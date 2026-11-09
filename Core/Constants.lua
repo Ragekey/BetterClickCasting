@@ -4,7 +4,7 @@ local Constants = {}
 ns.Constants = Constants
 
 Constants.ADDON_NAME = addonName or "BetterClickCasting"
-Constants.VERSION = "0.4.3"
+Constants.VERSION = "0.5.0"
 -- Nativer gemipmappter Blizzard-Atlas aus Blizzard_ClickBindingUI.lua
 Constants.ICON_ATLAS = "clickcast-icon-mouse"
 

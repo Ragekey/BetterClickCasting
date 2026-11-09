@@ -3,7 +3,7 @@
 ## Notes: Enhances Blizzard's native Click Cast Bindings with spell ranks, inline rank switching, grouping, tooltips, spellbook direct-binding, and a minimap button.
 ## Notes-deDE: Verbessert Blizzards native Klickbelegung (Zauberränge, direkter Rang-Wechsler, Gruppierung, Tooltips, Direkt-Binden im Zauberbuch und Minimap-Icon).
 ## Author: Ragekey
-## Version: 0.4.3
+## Version: 0.5.0
 ## SavedVariables: BetterClickCastingDB, BetterClickCastingsDB
 ## IconAtlas: clickcast-icon-mouse
 ## AddonCompartmentFunc: BetterClickCasting_OnAddonCompartmentClick
@@ -27,5 +27,6 @@ Modules\SettingsUI.lua
 Modules\MinimapButton.lua
 Modules\SpellBookUI.lua
 Modules\ClickBindingUI.lua
+Modules\UnitHoverTooltip.lua
 
 BetterClickCasting.lua

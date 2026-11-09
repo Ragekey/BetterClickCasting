@@ -1874,9 +1874,25 @@ function ClickBindingUI.RunTaintDiagnostics(subArg)
 		end
 	end
 
-	-- 3. EditModeManagerFrame, PlayerSpellsFrame und SpellBookFrame prüfen
+	-- 3. EditModeManagerFrame, UnitFrames, PlayerSpellsFrame und SpellBookFrame prüfen
 	if _G.EditModeManagerFrame then
 		checkVar(_G.EditModeManagerFrame, "layoutApplyInProgress", "EditModeManagerFrame")
+	end
+	local unitFramesToCheck = {
+		{ name = "PlayerFrame", frame = _G.PlayerFrame },
+		{ name = "TargetFrame", frame = _G.TargetFrame },
+		{ name = "FocusFrame", frame = _G.FocusFrame },
+		{ name = "CompactPartyFrameMember1", frame = _G.CompactPartyFrameMember1 },
+	}
+	for _, ufEntry in ipairs(unitFramesToCheck) do
+		if ufEntry.frame then
+			if ufEntry.frame.unit ~= nil then
+				checkVar(ufEntry.frame, "unit", ufEntry.name)
+			end
+			if ufEntry.frame.displayedUnit ~= nil then
+				checkVar(ufEntry.frame, "displayedUnit", ufEntry.name)
+			end
+		end
 	end
 	local infoNotes = {}
 	if _G.PlayerSpellsFrame then

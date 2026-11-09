@@ -14,36 +14,73 @@ local GROUP_MODES = {
 	{ value = "none",     labelKey = "GROUP_MODE_NONE",     shortKey = "GROUP_MODE_NONE_SHORT" },
 }
 
-SettingsUI.GROUP_MODES = GROUP_MODES
+local UNITHOVER_MODES = {
+	{ value = "off",      labelKey = "UNITHOVER_MODE_OFF",      shortKey = "UNITHOVER_MODE_OFF_SHORT" },
+	{ value = "modifier", labelKey = "UNITHOVER_MODE_MODIFIER", shortKey = "UNITHOVER_MODE_MODIFIER_SHORT" },
+	{ value = "always",   labelKey = "UNITHOVER_MODE_ALWAYS",   shortKey = "UNITHOVER_MODE_ALWAYS_SHORT" },
+}
 
-function SettingsUI.GetCurrentGroupShortLabel()
-	local current = Database.Get("groupingMode") or "modifier"
-	for _, entry in ipairs(GROUP_MODES) do
-		if entry.value == current then
+local UNITHOVER_ANCHORS = {
+	{ value = "cursor", labelKey = "UNITHOVER_ANCHOR_CURSOR", shortKey = "UNITHOVER_ANCHOR_CURSOR_SHORT" },
+	{ value = "top",    labelKey = "UNITHOVER_ANCHOR_TOP",    shortKey = "UNITHOVER_ANCHOR_TOP_SHORT" },
+	{ value = "bottom", labelKey = "UNITHOVER_ANCHOR_BOTTOM", shortKey = "UNITHOVER_ANCHOR_BOTTOM_SHORT" },
+	{ value = "left",   labelKey = "UNITHOVER_ANCHOR_LEFT",   shortKey = "UNITHOVER_ANCHOR_LEFT_SHORT" },
+	{ value = "right",  labelKey = "UNITHOVER_ANCHOR_RIGHT",  shortKey = "UNITHOVER_ANCHOR_RIGHT_SHORT" },
+	{ value = "free",   labelKey = "UNITHOVER_ANCHOR_FREE",   shortKey = "UNITHOVER_ANCHOR_FREE_SHORT" },
+}
+
+SettingsUI.GROUP_MODES = GROUP_MODES
+SettingsUI.UNITHOVER_MODES = UNITHOVER_MODES
+SettingsUI.UNITHOVER_ANCHORS = UNITHOVER_ANCHORS
+
+local function GetShortLabelFromList(list, currentVal, fallbackKey)
+	for _, entry in ipairs(list) do
+		if entry.value == currentVal then
 			return L[entry.shortKey]
 		end
 	end
-	return L["GROUP_MODE_MODIFIER_SHORT"]
+	return L[fallbackKey]
+end
+
+function SettingsUI.GetCurrentGroupShortLabel()
+	local current = Database.Get("groupingMode") or "modifier"
+	return GetShortLabelFromList(GROUP_MODES, current, "GROUP_MODE_MODIFIER_SHORT")
+end
+
+function SettingsUI.GetCurrentUnitHoverModeShortLabel()
+	local current = Database.Get("unitHoverMode") or "off"
+	return GetShortLabelFromList(UNITHOVER_MODES, current, "UNITHOVER_MODE_OFF_SHORT")
+end
+
+function SettingsUI.GetCurrentUnitHoverAnchorShortLabel()
+	local current = Database.Get("unitHoverAnchor") or "cursor"
+	return GetShortLabelFromList(UNITHOVER_ANCHORS, current, "UNITHOVER_ANCHOR_CURSOR_SHORT")
+end
+
+local function PopulateRadioMenu(rootDescription, titleKey, dbKey, defaultValue, list, descKey)
+	rootDescription:CreateTitle(L[titleKey])
+
+	local function IsSelected(val)
+		return (Database.Get(dbKey) or defaultValue) == val
+	end
+
+	local function SetSelected(val)
+		Database.Set(dbKey, val)
+	end
+
+	for _, entry in ipairs(list) do
+		local radio = rootDescription:CreateRadio(L[entry.labelKey], IsSelected, SetSelected, entry.value)
+		if descKey and L[descKey] then
+			radio:SetTooltip(function(tooltip)
+				GameTooltip_SetTitle(tooltip, L[entry.labelKey])
+				GameTooltip_AddNormalLine(tooltip, L[descKey], true)
+			end)
+		end
+	end
 end
 
 function SettingsUI.PopulateGroupingMenu(rootDescription)
-	rootDescription:CreateTitle(L["GROUP_MENU_TITLE"])
-
-	local function IsSelected(modeValue)
-		return (Database.Get("groupingMode") or "modifier") == modeValue
-	end
-
-	local function SetSelected(modeValue)
-		Database.Set("groupingMode", modeValue)
-	end
-
-	for _, entry in ipairs(GROUP_MODES) do
-		local radio = rootDescription:CreateRadio(L[entry.labelKey], IsSelected, SetSelected, entry.value)
-		radio:SetTooltip(function(tooltip)
-			GameTooltip_SetTitle(tooltip, L[entry.labelKey])
-			GameTooltip_AddNormalLine(tooltip, L["GROUP_TOOLTIP_DESC"], true)
-		end)
-	end
+	PopulateRadioMenu(rootDescription, "GROUP_MENU_TITLE", "groupingMode", "modifier", GROUP_MODES, "GROUP_TOOLTIP_DESC")
 end
 
 function SettingsUI.OpenGroupingMenu(ownerRegion)
@@ -102,7 +139,39 @@ function SettingsUI.OpenSettingsMenu(ownerRegion)
 		AddSettingCheckbox(rootDescription, "showSpellbookBadges", "SETTING_SHOW_SPELLBOOK_BADGES", "SETTING_SHOW_SPELLBOOK_BADGES_DESC")
 		AddSettingCheckbox(rootDescription, "autoShowAllRanks", "SETTING_AUTO_SHOW_ALL_RANKS", "SETTING_AUTO_SHOW_ALL_RANKS_DESC")
 
-		-- Sektion 3: Allgemein und Schnell-Aktion
+		-- Sektion 3: Unit-Frame Hover-Overlay
+		rootDescription:CreateDivider()
+		rootDescription:CreateTitle(L["SETTINGS_HEADER_UNITHOVER"])
+		local hoverModeSubmenu = rootDescription:CreateButton(
+			string.format(L["UNITHOVER_MODE_BUTTON_FORMAT"], SettingsUI.GetCurrentUnitHoverModeShortLabel())
+		)
+		PopulateRadioMenu(hoverModeSubmenu, "UNITHOVER_MODE_MENU_TITLE", "unitHoverMode", "off", UNITHOVER_MODES, "UNITHOVER_MODE_TOOLTIP_DESC")
+
+		local hoverAnchorSubmenu = rootDescription:CreateButton(
+			string.format(L["UNITHOVER_ANCHOR_BUTTON_FORMAT"], SettingsUI.GetCurrentUnitHoverAnchorShortLabel())
+		)
+		PopulateRadioMenu(hoverAnchorSubmenu, "UNITHOVER_ANCHOR_MENU_TITLE", "unitHoverAnchor", "cursor", UNITHOVER_ANCHORS, "UNITHOVER_ANCHOR_TOOLTIP_DESC")
+
+		if (Database.Get("unitHoverAnchor") or "cursor") == "free" and ns.UnitHoverTooltip then
+			local function IsMoveUnlocked()
+				return ns.UnitHoverTooltip.IsMoveUnlocked and ns.UnitHoverTooltip.IsMoveUnlocked() or false
+			end
+			local function ToggleMoveUnlocked()
+				if ns.UnitHoverTooltip.SetMoveUnlocked then
+					ns.UnitHoverTooltip.SetMoveUnlocked(not IsMoveUnlocked())
+				end
+			end
+			local unlockCb = rootDescription:CreateCheckbox(L["SETTING_UNITHOVER_UNLOCK_MOVE"], IsMoveUnlocked, ToggleMoveUnlocked)
+			unlockCb:SetTooltip(function(tooltip)
+				GameTooltip_SetTitle(tooltip, L["SETTING_UNITHOVER_UNLOCK_MOVE"])
+				GameTooltip_AddNormalLine(tooltip, L["SETTING_UNITHOVER_UNLOCK_MOVE_DESC"], true)
+			end)
+		end
+
+		AddSettingCheckbox(rootDescription, "unitHoverShowInCombat", "SETTING_UNITHOVER_SHOW_IN_COMBAT", "SETTING_UNITHOVER_SHOW_IN_COMBAT_DESC")
+		AddSettingCheckbox(rootDescription, "unitHoverShowInteractions", "SETTING_UNITHOVER_SHOW_INTERACTIONS", "SETTING_UNITHOVER_SHOW_INTERACTIONS_DESC")
+
+		-- Sektion 4: Allgemein und Schnell-Aktion
 		rootDescription:CreateDivider()
 		rootDescription:CreateTitle(L["SETTINGS_HEADER_GENERAL"])
 		AddSettingCheckbox(rootDescription, "showMinimapButton", "SETTING_SHOW_MINIMAP_BUTTON", "SETTING_SHOW_MINIMAP_BUTTON_DESC")

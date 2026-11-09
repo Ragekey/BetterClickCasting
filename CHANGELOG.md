@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.5.0] (2026-11-09)
+### Added
+- **Unit Frame Hover Overlay (Optional, Default: Off):**
+  - Displays a compact, 100% taint-free overlay when hovering over unit frames (`Only While Holding Modifier` or `Always When Hovering Unit Frames`).
+  - Shows the currently active modifier (`No Modifier`, `SHIFT`, `CTRL`, `ALT`, etc.) and a clean 3-column table of bound spells for that modifier: mouse button (`LMB`, `RMB`, `MMB`, `MB4+`), spell icon + name + rank with `[MAX]` / `[-1]` / `[-2]` status tags, and live mana costs.
+  - **Live Out-of-Mana Detection:** Automatically grays out spell rows and highlights mana costs in red when your current mana is insufficient for that rank.
+  - **6 Anchor Options:** Follow Mouse Cursor, attach to the hovered Unit Frame (`Top`, `Bottom`, `Left`, `Right`), or use a `Free Position (Saved & Movable)` that can be dragged anytime while `/bcc` is open or via the menu unlock toggle.
+  - **Combat & Interaction Toggles:** Hidden in combat by default with an optional `Show in Combat` setting, plus an optional toggle to include `Target Unit` and `Open Context Menu` actions.
+
 ## [0.4.3] (2026-11-06)
 ### Fixed
 - **Complete Spellbook Hover Taint Protection (`_G.PET_ACTION_HIGHLIGHT_MARKS` & `PetActionBar:SetShownBase()`):**

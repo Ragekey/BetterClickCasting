@@ -13,6 +13,10 @@ local DEFAULTS = {
 	showSpellbookBadges = true,
 	autoShowAllRanks = true,
 	enableSmartRankRules = true,
+	unitHoverMode = "off", -- "off", "modifier", "always"
+	unitHoverAnchor = "cursor", -- "cursor", "top", "bottom", "left", "right", "free"
+	unitHoverShowInCombat = false,
+	unitHoverShowInteractions = false,
 	showMinimapButton = true,
 	minimapAngle = 225,
 }
@@ -83,5 +87,8 @@ function Database.NotifyChanged(key, value)
 	end
 	if ns.MinimapButton and ns.MinimapButton.UpdateVisibility then
 		ns.MinimapButton.UpdateVisibility()
+	end
+	if ns.UnitHoverTooltip and ns.UnitHoverTooltip.OnSettingChanged then
+		ns.UnitHoverTooltip.OnSettingChanged(key, value)
 	end
 end

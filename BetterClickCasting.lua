@@ -10,6 +10,7 @@ local SpellRanks = ns.SpellRanks
 local ClickBindingUI = ns.ClickBindingUI
 local SpellBookUI = ns.SpellBookUI
 local MinimapButton = ns.MinimapButton
+local UnitHoverTooltip = ns.UnitHoverTooltip
 
 local loaderFrame = CreateFrame("Frame")
 loaderFrame:RegisterEvent("ADDON_LOADED")
@@ -26,6 +27,9 @@ loaderFrame:SetScript("OnEvent", function(self, event, arg1)
 		if arg1 == addonName or arg1 == "BetterClickCasting" or arg1 == "BetterClickCastings" then
 			Database.Init()
 			MinimapButton.Init()
+			if UnitHoverTooltip and UnitHoverTooltip.Init then
+				UnitHoverTooltip.Init()
+			end
 			if ClickBindingUI and ClickBindingUI.SyncAutoShowAllRanks then
 				ClickBindingUI.SyncAutoShowAllRanks()
 			end
@@ -41,6 +45,9 @@ loaderFrame:SetScript("OnEvent", function(self, event, arg1)
 	elseif event == "PLAYER_LOGIN" then
 		Database.Init()
 		MinimapButton.Init()
+		if UnitHoverTooltip and UnitHoverTooltip.Init then
+			UnitHoverTooltip.Init()
+		end
 		if ClickBindingUI and ClickBindingUI.SyncAutoShowAllRanks then
 			ClickBindingUI.SyncAutoShowAllRanks()
 		end
