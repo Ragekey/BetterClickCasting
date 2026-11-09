@@ -86,6 +86,9 @@ end
 function UnitHoverTooltip.SetMoveUnlocked(unlocked)
 	isMoveUnlocked = unlocked and true or false
 	UnitHoverTooltip.UpdateTrackingState()
+	if ns.SettingsUI and ns.SettingsUI.RefreshWindow then
+		ns.SettingsUI.RefreshWindow()
+	end
 end
 
 local function GetModifierHeaderText(modMask)
@@ -248,7 +251,7 @@ local function FormatBindingRowData(bindingInfo)
 		end
 
 		local rankStatusTag = ""
-		if rankEntry and rankEntry.group and #rankEntry.group.entries > 1 then
+		if Database.Get("unitHoverShowRankTags") and rankEntry and rankEntry.group and #rankEntry.group.entries > 1 then
 			local maxEntry = rankEntry.group.maxEntry
 			if maxEntry and maxEntry.actionID == actionID then
 				rankStatusTag = " " .. Colors.TAG_MAX .. L["TAG_MAX"] .. Colors.RESET
@@ -264,7 +267,10 @@ local function FormatBindingRowData(bindingInfo)
 			insufficientPower = noMana and true or false
 		end
 
-		local costStr = SpellRanks.GetSpellPowerCostString(actionID) or ""
+		local costStr = ""
+		if Database.Get("unitHoverShowMana") then
+			costStr = SpellRanks.GetSpellPowerCostString(actionID) or ""
+		end
 		local iconPrefix = iconID and string.format("|T%s:14:14:0:0:64:64:4:60:4:60|t ", tostring(iconID)) or ""
 
 		local namePart = spellName
@@ -444,8 +450,11 @@ local function UpdateCardPosition(card, unitFrame)
 		ApplySavedFreePosition(card)
 	elseif anchorMode == "cursor" or not unitFrame then
 		local x, y = GetCursorPosition()
-		local scale = UIParent:GetEffectiveScale()
-		card:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", (x / scale) + 18, (y / scale) - 18)
+		local effScale = card:GetEffectiveScale()
+		if not effScale or effScale <= 0 then
+			effScale = UIParent:GetEffectiveScale()
+		end
+		card:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", (x / effScale) + 18, (y / effScale) - 18)
 	elseif anchorMode == "top" then
 		card:SetPoint("BOTTOM", unitFrame, "TOP", 0, 6)
 	elseif anchorMode == "bottom" then
@@ -465,7 +474,17 @@ local function RenderHoverCard(unitFrame, modMask)
 	local bindings = CollectBindingsForModifier(modMask)
 	local freeMove = IsFreeMoveActive()
 
+	local scalePct = tonumber(Database.Get("unitHoverScale")) or 100
+	scalePct = math.max(70, math.min(150, scalePct))
+	card:SetScale(scalePct / 100)
+
+	local alphaPct = tonumber(Database.Get("unitHoverAlpha")) or 94
+	alphaPct = math.max(30, math.min(100, alphaPct))
+
 	card:EnableMouse(freeMove)
+	if card.SetBackdropColor then
+		card:SetBackdropColor(0.06, 0.07, 0.10, alphaPct / 100)
+	end
 	if card.SetBackdropBorderColor then
 		if freeMove then
 			card:SetBackdropBorderColor(0.35, 1.0, 0.45, 0.95)
@@ -693,6 +712,10 @@ end
 function UnitHoverTooltip.OnSettingChanged(key)
 	if key == "unitHoverMode"
 		or key == "unitHoverAnchor"
+		or key == "unitHoverScale"
+		or key == "unitHoverAlpha"
+		or key == "unitHoverShowMana"
+		or key == "unitHoverShowRankTags"
 		or key == "unitHoverShowInCombat"
 		or key == "unitHoverShowInteractions" then
 		UnitHoverTooltip.UpdateTrackingState()

@@ -33,6 +33,9 @@ SettingsUI.GROUP_MODES = GROUP_MODES
 SettingsUI.UNITHOVER_MODES = UNITHOVER_MODES
 SettingsUI.UNITHOVER_ANCHORS = UNITHOVER_ANCHORS
 
+local settingsWindow = nil
+local activeTabIndex = 1
+
 local function GetShortLabelFromList(list, currentVal, fallbackKey)
 	for _, entry in ipairs(list) do
 		if entry.value == currentVal then
@@ -92,108 +95,607 @@ function SettingsUI.OpenGroupingMenu(ownerRegion)
 	end)
 end
 
-local function AddSettingCheckbox(rootDescription, key, labelKey, descKey)
-	local function IsSelected()
-		return Database.Get(key) and true or false
-	end
+--------------------------------------------------------------------------------
+-- UI-Bausteine für das eigene Einstellungs-Fenster (BCCSettingsWindow)
+--------------------------------------------------------------------------------
 
-	local function SetSelected()
-		Database.Toggle(key)
-	end
+local function CreateSectionHeader(parent, text, yOffset)
+	local label = parent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+	label:SetPoint("TOPLEFT", parent, "TOPLEFT", 18, yOffset)
+	label:SetText("|cffffd100" .. text .. "|r")
 
-	local checkbox = rootDescription:CreateCheckbox(L[labelKey], IsSelected, SetSelected)
-	if descKey and L[descKey] then
-		checkbox:SetTooltip(function(tooltip)
-			GameTooltip_SetTitle(tooltip, L[labelKey])
-			GameTooltip_AddNormalLine(tooltip, L[descKey], true)
-		end)
-	end
-	return checkbox
+	local line = parent:CreateTexture(nil, "ARTWORK")
+	line:SetHeight(1)
+	line:SetPoint("TOPLEFT", parent, "TOPLEFT", 18, yOffset - 16)
+	line:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -18, yOffset - 16)
+	line:SetColorTexture(0.65, 0.55, 0.30, 0.30)
+
+	return label, line
 end
 
-function SettingsUI.OpenSettingsMenu(ownerRegion)
-	if not MenuUtil or not MenuUtil.CreateContextMenu then
-		return
+local function CreateCheckboxControl(parent, yOffset, labelKey, descKey, getterFunc, setterFunc)
+	local cb = CreateFrame("CheckButton", nil, parent, "UICheckButtonTemplate")
+	cb:SetSize(24, 24)
+	cb:SetPoint("TOPLEFT", parent, "TOPLEFT", 16, yOffset)
+
+	local label = cb.Text or cb.text or cb:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+	label:ClearAllPoints()
+	label:SetPoint("LEFT", cb, "RIGHT", 4, 0)
+	label:SetJustifyH("LEFT")
+	label:SetText(L[labelKey])
+	cb.Label = label
+
+	cb:SetHitRectInsets(0, -320, 0, 0)
+
+	cb:SetScript("OnClick", function(self)
+		PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
+		setterFunc(self:GetChecked() and true or false)
+	end)
+
+	if descKey and L[descKey] then
+		cb:SetScript("OnEnter", function(self)
+			GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+			GameTooltip_SetTitle(GameTooltip, L[labelKey])
+			GameTooltip_AddNormalLine(GameTooltip, L[descKey], true)
+			GameTooltip:Show()
+		end)
+		cb:SetScript("OnLeave", function()
+			GameTooltip:Hide()
+		end)
 	end
 
-	MenuUtil.CreateContextMenu(ownerRegion, function(_, rootDescription)
-		rootDescription:CreateTitle(string.format("%s  |cff888888v%s|r", L["SETTINGS_MENU_TITLE"], Constants.VERSION))
-
-		-- Sektion 1: ClickBindingFrame
-		rootDescription:CreateTitle(L["SETTINGS_HEADER_CLICKCAST"])
-		local groupSubmenu = rootDescription:CreateButton(
-			string.format(L["GROUP_BUTTON_FORMAT"], SettingsUI.GetCurrentGroupShortLabel())
-		)
-		SettingsUI.PopulateGroupingMenu(groupSubmenu)
-
-		AddSettingCheckbox(rootDescription, "showRankInName", "SETTING_SHOW_RANK_IN_NAME", "SETTING_SHOW_RANK_IN_NAME_DESC")
-		AddSettingCheckbox(rootDescription, "highlightDownranks", "SETTING_HIGHLIGHT_DOWNRANKS", "SETTING_HIGHLIGHT_DOWNRANKS_DESC")
-		AddSettingCheckbox(rootDescription, "showRankSwitcher", "SETTING_SHOW_RANK_SWITCHER", "SETTING_SHOW_RANK_SWITCHER_DESC")
-		AddSettingCheckbox(rootDescription, "enableSmartRankRules", "SETTING_ENABLE_SMART_RULES", "SETTING_ENABLE_SMART_RULES_DESC")
-		AddSettingCheckbox(rootDescription, "showLineTooltips", "SETTING_SHOW_LINE_TOOLTIPS", "SETTING_SHOW_LINE_TOOLTIPS_DESC")
-
-		-- Sektion 2: Zauberbuch
-		rootDescription:CreateDivider()
-		rootDescription:CreateTitle(L["SETTINGS_HEADER_SPELLBOOK"])
-		AddSettingCheckbox(rootDescription, "quickBindSpellbook", "SETTING_QUICK_BIND_SPELLBOOK", "SETTING_QUICK_BIND_SPELLBOOK_DESC")
-		AddSettingCheckbox(rootDescription, "showSpellbookBadges", "SETTING_SHOW_SPELLBOOK_BADGES", "SETTING_SHOW_SPELLBOOK_BADGES_DESC")
-		AddSettingCheckbox(rootDescription, "autoShowAllRanks", "SETTING_AUTO_SHOW_ALL_RANKS", "SETTING_AUTO_SHOW_ALL_RANKS_DESC")
-
-		-- Sektion 3: Unit-Frame Hover-Overlay
-		rootDescription:CreateDivider()
-		rootDescription:CreateTitle(L["SETTINGS_HEADER_UNITHOVER"])
-		local hoverModeSubmenu = rootDescription:CreateButton(
-			string.format(L["UNITHOVER_MODE_BUTTON_FORMAT"], SettingsUI.GetCurrentUnitHoverModeShortLabel())
-		)
-		PopulateRadioMenu(hoverModeSubmenu, "UNITHOVER_MODE_MENU_TITLE", "unitHoverMode", "off", UNITHOVER_MODES, "UNITHOVER_MODE_TOOLTIP_DESC")
-
-		local hoverAnchorSubmenu = rootDescription:CreateButton(
-			string.format(L["UNITHOVER_ANCHOR_BUTTON_FORMAT"], SettingsUI.GetCurrentUnitHoverAnchorShortLabel())
-		)
-		PopulateRadioMenu(hoverAnchorSubmenu, "UNITHOVER_ANCHOR_MENU_TITLE", "unitHoverAnchor", "cursor", UNITHOVER_ANCHORS, "UNITHOVER_ANCHOR_TOOLTIP_DESC")
-
-		if (Database.Get("unitHoverAnchor") or "cursor") == "free" and ns.UnitHoverTooltip then
-			local function IsMoveUnlocked()
-				return ns.UnitHoverTooltip.IsMoveUnlocked and ns.UnitHoverTooltip.IsMoveUnlocked() or false
+	cb.RefreshValue = function(self)
+		local checked = getterFunc() and true or false
+		self:SetChecked(checked)
+		if self.Label then
+			if checked then
+				self.Label:SetTextColor(1.0, 0.96, 0.85)
+			else
+				self.Label:SetTextColor(0.80, 0.80, 0.80)
 			end
-			local function ToggleMoveUnlocked()
-				if ns.UnitHoverTooltip.SetMoveUnlocked then
-					ns.UnitHoverTooltip.SetMoveUnlocked(not IsMoveUnlocked())
-				end
-			end
-			local unlockCb = rootDescription:CreateCheckbox(L["SETTING_UNITHOVER_UNLOCK_MOVE"], IsMoveUnlocked, ToggleMoveUnlocked)
-			unlockCb:SetTooltip(function(tooltip)
-				GameTooltip_SetTitle(tooltip, L["SETTING_UNITHOVER_UNLOCK_MOVE"])
-				GameTooltip_AddNormalLine(tooltip, L["SETTING_UNITHOVER_UNLOCK_MOVE_DESC"], true)
-			end)
 		end
+	end
 
-		AddSettingCheckbox(rootDescription, "unitHoverShowInCombat", "SETTING_UNITHOVER_SHOW_IN_COMBAT", "SETTING_UNITHOVER_SHOW_IN_COMBAT_DESC")
-		AddSettingCheckbox(rootDescription, "unitHoverShowInteractions", "SETTING_UNITHOVER_SHOW_INTERACTIONS", "SETTING_UNITHOVER_SHOW_INTERACTIONS_DESC")
+	return cb
+end
 
-		-- Sektion 4: Allgemein und Schnell-Aktion
-		rootDescription:CreateDivider()
-		rootDescription:CreateTitle(L["SETTINGS_HEADER_GENERAL"])
-		AddSettingCheckbox(rootDescription, "showMinimapButton", "SETTING_SHOW_MINIMAP_BUTTON", "SETTING_SHOW_MINIMAP_BUTTON_DESC")
+local function CreateDBCheckbox(parent, yOffset, dbKey, labelKey, descKey)
+	return CreateCheckboxControl(
+		parent,
+		yOffset,
+		labelKey,
+		descKey,
+		function()
+			return Database.Get(dbKey)
+		end,
+		function(val)
+			Database.Set(dbKey, val)
+		end
+	)
+end
 
-		if ClickBindingFrame and ClickBindingFrame:IsShown() and ns.ClickBindingUI and ns.ClickBindingUI.CountUpgradeableBindings then
-			local upgradeCount = ns.ClickBindingUI.CountUpgradeableBindings()
-			local actionLabel = upgradeCount > 0
-				and string.format(L["ACTION_UPGRADE_ALL_MAX_FORMAT"], upgradeCount)
-				or L["ACTION_UPGRADE_ALL_MAX_NONE"]
+local function CreatePillSelectorButton(parent, yOffset, width, getTextFunc, openMenuFunc, tooltipTitleKey, tooltipDescKey)
+	local btn = CreateFrame("Button", nil, parent)
+	btn:SetSize(width or 390, 26)
+	btn:SetPoint("TOPLEFT", parent, "TOPLEFT", 18, yOffset)
+	btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
 
-			local upgradeBtn = rootDescription:CreateButton(actionLabel, function()
-				if upgradeCount > 0 and ns.ClickBindingUI.UpgradeAllBindingsToMaxRank then
-					ns.ClickBindingUI.UpgradeAllBindingsToMaxRank()
-				end
-			end)
-			upgradeBtn:SetEnabled(upgradeCount > 0)
-			upgradeBtn:SetTooltip(function(tooltip)
-				GameTooltip_SetTitle(tooltip, actionLabel)
-				GameTooltip_AddNormalLine(tooltip, L["ACTION_UPGRADE_ALL_MAX_DESC"], true)
-			end)
+	local bg = btn:CreateTexture(nil, "BACKGROUND")
+	bg:SetAllPoints()
+	bg:SetAtlas("common-dropdown-c-button")
+	bg:SetVertexColor(0.88, 0.88, 0.88, 0.96)
+	btn.Bg = bg
+
+	local border = btn:CreateTexture(nil, "BORDER")
+	border:SetAllPoints()
+	border:SetAtlas("common-dropdown-c-button-hover")
+	border:SetAlpha(0.35)
+	btn.Border = border
+
+	local highlight = btn:CreateTexture(nil, "HIGHLIGHT")
+	highlight:SetAllPoints()
+	highlight:SetAtlas("common-dropdown-c-button-hover")
+	highlight:SetBlendMode("ADD")
+	highlight:SetAlpha(0.55)
+
+	local arrow = btn:CreateTexture(nil, "ARTWORK")
+	arrow:SetSize(11, 7)
+	arrow:SetPoint("RIGHT", btn, "RIGHT", -12, -1)
+	arrow:SetAtlas("common-dropdown-a-button-open")
+	btn.Arrow = arrow
+
+	local text = btn:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+	text:SetPoint("LEFT", btn, "LEFT", 12, 0)
+	text:SetPoint("RIGHT", arrow, "LEFT", -6, 0)
+	text:SetJustifyH("LEFT")
+	btn.Text = text
+
+	btn:SetScript("OnClick", function(self)
+		PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
+		openMenuFunc(self)
+	end)
+
+	if tooltipTitleKey and tooltipDescKey then
+		btn:SetScript("OnEnter", function(self)
+			GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+			GameTooltip_SetTitle(GameTooltip, L[tooltipTitleKey])
+			GameTooltip_AddNormalLine(GameTooltip, L[tooltipDescKey], true)
+			GameTooltip:Show()
+		end)
+		btn:SetScript("OnLeave", function()
+			GameTooltip:Hide()
+		end)
+	end
+
+	btn.RefreshValue = function(self)
+		self.Text:SetText(getTextFunc())
+	end
+
+	return btn
+end
+
+local function CreateActionButton(parent, yOffset, width, getTextFunc, onClickFunc, tooltipDescKey)
+	local btn = CreateFrame("Button", nil, parent)
+	btn:SetSize(width or 390, 26)
+	btn:SetPoint("TOPLEFT", parent, "TOPLEFT", 18, yOffset)
+	btn:RegisterForClicks("LeftButtonUp")
+
+	local bg = btn:CreateTexture(nil, "BACKGROUND")
+	bg:SetAllPoints()
+	bg:SetAtlas("common-dropdown-c-button")
+	bg:SetVertexColor(0.95, 0.90, 0.78, 0.98)
+	btn.Bg = bg
+
+	local border = btn:CreateTexture(nil, "BORDER")
+	border:SetAllPoints()
+	border:SetAtlas("common-dropdown-c-button-hover")
+	border:SetAlpha(0.45)
+	btn.Border = border
+
+	local highlight = btn:CreateTexture(nil, "HIGHLIGHT")
+	highlight:SetAllPoints()
+	highlight:SetAtlas("common-dropdown-c-button-hover")
+	highlight:SetBlendMode("ADD")
+	highlight:SetAlpha(0.60)
+
+	local text = btn:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+	text:SetPoint("CENTER", btn, "CENTER", 0, 0)
+	btn.Text = text
+
+	btn:SetScript("OnClick", function(self)
+		PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
+		onClickFunc(self)
+	end)
+
+	if tooltipDescKey and L[tooltipDescKey] then
+		btn:SetScript("OnEnter", function(self)
+			GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+			GameTooltip_SetTitle(GameTooltip, getTextFunc())
+			GameTooltip_AddNormalLine(GameTooltip, L[tooltipDescKey], true)
+			GameTooltip:Show()
+		end)
+		btn:SetScript("OnLeave", function()
+			GameTooltip:Hide()
+		end)
+	end
+
+	btn.RefreshValue = function(self)
+		self.Text:SetText(getTextFunc())
+	end
+
+	return btn
+end
+
+local function CreateSliderControl(parent, yOffset, dbKey, minVal, maxVal, stepVal, formatKey)
+	local container = CreateFrame("Frame", nil, parent)
+	container:SetSize(390, 42)
+	container:SetPoint("TOPLEFT", parent, "TOPLEFT", 18, yOffset)
+
+	local title = container:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+	title:SetPoint("TOPLEFT", container, "TOPLEFT", 2, 0)
+	title:SetJustifyH("LEFT")
+	container.Title = title
+
+	local minLabel = container:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+	minLabel:SetPoint("BOTTOMLEFT", container, "BOTTOMLEFT", 2, 0)
+	minLabel:SetText(tostring(minVal) .. "%")
+
+	local maxLabel = container:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+	maxLabel:SetPoint("BOTTOMRIGHT", container, "BOTTOMRIGHT", -2, 0)
+	maxLabel:SetText(tostring(maxVal) .. "%")
+
+	local slider = CreateFrame("Slider", nil, container, "BackdropTemplate")
+	slider:SetOrientation("HORIZONTAL")
+	slider:SetSize(386, 12)
+	slider:SetPoint("TOPLEFT", container, "TOPLEFT", 2, -16)
+	slider:SetMinMaxValues(minVal, maxVal)
+	slider:SetValueStep(stepVal)
+	slider:SetObeyStepOnDrag(true)
+
+	if slider.SetBackdrop then
+		slider:SetBackdrop({
+			bgFile = "Interface\\Buttons\\WHITE8x8",
+			edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+			tile = true,
+			tileSize = 8,
+			edgeSize = 8,
+			insets = { left = 2, right = 2, top = 2, bottom = 2 },
+		})
+		slider:SetBackdropColor(0.08, 0.10, 0.14, 0.95)
+		slider:SetBackdropBorderColor(0.55, 0.48, 0.28, 0.85)
+	end
+
+	local thumb = slider:CreateTexture(nil, "OVERLAY")
+	thumb:SetSize(16, 20)
+	thumb:SetTexture("Interface\\Buttons\\UI-SliderBar-Button-Horizontal")
+	slider:SetThumbTexture(thumb)
+
+	local isUpdatingSlider = false
+	slider:SetScript("OnValueChanged", function(_, value)
+		local rounded = math.floor((value / stepVal) + 0.5) * stepVal
+		title:SetText(string.format(L[formatKey], rounded))
+		if not isUpdatingSlider then
+			Database.Set(dbKey, rounded)
 		end
 	end)
+
+	container.RefreshValue = function()
+		isUpdatingSlider = true
+		local val = tonumber(Database.Get(dbKey)) or minVal
+		val = math.max(minVal, math.min(maxVal, val))
+		slider:SetValue(val)
+		title:SetText(string.format(L[formatKey], val))
+		isUpdatingSlider = false
+	end
+
+	return container
+end
+
+local function SelectTab(tabIndex)
+	if not settingsWindow then
+		return
+	end
+	activeTabIndex = tabIndex
+	for i, tabBtn in ipairs(settingsWindow.TabButtons) do
+		local isSelected = (i == tabIndex)
+		if isSelected then
+			tabBtn.Bg:SetVertexColor(1.0, 0.92, 0.72, 1.0)
+			tabBtn.Border:SetAlpha(0.85)
+			tabBtn.Text:SetTextColor(1.0, 0.82, 0.0)
+		else
+			tabBtn.Bg:SetVertexColor(0.65, 0.65, 0.65, 0.85)
+			tabBtn.Border:SetAlpha(0.20)
+			tabBtn.Text:SetTextColor(0.82, 0.82, 0.82)
+		end
+	end
+	for i, page in ipairs(settingsWindow.Pages) do
+		page:SetShown(i == tabIndex)
+	end
+	SettingsUI.RefreshWindow()
+end
+
+local function SaveWindowPosition(frame)
+	local point, _, relativePoint, xOfs, yOfs = frame:GetPoint(1)
+	if point and type(BetterClickCastingDB) == "table" then
+		BetterClickCastingDB.settingsWindowPos = {
+			point = point,
+			relativePoint = relativePoint or point,
+			x = xOfs or 0,
+			y = yOfs or 0,
+		}
+	end
+end
+
+local function PositionSettingsWindow(frame)
+	frame:ClearAllPoints()
+	local saved = (type(BetterClickCastingDB) == "table") and BetterClickCastingDB.settingsWindowPos or nil
+	if type(saved) == "table" and saved.point then
+		frame:SetPoint(saved.point, UIParent, saved.relativePoint or saved.point, saved.x or 0, saved.y or 0)
+	elseif ClickBindingFrame and ClickBindingFrame:IsShown() then
+		frame:SetPoint("TOPLEFT", ClickBindingFrame, "TOPRIGHT", 12, 0)
+	else
+		frame:SetPoint("CENTER", UIParent, "CENTER", 0, 40)
+	end
+end
+
+local function EnsureSettingsWindow()
+	if settingsWindow then
+		return settingsWindow
+	end
+
+	local win = CreateFrame("Frame", "BetterClickCastingSettingsFrame", UIParent, "BackdropTemplate")
+	win:SetSize(430, 415)
+	win:SetFrameStrata("DIALOG")
+	win:SetFrameLevel(130)
+	win:SetClampedToScreen(true)
+	win:SetMovable(true)
+	win:EnableMouse(true)
+	win:RegisterForDrag("LeftButton")
+	win:SetScript("OnDragStart", win.StartMoving)
+	win:SetScript("OnDragStop", function(self)
+		self:StopMovingOrSizing()
+		SaveWindowPosition(self)
+	end)
+
+	if UISpecialFrames then
+		table.insert(UISpecialFrames, "BetterClickCastingSettingsFrame")
+	end
+
+	if win.SetBackdrop then
+		win:SetBackdrop({
+			bgFile = "Interface\\Buttons\\WHITE8x8",
+			edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
+			tile = true,
+			tileSize = 16,
+			edgeSize = 24,
+			insets = { left = 6, right = 6, top = 6, bottom = 6 },
+		})
+		win:SetBackdropColor(0.06, 0.07, 0.10, 0.96)
+		win:SetBackdropBorderColor(0.85, 0.72, 0.40, 1.0)
+	end
+
+	-- Kopfzeile mit Maus-Atlas, Titel und Versionsnummer
+	local icon = win:CreateTexture(nil, "ARTWORK")
+	icon:SetSize(22, 22)
+	icon:SetPoint("TOPLEFT", win, "TOPLEFT", 16, -14)
+	icon:SetAtlas(Constants.ICON_ATLAS)
+
+	local title = win:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+	title:SetPoint("LEFT", icon, "RIGHT", 8, 0)
+	title:SetText(string.format("%s  |cff888888v%s|r", L["SETTINGS_MENU_TITLE"], Constants.VERSION))
+
+	local closeBtn = CreateFrame("Button", nil, win, "UIPanelCloseButton")
+	closeBtn:SetPoint("TOPRIGHT", win, "TOPRIGHT", -4, -4)
+
+	-- 3 Reiter-Buttons oben
+	local tabLabels = {
+		L["SETTINGS_TAB_CLICKCAST"],
+		L["SETTINGS_TAB_SPELLBOOK"],
+		L["SETTINGS_TAB_UNITHOVER"],
+	}
+	win.TabButtons = {}
+	win.Pages = {}
+	win.Controls = {}
+
+	local tabWidth = 128
+	for i, tabTitle in ipairs(tabLabels) do
+		local tabBtn = CreateFrame("Button", nil, win)
+		tabBtn:SetSize(tabWidth, 26)
+		tabBtn:SetPoint("TOPLEFT", win, "TOPLEFT", 16 + ((i - 1) * (tabWidth + 7)), -44)
+		tabBtn:RegisterForClicks("LeftButtonUp")
+
+		local bg = tabBtn:CreateTexture(nil, "BACKGROUND")
+		bg:SetAllPoints()
+		bg:SetAtlas("common-dropdown-c-button")
+		tabBtn.Bg = bg
+
+		local border = tabBtn:CreateTexture(nil, "BORDER")
+		border:SetAllPoints()
+		border:SetAtlas("common-dropdown-c-button-hover")
+		tabBtn.Border = border
+
+		local highlight = tabBtn:CreateTexture(nil, "HIGHLIGHT")
+		highlight:SetAllPoints()
+		highlight:SetAtlas("common-dropdown-c-button-hover")
+		highlight:SetBlendMode("ADD")
+		highlight:SetAlpha(0.45)
+
+		local text = tabBtn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+		text:SetPoint("CENTER", tabBtn, "CENTER", 0, 0)
+		text:SetText(tabTitle)
+		tabBtn.Text = text
+
+		tabBtn:SetScript("OnClick", function()
+			PlaySound(SOUNDKIT.IG_CHARACTER_INFO_TAB)
+			SelectTab(i)
+		end)
+
+		win.TabButtons[i] = tabBtn
+
+		local page = CreateFrame("Frame", nil, win)
+		page:SetPoint("TOPLEFT", win, "TOPLEFT", 0, -76)
+		page:SetPoint("BOTTOMRIGHT", win, "BOTTOMRIGHT", 0, 10)
+		page:Hide()
+		win.Pages[i] = page
+	end
+
+	local function RegisterControl(ctrl)
+		table.insert(win.Controls, ctrl)
+		return ctrl
+	end
+
+	----------------------------------------------------------------------------
+	-- TAB 1: Klickbelegung & Ränge
+	----------------------------------------------------------------------------
+	local page1 = win.Pages[1]
+	CreateSectionHeader(page1, L["SETTINGS_HEADER_CLICKCAST"], -6)
+
+	RegisterControl(CreatePillSelectorButton(
+		page1,
+		-30,
+		394,
+		function()
+			return string.format(L["GROUP_BUTTON_FORMAT"], SettingsUI.GetCurrentGroupShortLabel())
+		end,
+		function(owner)
+			SettingsUI.OpenGroupingMenu(owner)
+		end,
+		"GROUP_TOOLTIP_TITLE",
+		"GROUP_TOOLTIP_DESC"
+	))
+
+	RegisterControl(CreateDBCheckbox(page1, -66, "showRankInName", "SETTING_SHOW_RANK_IN_NAME", "SETTING_SHOW_RANK_IN_NAME_DESC"))
+	RegisterControl(CreateDBCheckbox(page1, -96, "highlightDownranks", "SETTING_HIGHLIGHT_DOWNRANKS", "SETTING_HIGHLIGHT_DOWNRANKS_DESC"))
+	RegisterControl(CreateDBCheckbox(page1, -126, "showRankSwitcher", "SETTING_SHOW_RANK_SWITCHER", "SETTING_SHOW_RANK_SWITCHER_DESC"))
+	RegisterControl(CreateDBCheckbox(page1, -156, "enableSmartRankRules", "SETTING_ENABLE_SMART_RULES", "SETTING_ENABLE_SMART_RULES_DESC"))
+	RegisterControl(CreateDBCheckbox(page1, -186, "showLineTooltips", "SETTING_SHOW_LINE_TOOLTIPS", "SETTING_SHOW_LINE_TOOLTIPS_DESC"))
+
+	local upgradeBtn = RegisterControl(CreateActionButton(
+		page1,
+		-232,
+		394,
+		function()
+			if ClickBindingFrame and ClickBindingFrame:IsShown() and ns.ClickBindingUI and ns.ClickBindingUI.CountUpgradeableBindings then
+				local count = ns.ClickBindingUI.CountUpgradeableBindings()
+				if count > 0 then
+					return string.format(L["ACTION_UPGRADE_ALL_MAX_FORMAT"], count)
+				end
+			end
+			return L["ACTION_UPGRADE_ALL_MAX_NONE"]
+		end,
+		function()
+			if ClickBindingFrame and ClickBindingFrame:IsShown() and ns.ClickBindingUI and ns.ClickBindingUI.UpgradeAllBindingsToMaxRank then
+				ns.ClickBindingUI.UpgradeAllBindingsToMaxRank()
+				SettingsUI.RefreshWindow()
+			elseif ns.MinimapButton and ns.MinimapButton.ToggleClickCastingWindow then
+				ns.MinimapButton.ToggleClickCastingWindow()
+				SettingsUI.RefreshWindow()
+			end
+		end,
+		"ACTION_UPGRADE_ALL_MAX_DESC"
+	))
+	win.UpgradeAllBtn = upgradeBtn
+
+	RegisterControl(CreateActionButton(
+		page1,
+		-268,
+		394,
+		function()
+			return L["SETTINGS_OPEN_CLICKCAST_BTN"]
+		end,
+		function()
+			if ns.MinimapButton and ns.MinimapButton.ToggleClickCastingWindow then
+				ns.MinimapButton.ToggleClickCastingWindow()
+			end
+		end,
+		nil
+	))
+
+	----------------------------------------------------------------------------
+	-- TAB 2: Zauberbuch & Allgemein
+	----------------------------------------------------------------------------
+	local page2 = win.Pages[2]
+	CreateSectionHeader(page2, L["SETTINGS_HEADER_SPELLBOOK"], -6)
+
+	RegisterControl(CreateDBCheckbox(page2, -30, "quickBindSpellbook", "SETTING_QUICK_BIND_SPELLBOOK", "SETTING_QUICK_BIND_SPELLBOOK_DESC"))
+	RegisterControl(CreateDBCheckbox(page2, -60, "showSpellbookBadges", "SETTING_SHOW_SPELLBOOK_BADGES", "SETTING_SHOW_SPELLBOOK_BADGES_DESC"))
+	RegisterControl(CreateDBCheckbox(page2, -90, "autoShowAllRanks", "SETTING_AUTO_SHOW_ALL_RANKS", "SETTING_AUTO_SHOW_ALL_RANKS_DESC"))
+
+	CreateSectionHeader(page2, L["SETTINGS_HEADER_GENERAL"], -132)
+	RegisterControl(CreateDBCheckbox(page2, -156, "showMinimapButton", "SETTING_SHOW_MINIMAP_BUTTON", "SETTING_SHOW_MINIMAP_BUTTON_DESC"))
+
+	RegisterControl(CreateActionButton(
+		page2,
+		-200,
+		394,
+		function()
+			return L["SETTINGS_RUN_DEBUG_BTN"]
+		end,
+		function()
+			if ns.ClickBindingUI and ns.ClickBindingUI.RunTaintDiagnostics then
+				ns.ClickBindingUI.RunTaintDiagnostics()
+			end
+		end,
+		"SETTINGS_RUN_DEBUG_DESC"
+	))
+
+	----------------------------------------------------------------------------
+	-- TAB 3: Unit-Frame Hover-Overlay
+	----------------------------------------------------------------------------
+	local page3 = win.Pages[3]
+	CreateSectionHeader(page3, L["SETTINGS_HEADER_UNITHOVER"], -6)
+
+	RegisterControl(CreatePillSelectorButton(
+		page3,
+		-30,
+		192,
+		function()
+			return string.format(L["UNITHOVER_MODE_BUTTON_FORMAT"], SettingsUI.GetCurrentUnitHoverModeShortLabel())
+		end,
+		function(owner)
+			if MenuUtil and MenuUtil.CreateContextMenu then
+				MenuUtil.CreateContextMenu(owner, function(_, rootDescription)
+					PopulateRadioMenu(rootDescription, "UNITHOVER_MODE_MENU_TITLE", "unitHoverMode", "off", UNITHOVER_MODES, "UNITHOVER_MODE_TOOLTIP_DESC")
+				end)
+			end
+		end,
+		"UNITHOVER_MODE_MENU_TITLE",
+		"UNITHOVER_MODE_TOOLTIP_DESC"
+	))
+
+	local anchorBtn = RegisterControl(CreatePillSelectorButton(
+		page3,
+		-30,
+		192,
+		function()
+			return string.format(L["UNITHOVER_ANCHOR_BUTTON_FORMAT"], SettingsUI.GetCurrentUnitHoverAnchorShortLabel())
+		end,
+		function(owner)
+			if MenuUtil and MenuUtil.CreateContextMenu then
+				MenuUtil.CreateContextMenu(owner, function(_, rootDescription)
+					PopulateRadioMenu(rootDescription, "UNITHOVER_ANCHOR_MENU_TITLE", "unitHoverAnchor", "cursor", UNITHOVER_ANCHORS, "UNITHOVER_ANCHOR_TOOLTIP_DESC")
+				end)
+			end
+		end,
+		"UNITHOVER_ANCHOR_MENU_TITLE",
+		"UNITHOVER_ANCHOR_TOOLTIP_DESC"
+	))
+	anchorBtn:ClearAllPoints()
+	anchorBtn:SetPoint("TOPLEFT", page3, "TOPLEFT", 220, -30)
+
+	RegisterControl(CreateSliderControl(page3, -68, "unitHoverScale", 70, 150, 5, "SETTING_UNITHOVER_SCALE_FORMAT"))
+	RegisterControl(CreateSliderControl(page3, -118, "unitHoverAlpha", 30, 100, 5, "SETTING_UNITHOVER_ALPHA_FORMAT"))
+
+	RegisterControl(CreateDBCheckbox(page3, -168, "unitHoverShowMana", "SETTING_UNITHOVER_SHOW_MANA", "SETTING_UNITHOVER_SHOW_MANA_DESC"))
+	RegisterControl(CreateDBCheckbox(page3, -196, "unitHoverShowRankTags", "SETTING_UNITHOVER_SHOW_RANK_TAGS", "SETTING_UNITHOVER_SHOW_RANK_TAGS_DESC"))
+	RegisterControl(CreateDBCheckbox(page3, -224, "unitHoverShowInCombat", "SETTING_UNITHOVER_SHOW_IN_COMBAT", "SETTING_UNITHOVER_SHOW_IN_COMBAT_DESC"))
+	RegisterControl(CreateDBCheckbox(page3, -252, "unitHoverShowInteractions", "SETTING_UNITHOVER_SHOW_INTERACTIONS", "SETTING_UNITHOVER_SHOW_INTERACTIONS_DESC"))
+
+	local unlockMoveCb = RegisterControl(CreateCheckboxControl(
+		page3,
+		-280,
+		"SETTING_UNITHOVER_UNLOCK_MOVE",
+		"SETTING_UNITHOVER_UNLOCK_MOVE_DESC",
+		function()
+			return ns.UnitHoverTooltip and ns.UnitHoverTooltip.IsMoveUnlocked and ns.UnitHoverTooltip.IsMoveUnlocked() or false
+		end,
+		function(val)
+			if ns.UnitHoverTooltip and ns.UnitHoverTooltip.SetMoveUnlocked then
+				if val and (Database.Get("unitHoverAnchor") or "cursor") ~= "free" then
+					Database.Set("unitHoverAnchor", "free")
+				end
+				ns.UnitHoverTooltip.SetMoveUnlocked(val)
+			end
+		end
+	))
+	win.UnlockMoveCheckbox = unlockMoveCb
+
+	win:Hide()
+	settingsWindow = win
+	SelectTab(1)
+	return win
+end
+
+function SettingsUI.RefreshWindow()
+	if not settingsWindow or not settingsWindow:IsShown() then
+		return
+	end
+	for _, ctrl in ipairs(settingsWindow.Controls) do
+		if ctrl.RefreshValue then
+			ctrl:RefreshValue()
+		end
+	end
+end
+
+function SettingsUI.OpenSettingsMenu()
+	local win = EnsureSettingsWindow()
+	if win:IsShown() then
+		win:Hide()
+	else
+		PositionSettingsWindow(win)
+		win:Show()
+		SettingsUI.RefreshWindow()
+	end
 end
 
 function SettingsUI.AttachToClickBindingFrame()
@@ -248,9 +750,9 @@ function SettingsUI.AttachToClickBindingFrame()
 		self.GearIcon:SetPoint("CENTER", self.GearBg, "CENTER", 0, 0)
 	end)
 
-	btn:SetScript("OnClick", function(self)
+	btn:SetScript("OnClick", function()
 		PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
-		SettingsUI.OpenSettingsMenu(self)
+		SettingsUI.OpenSettingsMenu()
 	end)
 
 	btn:SetScript("OnEnter", function(self)

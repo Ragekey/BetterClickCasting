@@ -15,6 +15,10 @@ local DEFAULTS = {
 	enableSmartRankRules = true,
 	unitHoverMode = "off", -- "off", "modifier", "always"
 	unitHoverAnchor = "cursor", -- "cursor", "top", "bottom", "left", "right", "free"
+	unitHoverScale = 100, -- 70 bis 150 (%)
+	unitHoverAlpha = 94, -- 30 bis 100 (%)
+	unitHoverShowMana = true,
+	unitHoverShowRankTags = true,
 	unitHoverShowInCombat = false,
 	unitHoverShowInteractions = false,
 	showMinimapButton = true,
@@ -90,5 +94,8 @@ function Database.NotifyChanged(key, value)
 	end
 	if ns.UnitHoverTooltip and ns.UnitHoverTooltip.OnSettingChanged then
 		ns.UnitHoverTooltip.OnSettingChanged(key, value)
+	end
+	if ns.SettingsUI and ns.SettingsUI.RefreshWindow then
+		ns.SettingsUI.RefreshWindow()
 	end
 end
