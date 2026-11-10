@@ -100,10 +100,11 @@ local function GetPrimarySectionRank(e)
 	if not e then
 		return 99
 	end
+	local moveBottom = Database.Get("moveInteractionsToBottom")
 	if e.elementType == ElementDataTypes.DefaultsHeader then
-		return 10
+		return moveBottom and 60 or 10
 	elseif e.elementType == ElementDataTypes.InteractionBinding then
-		return 20
+		return moveBottom and 70 or 20
 	elseif e.elementType == ElementDataTypes.CustomsHeader and not e.isBCCGroupHeader then
 		return 30
 	elseif e.elementType == ElementDataTypes.NewSlot then
@@ -132,7 +133,7 @@ local function BCCElementSortComparator(e1, e2)
 		return r1 < r2
 	end
 
-	if r1 == 20 then
+	if r1 == 20 or r1 == 70 then
 		local id1 = (e1.bindingInfo and e1.bindingInfo.actionID) or 0
 		local id2 = (e2.bindingInfo and e2.bindingInfo.actionID) or 0
 		if id1 ~= id2 then
@@ -1111,12 +1112,30 @@ local function EnsureLineRankButton(lineFrame)
 	return btn
 end
 
+local function EnsureLineManaText(lineFrame)
+	if lineFrame.BCCManaText then
+		return lineFrame.BCCManaText
+	end
+
+	local manaFS = lineFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+	manaFS:SetPoint("RIGHT", lineFrame, "RIGHT", -8, 9)
+	manaFS:SetJustifyH("RIGHT")
+	manaFS:SetWordWrap(false)
+	manaFS:Hide()
+	lineFrame.BCCManaText = manaFS
+	return manaFS
+end
+
 local function ApplyRankToLine(lineFrame, elementData, subtext)
 	local rankBtn = EnsureLineRankButton(lineFrame)
+	local manaText = EnsureLineManaText(lineFrame)
 
 	if not elementData or not elementData.bindingInfo or not Constants.IsSpellOrPetBinding(elementData.bindingInfo) then
 		if rankBtn then
 			rankBtn:Hide()
+		end
+		if manaText then
+			manaText:Hide()
 		end
 		return
 	end
@@ -1127,7 +1146,37 @@ local function ApplyRankToLine(lineFrame, elementData, subtext)
 		if rankBtn then
 			rankBtn:Hide()
 		end
+		if manaText then
+			manaText:Hide()
+		end
 		return
+	end
+
+	local isDisabled = elementData.unbound
+
+	-- Live-Manakosten rechtsbündig in Zeile 1 einblenden (Option 1A)
+	if manaText then
+		local costStr = Database.Get("showLineManaCost") and SpellRanks.GetSpellPowerCostString(actionID) or nil
+		if costStr and costStr ~= "" then
+			if isDisabled then
+				manaText:SetText("|cff777777" .. costStr .. "|r")
+			else
+				manaText:SetText("|cff80c8ff" .. costStr .. "|r")
+			end
+			manaText:Show()
+			if lineFrame.Name and lineFrame.Icon then
+				lineFrame.Name:ClearAllPoints()
+				lineFrame.Name:SetPoint("LEFT", lineFrame.Icon, "RIGHT", 5, 9)
+				lineFrame.Name:SetPoint("RIGHT", manaText, "LEFT", -6, 0)
+			end
+		else
+			manaText:Hide()
+			if lineFrame.Name and lineFrame.Icon then
+				lineFrame.Name:ClearAllPoints()
+				lineFrame.Name:SetPoint("LEFT", lineFrame.Icon, "RIGHT", 5, 9)
+				lineFrame.Name:SetPoint("RIGHT", lineFrame, "RIGHT", -8, 9)
+			end
+		end
 	end
 
 	local rankEntry = SpellRanks.GetRankEntryForAction(actionID)
@@ -1149,7 +1198,6 @@ local function ApplyRankToLine(lineFrame, elementData, subtext)
 	local hasMultipleRanks = rankEntry and rankEntry.group and #rankEntry.group.entries > 1
 	local maxEntry = hasMultipleRanks and rankEntry.group.maxEntry or nil
 	local isMaxRank = (not hasMultipleRanks) or (maxEntry and maxEntry.actionID == rankEntry.actionID)
-	local isDisabled = elementData.unbound
 
 	local formattedName
 	if not showRankInName then
@@ -1238,6 +1286,14 @@ function ClickBindingUI.UpdateLineWithRank(lineFrame, elementData)
 	if lineFrame.BCCRankButton then
 		lineFrame.BCCRankButton:Hide()
 	end
+	if lineFrame.BCCManaText then
+		lineFrame.BCCManaText:Hide()
+	end
+	if lineFrame.Name and lineFrame.Icon then
+		lineFrame.Name:ClearAllPoints()
+		lineFrame.Name:SetPoint("LEFT", lineFrame.Icon, "RIGHT", 5, 9)
+		lineFrame.Name:SetPoint("RIGHT", lineFrame, "RIGHT", -8, 9)
+	end
 
 	if not elementData or not elementData.bindingInfo or not Constants.IsSpellOrPetBinding(elementData.bindingInfo) then
 		return
@@ -1259,6 +1315,9 @@ function ClickBindingUI.UpdateLineWithRank(lineFrame, elementData)
 		ApplyRankToLine(lineFrame, elementData, rankEntry.subName)
 		return
 	end
+
+	-- Auch ranglose Zauber (ohne Subtext) sofort auf Manakosten aktualisieren
+	ApplyRankToLine(lineFrame, elementData, "")
 
 	-- C_Spell.GetSpellSubtext lädt laut Blizzard-Dokumentation asynchron nach;
 	-- vor dem Schreiben wird geprüft, ob das recycelte Frame noch dasselbe elementData hält.
@@ -1361,6 +1420,18 @@ local function BuildUpdatesSignature(updates)
 	return table.concat(parts, ";")
 end
 
+local heroCardPreviewUnlocked = false
+
+local function ApplySavedHeroCardPosition(card)
+	card:ClearAllPoints()
+	local savedPos = (type(BetterClickCastingDB) == "table") and BetterClickCastingDB.heroCardPos or nil
+	if type(savedPos) == "table" and savedPos.point and savedPos.relativePoint and type(savedPos.x) == "number" and type(savedPos.y) == "number" then
+		card:SetPoint(savedPos.point, UIParent, savedPos.relativePoint, savedPos.x, savedPos.y)
+	else
+		card:SetPoint("TOP", UIParent, "TOP", 0, -95)
+	end
+end
+
 local function EnsureHeroCardFrame()
 	if heroCardFrame then
 		return heroCardFrame
@@ -1368,12 +1439,7 @@ local function EnsureHeroCardFrame()
 
 	local card = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
 	card:SetSize(390, 180)
-	local savedPos = (type(BetterClickCastingDB) == "table") and BetterClickCastingDB.heroCardPos or nil
-	if type(savedPos) == "table" and savedPos.point and savedPos.relativePoint and type(savedPos.x) == "number" and type(savedPos.y) == "number" then
-		card:SetPoint(savedPos.point, UIParent, savedPos.relativePoint, savedPos.x, savedPos.y)
-	else
-		card:SetPoint("TOP", UIParent, "TOP", 0, -95)
-	end
+	ApplySavedHeroCardPosition(card)
 	card:SetFrameStrata("DIALOG")
 	card:SetFrameLevel(120)
 	card:SetClampedToScreen(true)
@@ -1391,6 +1457,12 @@ local function EnsureHeroCardFrame()
 				x = math.floor(xOfs + 0.5),
 				y = math.floor(yOfs + 0.5),
 			}
+		end
+	end)
+	card:SetScript("OnMouseUp", function(_, mouseButton)
+		if mouseButton == "RightButton" and heroCardPreviewUnlocked then
+			PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
+			ClickBindingUI.ResetHeroCardPosition()
 		end
 	end)
 
@@ -1423,6 +1495,10 @@ local function EnsureHeroCardFrame()
 	closeBtn:SetPoint("TOPRIGHT", card, "TOPRIGHT", -4, -4)
 	closeBtn:SetScript("OnClick", function()
 		PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF)
+		if heroCardPreviewUnlocked and ns.SettingsUI and ns.SettingsUI.SetOverlaysUnlocked then
+			ns.SettingsUI.SetOverlaysUnlocked(false)
+			return
+		end
 		if card.currentSignature then
 			dismissedSignature = card.currentSignature
 		end
@@ -1485,6 +1561,14 @@ local function EnsureHeroCardFrame()
 	applyBtn:SetText(L["HEROCARD_BTN_OPEN_APPLY"])
 	applyBtn:SetScript("OnClick", function()
 		PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
+		if heroCardPreviewUnlocked then
+			if ns.SettingsUI and ns.SettingsUI.SetOverlaysUnlocked then
+				ns.SettingsUI.SetOverlaysUnlocked(false)
+			else
+				ClickBindingUI.SetHeroCardPreviewUnlocked(false)
+			end
+			return
+		end
 		card:Hide()
 		if ClickBindingFrame and ClickBindingFrame:IsShown() then
 			ClickBindingUI.ApplySmartRulesToDataProvider(false)
@@ -1498,8 +1582,13 @@ local function EnsureHeroCardFrame()
 	end)
 	applyBtn:SetScript("OnEnter", function(self)
 		GameTooltip:SetOwner(self, "ANCHOR_TOP")
-		GameTooltip_SetTitle(GameTooltip, L["HEROCARD_BTN_OPEN_APPLY"])
-		GameTooltip_AddNormalLine(GameTooltip, L["HEROCARD_BTN_OPEN_APPLY_DESC"], true)
+		if heroCardPreviewUnlocked then
+			GameTooltip_SetTitle(GameTooltip, L["OVERLAY_UNLOCK_BTN_LOCK_ALL"])
+			GameTooltip_AddNormalLine(GameTooltip, L["SETTING_UNITHOVER_UNLOCK_MOVE_DESC"], true)
+		else
+			GameTooltip_SetTitle(GameTooltip, L["HEROCARD_BTN_OPEN_APPLY"])
+			GameTooltip_AddNormalLine(GameTooltip, L["HEROCARD_BTN_OPEN_APPLY_DESC"], true)
+		end
 		GameTooltip:Show()
 	end)
 	applyBtn:SetScript("OnLeave", function()
@@ -1512,6 +1601,15 @@ local function EnsureHeroCardFrame()
 	keepBtn:SetPoint("BOTTOMRIGHT", card, "BOTTOMRIGHT", -16, 14)
 	keepBtn:SetText(L["HEROCARD_BTN_KEEP_CURRENT"])
 	keepBtn:SetScript("OnClick", function()
+		if heroCardPreviewUnlocked then
+			PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
+			if ns.SettingsUI and ns.SettingsUI.ResetAllOverlayPositions then
+				ns.SettingsUI.ResetAllOverlayPositions()
+			else
+				ClickBindingUI.ResetHeroCardPosition()
+			end
+			return
+		end
 		PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF)
 		local updates = card.pendingUpdates or {}
 		local lockedCount = 0
@@ -1529,8 +1627,13 @@ local function EnsureHeroCardFrame()
 	end)
 	keepBtn:SetScript("OnEnter", function(self)
 		GameTooltip:SetOwner(self, "ANCHOR_TOP")
-		GameTooltip_SetTitle(GameTooltip, L["HEROCARD_BTN_KEEP_CURRENT"])
-		GameTooltip_AddNormalLine(GameTooltip, L["HEROCARD_BTN_KEEP_CURRENT_DESC"], true)
+		if heroCardPreviewUnlocked then
+			GameTooltip_SetTitle(GameTooltip, L["OVERLAY_UNLOCK_BTN_RESET_POS"])
+			GameTooltip_AddNormalLine(GameTooltip, L["OVERLAY_UNLOCK_BTN_RESET_POS_DESC"], true)
+		else
+			GameTooltip_SetTitle(GameTooltip, L["HEROCARD_BTN_KEEP_CURRENT"])
+			GameTooltip_AddNormalLine(GameTooltip, L["HEROCARD_BTN_KEEP_CURRENT_DESC"], true)
+		end
 		GameTooltip:Show()
 	end)
 	keepBtn:SetScript("OnLeave", function()
@@ -1543,7 +1646,65 @@ local function EnsureHeroCardFrame()
 	return card
 end
 
+function ClickBindingUI.ResetHeroCardPosition()
+	if type(BetterClickCastingDB) == "table" then
+		BetterClickCastingDB.heroCardPos = nil
+	end
+	if heroCardFrame then
+		ApplySavedHeroCardPosition(heroCardFrame)
+	end
+end
+
+function ClickBindingUI.IsHeroCardPreviewUnlocked()
+	return heroCardPreviewUnlocked
+end
+
+function ClickBindingUI.SetHeroCardPreviewUnlocked(unlocked)
+	heroCardPreviewUnlocked = unlocked and true or false
+	local card = EnsureHeroCardFrame()
+
+	if heroCardPreviewUnlocked then
+		ApplySavedHeroCardPosition(card)
+		if card.SetBackdropBorderColor then
+			card:SetBackdropBorderColor(0.35, 1.0, 0.45, 1.0)
+		end
+		card.Title:SetText("|cff55ff66" .. L["HEROCARD_PREVIEW_TITLE"] .. "|r")
+		card.Subtitle:SetText("|cff88ee99" .. L["HEROCARD_PREVIEW_SUBTITLE"] .. "|r")
+		card.ApplyButton:SetText(L["OVERLAY_UNLOCK_BTN_LOCK_ALL"])
+		card.KeepButton:SetText(L["OVERLAY_UNLOCK_BTN_RESET_POS"])
+
+		for i = 1, MAX_HERO_ROWS do
+			card.Rows[i]:Hide()
+		end
+		card.MoreText:Hide()
+
+		card.Rows[1].Icon:SetTexture(135907)
+		card.Rows[1].Text:SetText(L["HEROCARD_PREVIEW_ROW_1"])
+		card.Rows[1]:Show()
+
+		card.Rows[2].Icon:SetTexture(135953)
+		card.Rows[2].Text:SetText(L["HEROCARD_PREVIEW_ROW_2"])
+		card.Rows[2]:Show()
+
+		card:SetHeight(110 + (2 * 22))
+		card:Show()
+	else
+		if card.SetBackdropBorderColor then
+			card:SetBackdropBorderColor(1.0, 1.0, 1.0, 1.0)
+		end
+		card.Title:SetText(L["HEROCARD_TITLE"])
+		card.Subtitle:SetText(L["HEROCARD_SUBTITLE"])
+		card.ApplyButton:SetText(L["HEROCARD_BTN_OPEN_APPLY"])
+		card.KeepButton:SetText(L["HEROCARD_BTN_KEEP_CURRENT"])
+		card:Hide()
+		ClickBindingUI.CheckAndShowHeroCard(false)
+	end
+end
+
 function ClickBindingUI.HideHeroCard()
+	if heroCardPreviewUnlocked then
+		ClickBindingUI.SetHeroCardPreviewUnlocked(false)
+	end
 	if heroCardFrame then
 		heroCardFrame:Hide()
 	end
@@ -1554,7 +1715,17 @@ function ClickBindingUI.CheckAndShowHeroCard(resetDismissed)
 		dismissedSignature = nil
 	end
 
+	if heroCardPreviewUnlocked then
+		return
+	end
+
 	if not Database.Get("enableSmartRankRules") then
+		ClickBindingUI.HideHeroCard()
+		return
+	end
+
+	local trainerBehavior = Database.Get("trainerUpgradeBehavior") or "card"
+	if trainerBehavior == "off" then
 		ClickBindingUI.HideHeroCard()
 		return
 	end
@@ -1577,6 +1748,20 @@ function ClickBindingUI.CheckAndShowHeroCard(resetDismissed)
 
 	local sig = BuildUpdatesSignature(updates)
 	if dismissedSignature and dismissedSignature == sig then
+		return
+	end
+
+	-- Im Modus "Auto-Öffnen & Vorbereiten" (/bcc automatisch öffnen, Ränge eintragen und Speichern-Button hervorheben)
+	if trainerBehavior == "auto" then
+		dismissedSignature = sig
+		ClickBindingUI.HideHeroCard()
+		if ns.MinimapButton and ns.MinimapButton.ToggleClickCastingWindow then
+			if not (ClickBindingFrame and ClickBindingFrame:IsShown()) then
+				ns.MinimapButton.ToggleClickCastingWindow()
+			end
+		end
+		ClickBindingUI.SetupHooks()
+		ClickBindingUI.ApplySmartRulesToDataProvider(false)
 		return
 	end
 
@@ -1723,10 +1908,10 @@ end
 
 local debugCopyFrame = nil
 
-local function ShowDebugCopyPopup(reportText)
+local function ShowDebugCopyPopup(reportText, customTitle)
 	if not debugCopyFrame then
 		local f = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
-		f:SetSize(520, 210)
+		f:SetSize(520, 240)
 		f:SetPoint("CENTER", UIParent, "CENTER", 0, 120)
 		f:SetFrameStrata("DIALOG")
 		f:SetFrameLevel(200)
@@ -1749,6 +1934,7 @@ local function ShowDebugCopyPopup(reportText)
 		local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
 		title:SetPoint("TOPLEFT", f, "TOPLEFT", 16, -14)
 		title:SetText("Better Click Casting Debug (Strg+C zum Kopieren)")
+		f.Title = title
 
 		local closeBtn = CreateFrame("Button", nil, f, "UIPanelCloseButton")
 		closeBtn:SetPoint("TOPRIGHT", f, "TOPRIGHT", -4, -4)
@@ -1770,10 +1956,117 @@ local function ShowDebugCopyPopup(reportText)
 		debugCopyFrame = f
 	end
 
+	if debugCopyFrame.Title then
+		debugCopyFrame.Title:SetText(customTitle or "Better Click Casting Debug (Strg+C zum Kopieren)")
+	end
 	debugCopyFrame:Show()
 	debugCopyFrame.EditBox:SetText(reportText or "")
 	debugCopyFrame.EditBox:SetFocus()
 	debugCopyFrame.EditBox:HighlightText()
+end
+
+-- Erzeugt eine kopierbare Text-Übersicht aller aktiven Klickbelegungen inkl. Taste, Zaubername, Rang, Manakosten und Smart-Regel (/bcc list).
+function ClickBindingUI.ShowBindingsExportPopup()
+	local bindings = {}
+	if ClickBindingFrame and ClickBindingFrame:IsShown() and ClickBindingFrame.dataProvider then
+		for _, element in ClickBindingFrame.dataProvider:Enumerate() do
+			if element and not element.unbound and element.bindingInfo and element.bindingInfo.button then
+				table.insert(bindings, element.bindingInfo)
+			end
+		end
+	elseif C_ClickBindings and C_ClickBindings.GetProfileInfo then
+		local profile = C_ClickBindings.GetProfileInfo()
+		if type(profile) == "table" then
+			for _, info in ipairs(profile) do
+				if info and info.button then
+					table.insert(bindings, info)
+				end
+			end
+		end
+	end
+
+	if #bindings == 0 then
+		ShowDebugCopyPopup(L["EXPORT_EMPTY"], L["EXPORT_POPUP_TITLE"])
+		return
+	end
+
+	table.sort(bindings, function(a, b)
+		local pA = (a.type == Enum.ClickBindingType.Interaction and Database.Get("moveInteractionsToBottom")) and 2 or 1
+		local pB = (b.type == Enum.ClickBindingType.Interaction and Database.Get("moveInteractionsToBottom")) and 2 or 1
+		if pA ~= pB then
+			return pA < pB
+		end
+		local modA = Constants.GetModifierSortInfo(a.modifiers)
+		local modB = Constants.GetModifierSortInfo(b.modifiers)
+		if modA ~= modB then
+			return modA < modB
+		end
+		local btnA = Constants.GetButtonSortOrder(a.button)
+		local btnB = Constants.GetButtonSortOrder(b.button)
+		if btnA ~= btnB then
+			return btnA < btnB
+		end
+		return tostring(a.actionID or 0) < tostring(b.actionID or 0)
+	end)
+
+	local playerName = (UnitName and UnitName("player")) or "Player"
+	local classLoc = (UnitClass and select(1, UnitClass("player"))) or ""
+	local lines = {
+		string.format("Better Click Casting v%s (%s, %s, %d Bindings)", Constants.VERSION, playerName, classLoc, #bindings),
+		string.rep("=", 56),
+	}
+
+	for _, info in ipairs(bindings) do
+		local shortBind = Constants.GetShortBindingString(info) or "?"
+		local fullBind = Constants.GetFullBindingString(info) or shortBind
+		local actionDesc = "?"
+		local details = {}
+
+		if Constants.IsSpellOrPetBinding(info) and info.actionID then
+			local rankEntry = SpellRanks.GetRankEntryForAction(info.actionID)
+			local baseName = (rankEntry and rankEntry.name) or SpellRanks.GetSpellBaseNameForAction(info.actionID) or tostring(info.actionID)
+			local subtext = (rankEntry and rankEntry.subName) or SpellRanks.GetSpellSubtextForAction(info.actionID) or ""
+			actionDesc = (subtext ~= "") and string.format("%s (%s)", baseName, subtext) or baseName
+
+			if rankEntry and rankEntry.group and #rankEntry.group.entries > 1 then
+				local maxEntry = rankEntry.group.maxEntry
+				if not rankEntry.isLowRank then
+					table.insert(details, "MAX")
+				elseif maxEntry and maxEntry.subName and maxEntry.subName ~= "" then
+					table.insert(details, string.format("Downrank / Max: %s", maxEntry.subName))
+				end
+			end
+
+			local spellID = (rankEntry and rankEntry.spellID) or info.actionID
+			local costStr = SpellRanks.GetSpellPowerCostString and SpellRanks.GetSpellPowerCostString(spellID)
+			if costStr and costStr ~= "" then
+				table.insert(details, costStr)
+			end
+
+			if Database.Get("enableSmartRankRules") and rankEntry and rankEntry.group and #rankEntry.group.entries > 1 then
+				local ruleMode = SpellRanks.GetRuleForBinding and SpellRanks.GetRuleForBinding(info, rankEntry)
+				if ruleMode then
+					table.insert(details, GetRuleShortTag(ruleMode, not rankEntry.isLowRank))
+				end
+			end
+		elseif info.type == Enum.ClickBindingType.Macro and info.actionID then
+			local macroName = GetMacroInfo and select(1, GetMacroInfo(info.actionID))
+			actionDesc = string.format("%s: %s", L["GROUP_HDR_MACROS"] or "Macro", macroName or tostring(info.actionID))
+		elseif info.type == Enum.ClickBindingType.Interaction then
+			if info.actionID == Enum.ClickBindingInteraction.Target then
+				actionDesc = BINDING_NAME_TARGETSELF or "Target Unit"
+			elseif info.actionID == Enum.ClickBindingInteraction.OpenContextMenu then
+				actionDesc = HUD_EDIT_MODE_MENU or "Open Context Menu"
+			elseif C_ClickBindings and C_ClickBindings.GetStringFromType then
+				actionDesc = C_ClickBindings.GetStringFromType(info.type) or "Interaction"
+			end
+		end
+
+		local detailSuffix = (#details > 0) and ("  [" .. table.concat(details, " | ") .. "]") or ""
+		table.insert(lines, string.format("[%s] %s: %s%s", shortBind, fullBind, actionDesc, detailSuffix))
+	end
+
+	ShowDebugCopyPopup(table.concat(lines, "\n"), L["EXPORT_POPUP_TITLE"])
 end
 
 -- Diagnose-Werkzeug (/bcc debug, /bcc debug taintlog):
@@ -2020,6 +2313,86 @@ function ClickBindingUI.SyncAutoShowAllRanks()
 	end
 end
 
+-- Wählt beim Öffnen von /bcc automatisch den Klassen-Tab im Zauberbuch (den Reiter mit den meisten gebundenen
+-- Klick-Zaubern oder den ersten Klassen-Tab), sofern das Zauberbuch noch auf dem Reiter "Allgemein" steht.
+function ClickBindingUI.AutoSelectPrimarySpellBookTab()
+	if not Database.Get("autoSelectPrimarySpellTab") then
+		return
+	end
+	if InCombatLockdown and InCombatLockdown() then
+		return
+	end
+	if not PlayerSpellsFrame or not PlayerSpellsFrame.SpellBookFrame then
+		return
+	end
+	local sbFrame = PlayerSpellsFrame.SpellBookFrame
+	if not sbFrame.categoryMixins or not sbFrame.GetActiveCategoryMixin or not sbFrame.SetTab then
+		return
+	end
+
+	local generalIndex = (Enum and Enum.SpellBookSkillLineIndex and Enum.SpellBookSkillLineIndex.General) or 1
+	local activeMixin = sbFrame:GetActiveCategoryMixin()
+	-- Wenn der Spieler bereits manuell einen Klassen- oder Pet-Reiter gewählt hat, niemals überschreiben
+	if not activeMixin or activeMixin.skillLineIndex ~= generalIndex then
+		return
+	end
+
+	local classCandidates = {}
+	for _, mixin in ipairs(sbFrame.categoryMixins) do
+		if mixin.skillLineIndex
+			and mixin.skillLineIndex > generalIndex
+			and mixin.spellBank == Enum.SpellBookSpellBank.Player
+			and (not mixin.IsAvailable or mixin:IsAvailable())
+		then
+			table.insert(classCandidates, { mixin = mixin, boundCount = 0 })
+		end
+	end
+
+	if #classCandidates == 0 then
+		return
+	end
+
+	-- Zählen, welcher Klassen-Tab die meisten aktuell gebundenen Klick-Zauber enthält
+	if C_ClickBindings and C_ClickBindings.GetProfileInfo then
+		local profile = C_ClickBindings.GetProfileInfo()
+		if type(profile) == "table" then
+			for _, info in ipairs(profile) do
+				if info and info.actionID and Constants.IsSpellOrPetBinding(info) then
+					local rankEntry = SpellRanks.GetRankEntryForAction(info.actionID)
+					if rankEntry and rankEntry.slotIndex and rankEntry.spellBank == Enum.SpellBookSpellBank.Player then
+						for _, cand in ipairs(classCandidates) do
+							if cand.mixin.ContainsSlot and cand.mixin:ContainsSlot(rankEntry.slotIndex, rankEntry.spellBank) then
+								cand.boundCount = cand.boundCount + 1
+								break
+							end
+						end
+					end
+				end
+			end
+		end
+	end
+
+	local bestMixin = classCandidates[1].mixin
+	local bestCount = classCandidates[1].boundCount
+	for i = 2, #classCandidates do
+		if classCandidates[i].boundCount > bestCount then
+			bestCount = classCandidates[i].boundCount
+			bestMixin = classCandidates[i].mixin
+		end
+	end
+
+	local targetTabID = bestMixin and bestMixin.GetTabID and bestMixin:GetTabID()
+	if targetTabID then
+		if SpellBookUI and SpellBookUI.SetupHooks then
+			SpellBookUI.SetupHooks()
+		end
+		sbFrame:SetTab(targetTabID)
+		if SpellBookUI and SpellBookUI.RefreshBadges then
+			SpellBookUI.RefreshBadges()
+		end
+	end
+end
+
 function ClickBindingUI.SetupHooks()
 	if isHooked
 		or not ClickBindingFrame
@@ -2036,10 +2409,17 @@ function ClickBindingUI.SetupHooks()
 		SettingsUI.AttachToClickBindingFrame()
 	end
 
-	-- Beim Klick auf das Zauberbuch-Portrait im ClickBindingFrame sicherstellen, dass der SpellBook-Tab aktiv ist
+	-- Beim Klick auf das Zauberbuch-Portrait im ClickBindingFrame sicherstellen, dass der SpellBook-Tab aktiv ist,
+	-- und Blizzards irreführenden Tooltip-Titel ("Talents" via PLAYERSPELLS_BUTTON) zu "Spellbook" / "Zauberbuch" (SPELLBOOK) korrigieren.
 	if ClickBindingFrame.PlayerSpellsPortrait and ClickBindingFrame.PlayerSpellsPortrait.HookScript then
 		ClickBindingFrame.PlayerSpellsPortrait:HookScript("OnMouseDown", function()
 			ClickBindingUI.EnsureSpellBookTabForClickBinding()
+		end)
+		ClickBindingFrame.PlayerSpellsPortrait:HookScript("OnEnter", function(self)
+			if GameTooltip and GameTooltip:IsOwned(self) and SPELLBOOK then
+				GameTooltip_SetTitle(GameTooltip, SPELLBOOK)
+				GameTooltip:Show()
+			end
 		end)
 	end
 
@@ -2047,6 +2427,7 @@ function ClickBindingUI.SetupHooks()
 	ClickBindingFrame:HookScript("OnShow", function()
 		ClickBindingUI.HideHeroCard()
 		ClickBindingUI.SyncAutoShowAllRanks()
+		ClickBindingUI.AutoSelectPrimarySpellBookTab()
 		ClickBindingUI.RebuildGroups()
 		if SpellBookUI and SpellBookUI.RefreshBadges then
 			SpellBookUI.RefreshBadges()
@@ -2134,6 +2515,7 @@ function ClickBindingUI.SetupHooks()
 	if ClickBindingFrame:IsShown() then
 		ClickBindingUI.HideHeroCard()
 		ClickBindingUI.SyncAutoShowAllRanks()
+		ClickBindingUI.AutoSelectPrimarySpellBookTab()
 		ClickBindingUI.RebuildGroups()
 		ClickBindingUI.RefreshVisibleLines()
 	end

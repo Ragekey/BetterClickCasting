@@ -7,14 +7,22 @@ local DEFAULTS = {
 	showRankInName = true,
 	highlightDownranks = true,
 	showRankSwitcher = true,
+	showLineManaCost = true,
+	moveInteractionsToBottom = true,
 	showLineTooltips = true,
 	groupingMode = "modifier", -- "modifier", "button", "type", "none"
 	quickBindSpellbook = true,
 	showSpellbookBadges = true,
 	autoShowAllRanks = true,
+	autoSelectPrimarySpellTab = true,
 	enableSmartRankRules = true,
+	trainerUpgradeBehavior = "card", -- "card", "auto", "off"
 	unitHoverMode = "off", -- "off", "modifier", "always"
 	unitHoverAnchor = "cursor", -- "cursor", "top", "bottom", "left", "right", "free"
+	unitHoverScale = 100, -- 70 bis 150 (%)
+	unitHoverAlpha = 94, -- 30 bis 100 (%)
+	unitHoverShowMana = true,
+	unitHoverShowRankTags = true,
 	unitHoverShowInCombat = false,
 	unitHoverShowInteractions = false,
 	showMinimapButton = true,
@@ -72,10 +80,10 @@ function Database.NotifyChanged(key, value)
 		if key == "autoShowAllRanks" and ns.ClickBindingUI.SyncAutoShowAllRanks then
 			ns.ClickBindingUI.SyncAutoShowAllRanks()
 		end
-		if key == "groupingMode" and ns.ClickBindingUI.RebuildGroups then
+		if (key == "groupingMode" or key == "moveInteractionsToBottom") and ns.ClickBindingUI.RebuildGroups then
 			ns.ClickBindingUI.RebuildGroups()
 		end
-		if key == "enableSmartRankRules" and ns.ClickBindingUI.ScheduleSmartRuleCheck then
+		if (key == "enableSmartRankRules" or key == "trainerUpgradeBehavior") and ns.ClickBindingUI.ScheduleSmartRuleCheck then
 			ns.ClickBindingUI.ScheduleSmartRuleCheck(0.1)
 		end
 		if ns.ClickBindingUI.RefreshVisibleLines then
@@ -90,5 +98,8 @@ function Database.NotifyChanged(key, value)
 	end
 	if ns.UnitHoverTooltip and ns.UnitHoverTooltip.OnSettingChanged then
 		ns.UnitHoverTooltip.OnSettingChanged(key, value)
+	end
+	if ns.SettingsUI and ns.SettingsUI.RefreshWindow then
+		ns.SettingsUI.RefreshWindow()
 	end
 end

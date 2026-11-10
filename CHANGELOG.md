@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.6.0] (2026-11-10)
+### Added
+- **Dedicated 3-Tab Settings Window (`BetterClickCastingSettingsFrame` & `/bcc cfg`):**
+  - Replaced the right-click context menu with a movable, Blizzard-styled settings window organized into three clean tabs: **Click Cast**, **Spellbook & General**, and **Hover Overlay**.
+  - Accessible via the gear button inside `ClickBindingFrame`, Right-Clicking the Minimap button, `Esc -> Options -> AddOns -> Better Click Casting` (fully indexed in Blizzard's global Options search bar), or `/bcc cfg`.
+- **Hover Overlay Fine-Tuning & Global Unlock Mode (`/bcc move`):**
+  - Added sliders for **Overlay Scale** (`70%` to `150%`) and **Background Opacity** (`30%` to `100%`), plus toggles for **Show Mana Costs** and **Show Rank Status Tags** (`[MAX]`, `[-1]`, `[-2]`).
+  - **Global Overlay Unlock & Placeholder Mode (`/bcc move` / `/bcc unlock`):** Simultaneously unlocks both the Rank Update Hero-Card and the Unit Frame Hover Overlay with green borders and sample rows so you can position both cards anytime (Right-Click either card to reset to default position).
+- **Click Cast & Spellbook Quality-of-Life Enhancements:**
+  - **Live Mana Costs in Binding Rows (`/bcc mana`):** Displays each bound spell rank's mana or resource cost right-aligned in the top row of the Click Cast list.
+  - **Move Default Interactions to Bottom (`/bcc bottom`):** Places the default `Target Unit` and `Open Context Menu` rows at the bottom of the list so custom spell bindings start right at the top.
+  - **Configurable Trainer Upgrade Behavior (`/bcc trainer [card|auto|off]`):** Choose whether learning new spell ranks at a class trainer shows the **Upgrade Hero-Card** (`card`), **Auto-Opens & Prepares** `/bcc` with the Save button highlighted (`auto`), or stays **Manual Only** (`off`).
+  - **Auto-Select Active Class/Spec Spellbook Tab (`/bcc autotab`):** Automatically switches the Spellbook from the General tab (`Tab 1`) to your primary class tab (`Tab 2`) when opening Click Cast Bindings.
+  - **Copyable Binding Summary (`/bcc list`):** Generates a clean, formatted text summary of all bound spells, ranks, mana costs, and Smart Rules for easy copying (`Ctrl+C`), sharing, or backup.
+- **Complete Power-User `/bcc` Slash Command Set:**
+  - Every setting and action can now be controlled directly via `/bcc` commands (`/bcc help`, `/bcc cfg`, `/bcc upgrade`, `/bcc list`, `/bcc move`, `/bcc resetpos`, `/bcc group`, `/bcc hover`, `/bcc anchor`, `/bcc trainer`, `/bcc mana`, `/bcc bottom`, `/bcc autotab`, `/bcc combat`, `/bcc status`).
+
+### Fixed
+- **Spellbook Portrait Button Tooltip:** Fixed Blizzard's Spellbook portrait button inside `ClickBindingFrame` showing *"Talents"* (`PLAYERSPELLS_BUTTON`) instead of *"Spellbook"* (`SPELLBOOK`).
+- **Spellbook Cooldown Secret-Value Protection:** Unregistered `SPELL_UPDATE_COOLDOWN` on tainted `SpellBookItemFrame` instances so `SetCooldown()` never receives restricted `<secret number>` cooldown values during combat or active GCD.
+
 ## [0.5.0] (2026-11-09)
 ### Added
 - **Unit Frame Hover Overlay (Optional, Default: Off):**

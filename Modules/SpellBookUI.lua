@@ -344,8 +344,20 @@ function SpellBookUI.UpdateItemClickBindVisuals(spellBookItemFrame, bindingsMap)
 	local isItemTainted = false
 	if issecurevariable then
 		if (spellBookItemFrame.elementData ~= nil and not issecurevariable(spellBookItemFrame, "elementData"))
-			or (spellBookItemFrame.spellBookItemInfo ~= nil and not issecurevariable(spellBookItemFrame, "spellBookItemInfo")) then
+			or (spellBookItemFrame.spellBookItemInfo ~= nil and not issecurevariable(spellBookItemFrame, "spellBookItemInfo"))
+			or (spellBookItemFrame.slotIndex ~= nil and not issecurevariable(spellBookItemFrame, "slotIndex"))
+		then
 			isItemTainted = true
+		end
+	end
+
+	-- Auf getainteten Zauberbuch-Slots SPELL_UPDATE_COOLDOWN abmelden, damit Blizzards UpdateCooldown()
+	-- im Kampf keine geschützten Secret-Cooldown-Werte (SecretWhenCooldownsRestricted) an SetCooldown() übergibt.
+	if spellBookItemFrame.UnregisterEvent then
+		if isItemTainted then
+			spellBookItemFrame:UnregisterEvent("SPELL_UPDATE_COOLDOWN")
+		elseif spellBookItemFrame:IsShown() and spellBookItemFrame.RegisterEvent then
+			spellBookItemFrame:RegisterEvent("SPELL_UPDATE_COOLDOWN")
 		end
 	end
 
@@ -412,6 +424,18 @@ function SpellBookUI.SetupHooks()
 	hooksecurefunc(SpellBookItemMixin, "UpdateClickBindState", function(self)
 		SpellBookUI.UpdateItemClickBindVisuals(self)
 	end)
+
+	if SpellBookItemMixin.OnShow then
+		hooksecurefunc(SpellBookItemMixin, "OnShow", function(self)
+			if self and issecurevariable and self.UnregisterEvent then
+				if (self.elementData ~= nil and not issecurevariable(self, "elementData"))
+					or (self.slotIndex ~= nil and not issecurevariable(self, "slotIndex"))
+				then
+					self:UnregisterEvent("SPELL_UPDATE_COOLDOWN")
+				end
+			end
+		end)
+	end
 
 	if SpellBookItemMixin.ClearSpellData then
 		hooksecurefunc(SpellBookItemMixin, "ClearSpellData", function(self)
