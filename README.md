@@ -8,8 +8,8 @@ Back in the Beta, I dutifully reported an issue for Blizzard's built-in **Click 
 * **Learned a new spell rank at your class trainer and want to upgrade your binding?** *Have fun deleting the row, hunting down the spell in your Spellbook, and binding it all over again!*
 * **Want to see a tooltip in the list to check mana costs?** *Too bad!*
 
-Sadly, the menu never got any love from Blizzard.
-**Are you in the same boat as me? Then have fun with this AddOn!**
+Sadly, the menu never got any love from Blizzard (even Blizzard's native tooltips had to be fixed).
+**So here is the missing Classic upgrade Blizzard forgot to ship:**
 
 ---
 
