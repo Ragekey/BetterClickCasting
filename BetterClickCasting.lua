@@ -27,6 +27,9 @@ loaderFrame:SetScript("OnEvent", function(self, event, arg1)
 		if arg1 == addonName or arg1 == "BetterClickCasting" or arg1 == "BetterClickCastings" then
 			Database.Init()
 			MinimapButton.Init()
+			if ns.SettingsUI and ns.SettingsUI.RegisterBlizzardOptions then
+				ns.SettingsUI.RegisterBlizzardOptions()
+			end
 			if UnitHoverTooltip and UnitHoverTooltip.Init then
 				UnitHoverTooltip.Init()
 			end
@@ -45,6 +48,9 @@ loaderFrame:SetScript("OnEvent", function(self, event, arg1)
 	elseif event == "PLAYER_LOGIN" then
 		Database.Init()
 		MinimapButton.Init()
+		if ns.SettingsUI and ns.SettingsUI.RegisterBlizzardOptions then
+			ns.SettingsUI.RegisterBlizzardOptions()
+		end
 		if UnitHoverTooltip and UnitHoverTooltip.Init then
 			UnitHoverTooltip.Init()
 		end
@@ -82,6 +88,9 @@ loaderFrame:SetScript("OnEvent", function(self, event, arg1)
 			ClickBindingUI.ScheduleSmartRuleCheck(0.3, false)
 		end
 	elseif event == "PLAYER_REGEN_DISABLED" then
+		if ns.SettingsUI and ns.SettingsUI.IsOverlaysUnlocked and ns.SettingsUI.IsOverlaysUnlocked() then
+			ns.SettingsUI.SetOverlaysUnlocked(false, true)
+		end
 		if ClickBindingUI and ClickBindingUI.HideHeroCard then
 			ClickBindingUI.HideHeroCard()
 		end
@@ -104,27 +113,220 @@ end
 -- Slash-Commands (/bcc, /betterclickcasting)
 --------------------------------------------------------------------------------
 
+local function PrintSettingState(labelKey, isOn)
+	if not DEFAULT_CHAT_FRAME then
+		return
+	end
+	local stateStr = isOn and L["CHAT_STATE_ON"] or L["CHAT_STATE_OFF"]
+	DEFAULT_CHAT_FRAME:AddMessage(string.format(L["CHAT_SETTING_CHANGED_FORMAT"], L[labelKey] or labelKey, stateStr))
+end
+
+local function PrintSettingValue(labelKey, valueText)
+	if not DEFAULT_CHAT_FRAME then
+		return
+	end
+	DEFAULT_CHAT_FRAME:AddMessage(string.format(L["CHAT_SETTING_CHANGED_FORMAT"], L[labelKey] or labelKey, "|cffffd100" .. tostring(valueText) .. "|r"))
+end
+
+local function ToggleBoolCommand(dbKey, labelKey)
+	local newVal = Database.Toggle(dbKey)
+	PrintSettingState(labelKey, newVal)
+end
+
+local GROUP_CYCLE = { "modifier", "button", "type", "none" }
+local HOVER_MODE_CYCLE = { "off", "modifier", "always" }
+local HOVER_ANCHOR_CYCLE = { "cursor", "top", "bottom", "left", "right", "free" }
+local TRAINER_BEHAVIOR_CYCLE = { "card", "auto", "off" }
+
+local function CycleOrSetOption(dbKey, currentVal, cycleList, aliasMap, arg)
+	if arg and arg ~= "" and aliasMap[arg] then
+		Database.Set(dbKey, aliasMap[arg])
+		return
+	end
+	local nextIdx = 1
+	for i, v in ipairs(cycleList) do
+		if v == currentVal then
+			nextIdx = (i % #cycleList) + 1
+			break
+		end
+	end
+	Database.Set(dbKey, cycleList[nextIdx])
+end
+
 SLASH_BETTERCLICKCASTING1 = "/bcc"
 SLASH_BETTERCLICKCASTING2 = "/betterclickcasting"
 SLASH_BETTERCLICKCASTING3 = "/betterclickcastings"
 SlashCmdList["BETTERCLICKCASTING"] = function(msg)
-	local cmd = string.lower(strtrim(msg or ""))
-	if cmd == "minimap" or cmd == "mm" then
-		Database.Toggle("showMinimapButton")
+	local raw = strtrim(msg or "")
+	local cmd, arg = string.match(raw, "^(%S+)%s*(.-)$")
+	cmd = string.lower(cmd or "")
+	arg = string.lower(strtrim(arg or ""))
+
+	if cmd == "" then
+		MinimapButton.ToggleClickCastingWindow()
+	elseif cmd == "config" or cmd == "cfg" or cmd == "opt" or cmd == "options" or cmd == "settings" then
+		local tabNum = tonumber(arg)
+		if tabNum and ns.SettingsUI and ns.SettingsUI.OpenSettingsTab then
+			ns.SettingsUI.OpenSettingsTab(tabNum)
+		elseif ns.SettingsUI and ns.SettingsUI.OpenSettingsMenu then
+			ns.SettingsUI.OpenSettingsMenu()
+		end
+	elseif cmd == "move" or cmd == "unlock" or cmd == "lock" then
+		if ns.SettingsUI and ns.SettingsUI.SetOverlaysUnlocked and ns.SettingsUI.ToggleOverlaysUnlocked then
+			if cmd == "unlock" then
+				ns.SettingsUI.SetOverlaysUnlocked(true)
+			elseif cmd == "lock" and ns.SettingsUI.IsOverlaysUnlocked and ns.SettingsUI.IsOverlaysUnlocked() then
+				ns.SettingsUI.SetOverlaysUnlocked(false)
+			else
+				ns.SettingsUI.ToggleOverlaysUnlocked()
+			end
+		end
+	elseif cmd == "reset" or cmd == "resetpos" then
+		if ns.SettingsUI and ns.SettingsUI.ResetAllOverlayPositions then
+			ns.SettingsUI.ResetAllOverlayPositions()
+		end
+	elseif cmd == "max" or cmd == "upgrade" then
+		if InCombatLockdown and InCombatLockdown() then
+			if DEFAULT_CHAT_FRAME then
+				DEFAULT_CHAT_FRAME:AddMessage(L["CHAT_COMBAT_ERR"])
+			end
+			return
+		end
+		if not (ClickBindingFrame and ClickBindingFrame:IsShown()) then
+			MinimapButton.ToggleClickCastingWindow()
+		end
+		if ClickBindingUI and ClickBindingUI.UpgradeAllBindingsToMaxRank then
+			local count = ClickBindingUI.UpgradeAllBindingsToMaxRank()
+			if count == 0 and DEFAULT_CHAT_FRAME then
+				DEFAULT_CHAT_FRAME:AddMessage("|cff99ccffBetter Click Casting:|r " .. L["ACTION_UPGRADE_ALL_MAX_NONE"])
+			end
+		end
+	elseif cmd == "group" or cmd == "grouping" then
+		local aliases = {
+			mod = "modifier", modifier = "modifier",
+			btn = "button", button = "button",
+			type = "type", action = "type",
+			none = "none", off = "none", flat = "none",
+		}
+		CycleOrSetOption("groupingMode", Database.Get("groupingMode") or "modifier", GROUP_CYCLE, aliases, arg)
+		if ns.SettingsUI and ns.SettingsUI.GetCurrentGroupShortLabel then
+			PrintSettingValue("GROUP_MENU_TITLE", ns.SettingsUI.GetCurrentGroupShortLabel())
+		end
+	elseif cmd == "hover" then
+		local aliases = {
+			off = "off", ["0"] = "off", disable = "off",
+			mod = "modifier", modifier = "modifier", ["1"] = "modifier",
+			always = "always", on = "always", ["2"] = "always",
+		}
+		CycleOrSetOption("unitHoverMode", Database.Get("unitHoverMode") or "off", HOVER_MODE_CYCLE, aliases, arg)
+		if ns.SettingsUI and ns.SettingsUI.GetCurrentUnitHoverModeShortLabel then
+			PrintSettingValue("UNITHOVER_MODE_MENU_TITLE", ns.SettingsUI.GetCurrentUnitHoverModeShortLabel())
+		end
+	elseif cmd == "anchor" then
+		local aliases = {
+			cursor = "cursor", mouse = "cursor",
+			top = "top",
+			bottom = "bottom", bot = "bottom",
+			left = "left",
+			right = "right",
+			free = "free",
+		}
+		CycleOrSetOption("unitHoverAnchor", Database.Get("unitHoverAnchor") or "cursor", HOVER_ANCHOR_CYCLE, aliases, arg)
+		if ns.SettingsUI and ns.SettingsUI.GetCurrentUnitHoverAnchorShortLabel then
+			PrintSettingValue("UNITHOVER_ANCHOR_MENU_TITLE", ns.SettingsUI.GetCurrentUnitHoverAnchorShortLabel())
+		end
+	elseif cmd == "scale" then
+		local val = tonumber(arg)
+		if val then
+			val = math.max(70, math.min(150, math.floor((val / 5) + 0.5) * 5))
+			Database.Set("unitHoverScale", val)
+		end
+		if DEFAULT_CHAT_FRAME then
+			DEFAULT_CHAT_FRAME:AddMessage("|cff99ccffBetter Click Casting:|r " .. string.format(L["SETTING_UNITHOVER_SCALE_FORMAT"], Database.Get("unitHoverScale") or 100))
+		end
+	elseif cmd == "alpha" or cmd == "opacity" then
+		local val = tonumber(arg)
+		if val then
+			val = math.max(30, math.min(100, math.floor((val / 5) + 0.5) * 5))
+			Database.Set("unitHoverAlpha", val)
+		end
+		if DEFAULT_CHAT_FRAME then
+			DEFAULT_CHAT_FRAME:AddMessage("|cff99ccffBetter Click Casting:|r " .. string.format(L["SETTING_UNITHOVER_ALPHA_FORMAT"], Database.Get("unitHoverAlpha") or 94))
+		end
+	elseif cmd == "qb" or cmd == "quickbind" then
+		ToggleBoolCommand("quickBindSpellbook", "SETTING_QUICK_BIND_SPELLBOOK")
+	elseif cmd == "mana" or cmd == "manacost" then
+		ToggleBoolCommand("showLineManaCost", "SETTING_SHOW_LINE_MANA_COST")
+	elseif cmd == "bottom" or cmd == "interactions" then
+		ToggleBoolCommand("moveInteractionsToBottom", "SETTING_MOVE_INTERACTIONS_BOTTOM")
+	elseif cmd == "trainer" then
+		local aliases = {
+			card = "card", hero = "card", ["1"] = "card",
+			auto = "auto", open = "auto", ["2"] = "auto",
+			off = "off", none = "off", ["0"] = "off",
+		}
+		CycleOrSetOption("trainerUpgradeBehavior", Database.Get("trainerUpgradeBehavior") or "card", TRAINER_BEHAVIOR_CYCLE, aliases, arg)
+		if ns.SettingsUI and ns.SettingsUI.GetCurrentTrainerBehaviorShortLabel then
+			PrintSettingValue("TRAINER_BEHAVIOR_MENU_TITLE", ns.SettingsUI.GetCurrentTrainerBehaviorShortLabel())
+		end
+	elseif cmd == "autotab" or cmd == "tab" then
+		ToggleBoolCommand("autoSelectPrimarySpellTab", "SETTING_AUTO_SELECT_PRIMARY_TAB")
+	elseif cmd == "list" or cmd == "export" or cmd == "summary" then
+		if ClickBindingUI and ClickBindingUI.ShowBindingsExportPopup then
+			ClickBindingUI.ShowBindingsExportPopup()
+		end
+	elseif cmd == "rules" or cmd == "smartrules" then
+		ToggleBoolCommand("enableSmartRankRules", "SETTING_ENABLE_SMART_RULES")
+	elseif cmd == "ranks" then
+		ToggleBoolCommand("showRankInName", "SETTING_SHOW_RANK_IN_NAME")
+	elseif cmd == "downrank" or cmd == "downranks" then
+		ToggleBoolCommand("highlightDownranks", "SETTING_HIGHLIGHT_DOWNRANKS")
+	elseif cmd == "switcher" then
+		ToggleBoolCommand("showRankSwitcher", "SETTING_SHOW_RANK_SWITCHER")
+	elseif cmd == "tooltips" or cmd == "tooltip" then
+		ToggleBoolCommand("showLineTooltips", "SETTING_SHOW_LINE_TOOLTIPS")
+	elseif cmd == "badges" then
+		ToggleBoolCommand("showSpellbookBadges", "SETTING_SHOW_SPELLBOOK_BADGES")
+	elseif cmd == "allranks" then
+		ToggleBoolCommand("autoShowAllRanks", "SETTING_AUTO_SHOW_ALL_RANKS")
+	elseif cmd == "minimap" or cmd == "mm" then
+		ToggleBoolCommand("showMinimapButton", "SETTING_SHOW_MINIMAP_BUTTON")
+	elseif cmd == "status" then
+		if DEFAULT_CHAT_FRAME and ns.SettingsUI then
+			PrintSettingValue("GROUP_MENU_TITLE", ns.SettingsUI.GetCurrentGroupShortLabel())
+			if ns.SettingsUI.GetCurrentTrainerBehaviorShortLabel then
+				PrintSettingValue("TRAINER_BEHAVIOR_MENU_TITLE", ns.SettingsUI.GetCurrentTrainerBehaviorShortLabel())
+			end
+			PrintSettingState("SETTING_SHOW_LINE_MANA_COST", Database.Get("showLineManaCost"))
+			PrintSettingState("SETTING_MOVE_INTERACTIONS_BOTTOM", Database.Get("moveInteractionsToBottom"))
+			PrintSettingState("SETTING_QUICK_BIND_SPELLBOOK", Database.Get("quickBindSpellbook"))
+			PrintSettingState("SETTING_AUTO_SELECT_PRIMARY_TAB", Database.Get("autoSelectPrimarySpellTab"))
+			PrintSettingState("SETTING_ENABLE_SMART_RULES", Database.Get("enableSmartRankRules"))
+			PrintSettingValue("UNITHOVER_MODE_MENU_TITLE", ns.SettingsUI.GetCurrentUnitHoverModeShortLabel())
+			PrintSettingValue("UNITHOVER_ANCHOR_MENU_TITLE", ns.SettingsUI.GetCurrentUnitHoverAnchorShortLabel())
+		end
 	elseif cmd == "test" or cmd == "testcard" then
 		if ClickBindingUI and ClickBindingUI.PrepareSmartRuleTest then
 			ClickBindingUI.PrepareSmartRuleTest()
 		end
-	elseif cmd == "debug" or string.sub(cmd, 1, 6) == "debug " then
+	elseif cmd == "debug" then
 		if ClickBindingUI and ClickBindingUI.RunTaintDiagnostics then
-			local subArg = strtrim(string.sub(cmd, 7))
-			ClickBindingUI.RunTaintDiagnostics(subArg)
+			ClickBindingUI.RunTaintDiagnostics(arg)
 		end
 	elseif cmd == "help" or cmd == "?" then
 		if DEFAULT_CHAT_FRAME then
-			DEFAULT_CHAT_FRAME:AddMessage(L["CHAT_HELP_HINT"])
+			DEFAULT_CHAT_FRAME:AddMessage(L["CHAT_HELP_HEADER"])
+			DEFAULT_CHAT_FRAME:AddMessage(L["CHAT_HELP_LINE_1"])
+			DEFAULT_CHAT_FRAME:AddMessage(L["CHAT_HELP_LINE_2"])
+			DEFAULT_CHAT_FRAME:AddMessage(L["CHAT_HELP_LINE_3"])
+			DEFAULT_CHAT_FRAME:AddMessage(L["CHAT_HELP_LINE_4"])
+			DEFAULT_CHAT_FRAME:AddMessage(L["CHAT_HELP_LINE_5"])
+			DEFAULT_CHAT_FRAME:AddMessage(L["CHAT_HELP_LINE_6"])
+			DEFAULT_CHAT_FRAME:AddMessage(L["CHAT_HELP_LINE_7"])
 		end
 	else
-		MinimapButton.ToggleClickCastingWindow()
+		if DEFAULT_CHAT_FRAME then
+			DEFAULT_CHAT_FRAME:AddMessage(L["CHAT_HELP_HINT"])
+		end
 	end
 end

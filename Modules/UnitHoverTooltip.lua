@@ -67,14 +67,14 @@ local function IsPlayerInCombat()
 end
 
 local function IsFreeMoveActive()
+	if isMoveUnlocked then
+		return true
+	end
 	if (Database.Get("unitHoverMode") or "off") == "off" then
 		return false
 	end
 	if (Database.Get("unitHoverAnchor") or "cursor") ~= "free" then
 		return false
-	end
-	if isMoveUnlocked then
-		return true
 	end
 	return (ClickBindingFrame and ClickBindingFrame:IsShown()) and true or false
 end
@@ -88,6 +88,15 @@ function UnitHoverTooltip.SetMoveUnlocked(unlocked)
 	UnitHoverTooltip.UpdateTrackingState()
 	if ns.SettingsUI and ns.SettingsUI.RefreshWindow then
 		ns.SettingsUI.RefreshWindow()
+	end
+end
+
+function UnitHoverTooltip.ResetPosition()
+	if type(BetterClickCastingDB) == "table" then
+		BetterClickCastingDB.unitHoverPos = nil
+	end
+	if hoverCard and hoverCard:IsShown() then
+		EvaluateHoverState(true)
 	end
 end
 
@@ -372,6 +381,16 @@ local function EnsureHoverCard()
 		self:StopMovingOrSizing()
 		isDraggingCard = false
 		SaveFreeCardPosition(self)
+		if (Database.Get("unitHoverAnchor") or "cursor") ~= "free" then
+			Database.Set("unitHoverAnchor", "free")
+		end
+	end)
+
+	card:SetScript("OnMouseUp", function(_, mouseButton)
+		if mouseButton == "RightButton" and IsFreeMoveActive() then
+			PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
+			UnitHoverTooltip.ResetPosition()
+		end
 	end)
 
 	if card.SetBackdrop then
@@ -446,7 +465,7 @@ local function UpdateCardPosition(card, unitFrame)
 	local anchorMode = Database.Get("unitHoverAnchor") or "cursor"
 	card:ClearAllPoints()
 
-	if anchorMode == "free" then
+	if anchorMode == "free" or IsFreeMoveActive() then
 		ApplySavedFreePosition(card)
 	elseif anchorMode == "cursor" or not unitFrame then
 		local x, y = GetCursorPosition()
@@ -493,7 +512,11 @@ local function RenderHoverCard(unitFrame, modMask)
 		end
 	end
 
-	card.HeaderLeft:SetText("|cffffd100" .. L["UNITHOVER_HDR_PREFIX"] .. "|r")
+	if isMoveUnlocked then
+		card.HeaderLeft:SetText("|cff55ff66" .. L["UNITHOVER_PREVIEW_HEADER"] .. "|r")
+	else
+		card.HeaderLeft:SetText("|cffffd100" .. L["UNITHOVER_HDR_PREFIX"] .. "|r")
+	end
 	if modMask == 0 then
 		card.HeaderRight:SetText(Colors.MUTED .. modLabel .. Colors.RESET)
 	else
@@ -510,7 +533,40 @@ local function RenderHoverCard(unitFrame, modMask)
 	local yOffset = -29
 	local rowCount = #bindings
 
-	if rowCount == 0 then
+	if rowCount == 0 and isMoveUnlocked then
+		local previewRows = {
+			{ key = Colors.BIND_BADGE .. "LMB|r", spell = "|T135907:14:14:0:0:64:64:4:60:4:60|t |cffffffff" .. L["UNITHOVER_PREVIEW_ROW_1"] .. "|r " .. Colors.TAG_MAX .. L["TAG_MAX"] .. Colors.RESET, right = "|cff80c8ff215 Mana|r" },
+			{ key = Colors.BIND_BADGE .. "RMB|r", spell = "|T135953:14:14:0:0:64:64:4:60:4:60|t |cffffffff" .. L["UNITHOVER_PREVIEW_ROW_2"] .. "|r " .. Colors.TAG_MAX .. L["TAG_MAX"] .. Colors.RESET, right = "|cff80c8ff305 Mana|r" },
+		}
+		local maxKeyColWidth = 34
+		local spellColX = 10 + maxKeyColWidth + 8
+		for i, pRow in ipairs(previewRows) do
+			local row = EnsureCardRow(card, i)
+			row.Key:SetText(pRow.key)
+			row.Spell:SetText(pRow.spell)
+			row.Right:SetText(Database.Get("unitHoverShowMana") and pRow.right or "")
+
+			row.Key:ClearAllPoints()
+			row.Key:SetPoint("TOPLEFT", card, "TOPLEFT", 10, yOffset)
+			row.Key:Show()
+
+			row.Spell:ClearAllPoints()
+			row.Spell:SetPoint("TOPLEFT", card, "TOPLEFT", spellColX, yOffset)
+			row.Spell:Show()
+
+			row.Right:ClearAllPoints()
+			row.Right:SetPoint("TOPRIGHT", card, "TOPRIGHT", -10, yOffset)
+			row.Right:Show()
+
+			local spellW = row.Spell:GetStringWidth() or 90
+			local rightW = (row.Right:GetText() ~= "" and ((row.Right:GetStringWidth() or 0) + 16)) or 0
+			local combinedW = (maxKeyColWidth + 8) + spellW + rightW
+			if combinedW > maxRowWidth then
+				maxRowWidth = combinedW
+			end
+			yOffset = yOffset - 17
+		end
+	elseif rowCount == 0 then
 		local emptyRow = EnsureCardRow(card, 1)
 		emptyRow.Key:ClearAllPoints()
 		emptyRow.Key:SetPoint("TOPLEFT", card, "TOPLEFT", 10, yOffset)

@@ -4,17 +4,17 @@ local Constants = {}
 ns.Constants = Constants
 
 Constants.ADDON_NAME = addonName or "BetterClickCasting"
-Constants.VERSION = "0.5.0"
+Constants.VERSION = "0.6.0"
 -- Nativer gemipmappter Blizzard-Atlas aus Blizzard_ClickBindingUI.lua
 Constants.ICON_ATLAS = "clickcast-icon-mouse"
 
 Constants.Colors = {
-	RANK_MAX = "|cff99ccff",   -- Hellblau fÃƒÂ¼r aktuellen oder einzigen Rang
-	TAG_MAX = "|cff40ff40",    -- GrÃƒÂ¼n fÃƒÂ¼r [MAX] bei Zaubern mit mehreren RÃƒÂ¤ngen
-	RANK_DOWN = "|cffffb833",  -- Gold/Orange fÃƒÂ¼r Downranks (niedrigerer Rang als gelernt)
-	BIND_BADGE = "|cff55ff66", -- Leuchtendes GrÃƒÂ¼n fÃƒÂ¼r gebundene Tasten im Zauberbuch
-	HEADER_SUB = "|cffffd100", -- Warmes Gold fÃƒÂ¼r Untergruppen-Header
-	MUTED = "|cff999999",      -- Grau fÃƒÂ¼r Manakosten und ZÃƒÂ¤hler
+	RANK_MAX = "|cff99ccff",   -- Hellblau für aktuellen oder einzigen Rang
+	TAG_MAX = "|cff40ff40",    -- Grün für [MAX] bei Zaubern mit mehreren Rängen
+	RANK_DOWN = "|cffffb833",  -- Gold/Orange für Downranks (niedrigerer Rang als gelernt)
+	BIND_BADGE = "|cff55ff66", -- Leuchtendes Grün für gebundene Tasten im Zauberbuch
+	HEADER_SUB = "|cffffd100", -- Warmes Gold für Untergruppen-Header
+	MUTED = "|cff999999",      -- Grau für Manakosten und Zähler
 	RESET = "|r",
 }
 
@@ -104,7 +104,7 @@ function Constants.GetModifierSortInfo(modifiers)
 		order = 8
 	end
 
-	-- SchÃƒÂ¶n formatierter Modifier-String (z. B. "SHIFT + ALT" statt "SHIFT-ALT")
+	-- Schön formatierter Modifier-String (z. B. "SHIFT + ALT" statt "SHIFT-ALT")
 	local readable = string.gsub(modStr, "%-", " + ")
 	return order, readable
 end

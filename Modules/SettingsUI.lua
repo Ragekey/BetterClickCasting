@@ -29,9 +29,16 @@ local UNITHOVER_ANCHORS = {
 	{ value = "free",   labelKey = "UNITHOVER_ANCHOR_FREE",   shortKey = "UNITHOVER_ANCHOR_FREE_SHORT" },
 }
 
+local TRAINER_BEHAVIOR_OPTIONS = {
+	{ value = "card", labelKey = "TRAINER_BEHAVIOR_CARD", shortKey = "TRAINER_BEHAVIOR_CARD_SHORT", descKey = "TRAINER_BEHAVIOR_CARD_DESC" },
+	{ value = "auto", labelKey = "TRAINER_BEHAVIOR_AUTO", shortKey = "TRAINER_BEHAVIOR_AUTO_SHORT", descKey = "TRAINER_BEHAVIOR_AUTO_DESC" },
+	{ value = "off",  labelKey = "TRAINER_BEHAVIOR_OFF",  shortKey = "TRAINER_BEHAVIOR_OFF_SHORT",  descKey = "TRAINER_BEHAVIOR_OFF_DESC" },
+}
+
 SettingsUI.GROUP_MODES = GROUP_MODES
 SettingsUI.UNITHOVER_MODES = UNITHOVER_MODES
 SettingsUI.UNITHOVER_ANCHORS = UNITHOVER_ANCHORS
+SettingsUI.TRAINER_BEHAVIOR_OPTIONS = TRAINER_BEHAVIOR_OPTIONS
 
 local settingsWindow = nil
 local activeTabIndex = 1
@@ -60,6 +67,11 @@ function SettingsUI.GetCurrentUnitHoverAnchorShortLabel()
 	return GetShortLabelFromList(UNITHOVER_ANCHORS, current, "UNITHOVER_ANCHOR_CURSOR_SHORT")
 end
 
+function SettingsUI.GetCurrentTrainerBehaviorShortLabel()
+	local current = Database.Get("trainerUpgradeBehavior") or "card"
+	return GetShortLabelFromList(TRAINER_BEHAVIOR_OPTIONS, current, "TRAINER_BEHAVIOR_CARD_SHORT")
+end
+
 local function PopulateRadioMenu(rootDescription, titleKey, dbKey, defaultValue, list, descKey)
 	rootDescription:CreateTitle(L[titleKey])
 
@@ -73,10 +85,11 @@ local function PopulateRadioMenu(rootDescription, titleKey, dbKey, defaultValue,
 
 	for _, entry in ipairs(list) do
 		local radio = rootDescription:CreateRadio(L[entry.labelKey], IsSelected, SetSelected, entry.value)
-		if descKey and L[descKey] then
+		local itemDescKey = entry.descKey or descKey
+		if itemDescKey and L[itemDescKey] then
 			radio:SetTooltip(function(tooltip)
 				GameTooltip_SetTitle(tooltip, L[entry.labelKey])
-				GameTooltip_AddNormalLine(tooltip, L[descKey], true)
+				GameTooltip_AddNormalLine(tooltip, L[itemDescKey], true)
 			end)
 		end
 	end
@@ -92,6 +105,15 @@ function SettingsUI.OpenGroupingMenu(ownerRegion)
 	end
 	MenuUtil.CreateContextMenu(ownerRegion, function(_, rootDescription)
 		SettingsUI.PopulateGroupingMenu(rootDescription)
+	end)
+end
+
+function SettingsUI.OpenTrainerBehaviorMenu(ownerRegion)
+	if not MenuUtil or not MenuUtil.CreateContextMenu then
+		return
+	end
+	MenuUtil.CreateContextMenu(ownerRegion, function(_, rootDescription)
+		PopulateRadioMenu(rootDescription, "TRAINER_BEHAVIOR_MENU_TITLE", "trainerUpgradeBehavior", "card", TRAINER_BEHAVIOR_OPTIONS, "TRAINER_BEHAVIOR_TOOLTIP_DESC")
 	end)
 end
 
@@ -404,7 +426,7 @@ local function EnsureSettingsWindow()
 	end
 
 	local win = CreateFrame("Frame", "BetterClickCastingSettingsFrame", UIParent, "BackdropTemplate")
-	win:SetSize(430, 415)
+	win:SetSize(430, 445)
 	win:SetFrameStrata("DIALOG")
 	win:SetFrameLevel(130)
 	win:SetClampedToScreen(true)
@@ -513,7 +535,7 @@ local function EnsureSettingsWindow()
 	RegisterControl(CreatePillSelectorButton(
 		page1,
 		-30,
-		394,
+		192,
 		function()
 			return string.format(L["GROUP_BUTTON_FORMAT"], SettingsUI.GetCurrentGroupShortLabel())
 		end,
@@ -524,15 +546,33 @@ local function EnsureSettingsWindow()
 		"GROUP_TOOLTIP_DESC"
 	))
 
-	RegisterControl(CreateDBCheckbox(page1, -66, "showRankInName", "SETTING_SHOW_RANK_IN_NAME", "SETTING_SHOW_RANK_IN_NAME_DESC"))
-	RegisterControl(CreateDBCheckbox(page1, -96, "highlightDownranks", "SETTING_HIGHLIGHT_DOWNRANKS", "SETTING_HIGHLIGHT_DOWNRANKS_DESC"))
-	RegisterControl(CreateDBCheckbox(page1, -126, "showRankSwitcher", "SETTING_SHOW_RANK_SWITCHER", "SETTING_SHOW_RANK_SWITCHER_DESC"))
-	RegisterControl(CreateDBCheckbox(page1, -156, "enableSmartRankRules", "SETTING_ENABLE_SMART_RULES", "SETTING_ENABLE_SMART_RULES_DESC"))
-	RegisterControl(CreateDBCheckbox(page1, -186, "showLineTooltips", "SETTING_SHOW_LINE_TOOLTIPS", "SETTING_SHOW_LINE_TOOLTIPS_DESC"))
+	local trainerBtn = RegisterControl(CreatePillSelectorButton(
+		page1,
+		-30,
+		192,
+		function()
+			return string.format(L["TRAINER_BEHAVIOR_BUTTON_FORMAT"], SettingsUI.GetCurrentTrainerBehaviorShortLabel())
+		end,
+		function(owner)
+			SettingsUI.OpenTrainerBehaviorMenu(owner)
+		end,
+		"TRAINER_BEHAVIOR_MENU_TITLE",
+		"TRAINER_BEHAVIOR_TOOLTIP_DESC"
+	))
+	trainerBtn:ClearAllPoints()
+	trainerBtn:SetPoint("TOPLEFT", page1, "TOPLEFT", 220, -30)
+
+	RegisterControl(CreateDBCheckbox(page1, -64, "showRankInName", "SETTING_SHOW_RANK_IN_NAME", "SETTING_SHOW_RANK_IN_NAME_DESC"))
+	RegisterControl(CreateDBCheckbox(page1, -92, "highlightDownranks", "SETTING_HIGHLIGHT_DOWNRANKS", "SETTING_HIGHLIGHT_DOWNRANKS_DESC"))
+	RegisterControl(CreateDBCheckbox(page1, -120, "showRankSwitcher", "SETTING_SHOW_RANK_SWITCHER", "SETTING_SHOW_RANK_SWITCHER_DESC"))
+	RegisterControl(CreateDBCheckbox(page1, -148, "showLineManaCost", "SETTING_SHOW_LINE_MANA_COST", "SETTING_SHOW_LINE_MANA_COST_DESC"))
+	RegisterControl(CreateDBCheckbox(page1, -176, "moveInteractionsToBottom", "SETTING_MOVE_INTERACTIONS_BOTTOM", "SETTING_MOVE_INTERACTIONS_BOTTOM_DESC"))
+	RegisterControl(CreateDBCheckbox(page1, -204, "enableSmartRankRules", "SETTING_ENABLE_SMART_RULES", "SETTING_ENABLE_SMART_RULES_DESC"))
+	RegisterControl(CreateDBCheckbox(page1, -232, "showLineTooltips", "SETTING_SHOW_LINE_TOOLTIPS", "SETTING_SHOW_LINE_TOOLTIPS_DESC"))
 
 	local upgradeBtn = RegisterControl(CreateActionButton(
 		page1,
-		-232,
+		-272,
 		394,
 		function()
 			if ClickBindingFrame and ClickBindingFrame:IsShown() and ns.ClickBindingUI and ns.ClickBindingUI.CountUpgradeableBindings then
@@ -558,8 +598,8 @@ local function EnsureSettingsWindow()
 
 	RegisterControl(CreateActionButton(
 		page1,
-		-268,
-		394,
+		-308,
+		192,
 		function()
 			return L["SETTINGS_OPEN_CLICKCAST_BTN"]
 		end,
@@ -571,6 +611,23 @@ local function EnsureSettingsWindow()
 		nil
 	))
 
+	local exportBtn = RegisterControl(CreateActionButton(
+		page1,
+		-308,
+		192,
+		function()
+			return L["SETTINGS_EXPORT_BINDINGS_BTN"]
+		end,
+		function()
+			if ns.ClickBindingUI and ns.ClickBindingUI.ShowBindingsExportPopup then
+				ns.ClickBindingUI.ShowBindingsExportPopup()
+			end
+		end,
+		"SETTINGS_EXPORT_BINDINGS_DESC"
+	))
+	exportBtn:ClearAllPoints()
+	exportBtn:SetPoint("TOPLEFT", page1, "TOPLEFT", 220, -308)
+
 	----------------------------------------------------------------------------
 	-- TAB 2: Zauberbuch & Allgemein
 	----------------------------------------------------------------------------
@@ -578,15 +635,47 @@ local function EnsureSettingsWindow()
 	CreateSectionHeader(page2, L["SETTINGS_HEADER_SPELLBOOK"], -6)
 
 	RegisterControl(CreateDBCheckbox(page2, -30, "quickBindSpellbook", "SETTING_QUICK_BIND_SPELLBOOK", "SETTING_QUICK_BIND_SPELLBOOK_DESC"))
-	RegisterControl(CreateDBCheckbox(page2, -60, "showSpellbookBadges", "SETTING_SHOW_SPELLBOOK_BADGES", "SETTING_SHOW_SPELLBOOK_BADGES_DESC"))
-	RegisterControl(CreateDBCheckbox(page2, -90, "autoShowAllRanks", "SETTING_AUTO_SHOW_ALL_RANKS", "SETTING_AUTO_SHOW_ALL_RANKS_DESC"))
+	RegisterControl(CreateDBCheckbox(page2, -58, "showSpellbookBadges", "SETTING_SHOW_SPELLBOOK_BADGES", "SETTING_SHOW_SPELLBOOK_BADGES_DESC"))
+	RegisterControl(CreateDBCheckbox(page2, -86, "autoShowAllRanks", "SETTING_AUTO_SHOW_ALL_RANKS", "SETTING_AUTO_SHOW_ALL_RANKS_DESC"))
+	RegisterControl(CreateDBCheckbox(page2, -114, "autoSelectPrimarySpellTab", "SETTING_AUTO_SELECT_PRIMARY_TAB", "SETTING_AUTO_SELECT_PRIMARY_TAB_DESC"))
 
-	CreateSectionHeader(page2, L["SETTINGS_HEADER_GENERAL"], -132)
-	RegisterControl(CreateDBCheckbox(page2, -156, "showMinimapButton", "SETTING_SHOW_MINIMAP_BUTTON", "SETTING_SHOW_MINIMAP_BUTTON_DESC"))
+	CreateSectionHeader(page2, L["SETTINGS_HEADER_GENERAL"], -152)
+	RegisterControl(CreateDBCheckbox(page2, -176, "showMinimapButton", "SETTING_SHOW_MINIMAP_BUTTON", "SETTING_SHOW_MINIMAP_BUTTON_DESC"))
 
 	RegisterControl(CreateActionButton(
 		page2,
-		-200,
+		-214,
+		246,
+		function()
+			if SettingsUI.IsOverlaysUnlocked() then
+				return L["OVERLAY_UNLOCK_BTN_LOCK_ALL"]
+			end
+			return L["OVERLAY_UNLOCK_BTN_UNLOCK_ALL"]
+		end,
+		function()
+			SettingsUI.ToggleOverlaysUnlocked()
+		end,
+		"SETTING_UNITHOVER_UNLOCK_MOVE_DESC"
+	))
+
+	local resetPosBtn = RegisterControl(CreateActionButton(
+		page2,
+		-214,
+		140,
+		function()
+			return L["OVERLAY_UNLOCK_BTN_RESET_POS"]
+		end,
+		function()
+			SettingsUI.ResetAllOverlayPositions()
+		end,
+		"OVERLAY_UNLOCK_BTN_RESET_POS_DESC"
+	))
+	resetPosBtn:ClearAllPoints()
+	resetPosBtn:SetPoint("TOPLEFT", page2, "TOPLEFT", 272, -214)
+
+	RegisterControl(CreateActionButton(
+		page2,
+		-250,
 		394,
 		function()
 			return L["SETTINGS_RUN_DEBUG_BTN"]
@@ -657,15 +746,10 @@ local function EnsureSettingsWindow()
 		"SETTING_UNITHOVER_UNLOCK_MOVE",
 		"SETTING_UNITHOVER_UNLOCK_MOVE_DESC",
 		function()
-			return ns.UnitHoverTooltip and ns.UnitHoverTooltip.IsMoveUnlocked and ns.UnitHoverTooltip.IsMoveUnlocked() or false
+			return SettingsUI.IsOverlaysUnlocked()
 		end,
 		function(val)
-			if ns.UnitHoverTooltip and ns.UnitHoverTooltip.SetMoveUnlocked then
-				if val and (Database.Get("unitHoverAnchor") or "cursor") ~= "free" then
-					Database.Set("unitHoverAnchor", "free")
-				end
-				ns.UnitHoverTooltip.SetMoveUnlocked(val)
-			end
+			SettingsUI.SetOverlaysUnlocked(val)
 		end
 	))
 	win.UnlockMoveCheckbox = unlockMoveCb
@@ -674,6 +758,48 @@ local function EnsureSettingsWindow()
 	settingsWindow = win
 	SelectTab(1)
 	return win
+end
+
+function SettingsUI.IsOverlaysUnlocked()
+	local hoverUnlocked = ns.UnitHoverTooltip and ns.UnitHoverTooltip.IsMoveUnlocked and ns.UnitHoverTooltip.IsMoveUnlocked() or false
+	local heroUnlocked = ns.ClickBindingUI and ns.ClickBindingUI.IsHeroCardPreviewUnlocked and ns.ClickBindingUI.IsHeroCardPreviewUnlocked() or false
+	return hoverUnlocked or heroUnlocked
+end
+
+function SettingsUI.SetOverlaysUnlocked(unlocked, silent)
+	local target = unlocked and true or false
+	if target and InCombatLockdown and InCombatLockdown() then
+		if DEFAULT_CHAT_FRAME then
+			DEFAULT_CHAT_FRAME:AddMessage(L["CHAT_COMBAT_ERR"])
+		end
+		return
+	end
+	if ns.UnitHoverTooltip and ns.UnitHoverTooltip.SetMoveUnlocked then
+		ns.UnitHoverTooltip.SetMoveUnlocked(target)
+	end
+	if ns.ClickBindingUI and ns.ClickBindingUI.SetHeroCardPreviewUnlocked then
+		ns.ClickBindingUI.SetHeroCardPreviewUnlocked(target)
+	end
+	SettingsUI.RefreshWindow()
+	if not silent and DEFAULT_CHAT_FRAME then
+		DEFAULT_CHAT_FRAME:AddMessage(target and L["CHAT_OVERLAYS_UNLOCKED"] or L["CHAT_OVERLAYS_LOCKED"])
+	end
+end
+
+function SettingsUI.ToggleOverlaysUnlocked(silent)
+	SettingsUI.SetOverlaysUnlocked(not SettingsUI.IsOverlaysUnlocked(), silent)
+end
+
+function SettingsUI.ResetAllOverlayPositions(silent)
+	if ns.UnitHoverTooltip and ns.UnitHoverTooltip.ResetPosition then
+		ns.UnitHoverTooltip.ResetPosition()
+	end
+	if ns.ClickBindingUI and ns.ClickBindingUI.ResetHeroCardPosition then
+		ns.ClickBindingUI.ResetHeroCardPosition()
+	end
+	if not silent and DEFAULT_CHAT_FRAME then
+		DEFAULT_CHAT_FRAME:AddMessage(L["CHAT_OVERLAYS_RESET"])
+	end
 end
 
 function SettingsUI.RefreshWindow()
@@ -685,6 +811,18 @@ function SettingsUI.RefreshWindow()
 			ctrl:RefreshValue()
 		end
 	end
+end
+
+function SettingsUI.OpenSettingsTab(tabIndex)
+	local win = EnsureSettingsWindow()
+	if not win:IsShown() then
+		PositionSettingsWindow(win)
+		win:Show()
+	end
+	if tabIndex and tabIndex >= 1 and tabIndex <= 3 then
+		SelectTab(tabIndex)
+	end
+	SettingsUI.RefreshWindow()
 end
 
 function SettingsUI.OpenSettingsMenu()
@@ -767,4 +905,115 @@ function SettingsUI.AttachToClickBindingFrame()
 	end)
 
 	ClickBindingFrame.BCCSettingsButton = btn
+end
+
+local blizzardCategoryRegistered = false
+
+-- Registriert Better Click Casting unter Esc -> Optionen -> AddOns über Blizzards VerticalLayout,
+-- sodass alle Einträge auch direkt über die globale Suchleiste oben rechts im Optionen-Fenster gefunden werden.
+function SettingsUI.RegisterBlizzardOptions()
+	if blizzardCategoryRegistered then
+		return
+	end
+	if not Settings
+		or not Settings.RegisterVerticalLayoutCategory
+		or not Settings.RegisterInitializer
+		or not Settings.RegisterAddOnCategory
+		or not CreateSettingsButtonInitializer
+	then
+		return
+	end
+	blizzardCategoryRegistered = true
+
+	local category = Settings.RegisterVerticalLayoutCategory(L["ADDON_TITLE"] or "Better Click Casting")
+	SettingsUI.BlizzardCategory = category
+
+	local function CloseBlizzardSettingsIfSafe()
+		if SettingsPanel and SettingsPanel:IsShown() and HideUIPanel and not (InCombatLockdown and InCombatLockdown()) then
+			HideUIPanel(SettingsPanel)
+		end
+	end
+
+	local function AddActionRow(rowName, buttonLabel, tooltipDesc, onClickFunc, extraTags)
+		local initializer = CreateSettingsButtonInitializer(
+			rowName,
+			buttonLabel,
+			onClickFunc,
+			tooltipDesc,
+			true
+		)
+		if initializer and initializer.AddSearchTags then
+			initializer:AddSearchTags("Better Click Casting", "BetterClickCasting", "BCC", "Click Cast", "Klickbelegung")
+			if type(extraTags) == "table" then
+				for _, tag in ipairs(extraTags) do
+					initializer:AddSearchTags(tag)
+				end
+			end
+		end
+		Settings.RegisterInitializer(category, initializer)
+	end
+
+	-- 1. Tab 1: Klickbelegung & Zauberränge
+	AddActionRow(
+		L["BLIZZ_SETTINGS_ROW_CLICKCAST"],
+		L["BLIZZ_SETTINGS_OPEN_BTN"],
+		L["SETTINGS_BUTTON_TOOLTIP_DESC"],
+		function()
+			CloseBlizzardSettingsIfSafe()
+			SettingsUI.OpenSettingsTab(1)
+		end,
+		{ "Downrank", "Zauberrang", "Smart Rules", "Mana", "Manakosten", "Rank", "Rang", "Trainer" }
+	)
+
+	-- 2. Tab 2: Zauberbuch & Allgemein
+	AddActionRow(
+		L["BLIZZ_SETTINGS_ROW_SPELLBOOK"],
+		L["BLIZZ_SETTINGS_OPEN_BTN"],
+		L["SETTING_QUICK_BIND_SPELLBOOK_DESC"],
+		function()
+			CloseBlizzardSettingsIfSafe()
+			SettingsUI.OpenSettingsTab(2)
+		end,
+		{ "Spellbook", "Zauberbuch", "Quick Bind", "Direktbinden", "Minimap", "Badges" }
+	)
+
+	-- 3. Tab 3: Unit-Frame Hover-Overlay
+	AddActionRow(
+		L["BLIZZ_SETTINGS_ROW_UNITHOVER"],
+		L["BLIZZ_SETTINGS_OPEN_BTN"],
+		L["UNITHOVER_MODE_TOOLTIP_DESC"],
+		function()
+			CloseBlizzardSettingsIfSafe()
+			SettingsUI.OpenSettingsTab(3)
+		end,
+		{ "Hover", "Unit Frame", "Einheitenfenster", "Overlay", "Tooltip", "Cursor" }
+	)
+
+	-- 4. Direkt Blizzards Klickbelegungs-Fenster (/bcc) öffnen
+	AddActionRow(
+		L["BLIZZ_SETTINGS_ROW_WINDOW"],
+		L["SETTINGS_OPEN_CLICKCAST_BTN"],
+		L["MINIMAP_HINT_LEFT"],
+		function()
+			CloseBlizzardSettingsIfSafe()
+			if ns.MinimapButton and ns.MinimapButton.ToggleClickCastingWindow then
+				ns.MinimapButton.ToggleClickCastingWindow()
+			end
+		end,
+		{ "Bindings", "Belegung", "Window", "Fenster" }
+	)
+
+	-- 5. Alle Overlays entsperren / sperren (/bcc move)
+	AddActionRow(
+		L["BLIZZ_SETTINGS_ROW_MOVE"],
+		L["OVERLAY_UNLOCK_BTN_UNLOCK_ALL"],
+		L["SETTING_UNITHOVER_UNLOCK_MOVE_DESC"],
+		function()
+			CloseBlizzardSettingsIfSafe()
+			SettingsUI.ToggleOverlaysUnlocked()
+		end,
+		{ "Move", "Unlock", "Lock", "Verschieben", "Platzhalter", "Placeholder" }
+	)
+
+	Settings.RegisterAddOnCategory(category)
 end
