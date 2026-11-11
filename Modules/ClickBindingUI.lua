@@ -325,17 +325,31 @@ local function SetSaveButtonGlowShown(shown)
 	end
 	local saveBtn = ClickBindingFrame.SaveButton
 	if shown and not saveBtn.BCCGlowFrame then
+		-- Exaktes 3-Slice YellowGlow-Pattern aus Blizzard_SharedTalentFrameTemplates.xml (CommitButton.YellowGlow)
 		local glowFrame = CreateFrame("Frame", nil, saveBtn)
-		glowFrame:SetAllPoints(saveBtn)
+		glowFrame:SetSize(1, 1)
+		glowFrame:SetPoint("LEFT", saveBtn, "LEFT", -12, 0)
+		glowFrame:SetPoint("RIGHT", saveBtn, "RIGHT", 12, 0)
 		glowFrame:SetFrameLevel(saveBtn:GetFrameLevel() + 2)
 
-		local tex = glowFrame:CreateTexture(nil, "OVERLAY")
-		tex:SetAtlas("newplayertutorial-drag-slotblue")
-		tex:SetBlendMode("ADD")
-		tex:SetVertexColor(1.0, 0.82, 0.15, 0.85)
-		tex:SetPoint("TOPLEFT", -6, 6)
-		tex:SetPoint("BOTTOMRIGHT", 6, -6)
-		glowFrame.Tex = tex
+		local left = glowFrame:CreateTexture(nil, "ARTWORK")
+		left:SetAtlas("newplayertutorial-yellowGlow-redbutton-left", true)
+		left:SetBlendMode("ADD")
+		left:SetPoint("LEFT")
+		glowFrame.Left = left
+
+		local right = glowFrame:CreateTexture(nil, "ARTWORK")
+		right:SetAtlas("newplayertutorial-yellowGlow-redbutton-right", true)
+		right:SetBlendMode("ADD")
+		right:SetPoint("RIGHT")
+		glowFrame.Right = right
+
+		local middle = glowFrame:CreateTexture(nil, "ARTWORK")
+		middle:SetAtlas("newplayertutorial-yellowGlow-redbutton-middle", false)
+		middle:SetBlendMode("ADD")
+		middle:SetPoint("TOPLEFT", left, "TOPRIGHT")
+		middle:SetPoint("BOTTOMRIGHT", right, "BOTTOMLEFT")
+		glowFrame.Middle = middle
 
 		local hint = glowFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
 		hint:SetPoint("BOTTOMRIGHT", saveBtn, "TOPRIGHT", 0, 5)
@@ -345,6 +359,9 @@ local function SetSaveButtonGlowShown(shown)
 		saveBtn.BCCGlowFrame = glowFrame
 	end
 	if saveBtn.BCCGlowFrame then
+		if saveBtn.BCCGlowFrame.Hint then
+			saveBtn.BCCGlowFrame.Hint:SetText(Colors.HEADER_SUB .. L["SAVE_BUTTON_GLOW_HINT"] .. Colors.RESET)
+		end
 		saveBtn.BCCGlowFrame:SetShown(shown and true or false)
 	end
 end
