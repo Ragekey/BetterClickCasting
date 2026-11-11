@@ -325,16 +325,27 @@ local function SetSaveButtonGlowShown(shown)
 	end
 	local saveBtn = ClickBindingFrame.SaveButton
 	if shown and not saveBtn.BCCGlowFrame then
-		local glowFrame = CreateFrame("Frame", nil, saveBtn)
-		glowFrame:SetAllPoints(saveBtn)
+		local glowFrame = CreateFrame("Frame", nil, saveBtn, "BackdropTemplate")
+		glowFrame:SetPoint("TOPLEFT", saveBtn, "TOPLEFT", -6, 6)
+		glowFrame:SetPoint("BOTTOMRIGHT", saveBtn, "BOTTOMRIGHT", 6, -6)
 		glowFrame:SetFrameLevel(saveBtn:GetFrameLevel() + 2)
 
+		if glowFrame.SetBackdrop then
+			glowFrame:SetBackdrop({
+				edgeFile = "Interface\\TutorialFrame\\UI-TutorialFrame-CalloutGlow",
+				edgeSize = 14,
+				tileEdge = true,
+			})
+			glowFrame:SetBackdropBorderColor(1.0, 0.85, 0.20, 0.95)
+		end
+
+		-- Vollflächiger goldener Highlight-Schein über die gesamte Breite des UIPanelButtons
 		local tex = glowFrame:CreateTexture(nil, "OVERLAY")
-		tex:SetAtlas("newplayertutorial-drag-slotblue")
+		tex:SetTexture("Interface\\Buttons\\UI-Panel-Button-Highlight")
+		tex:SetTexCoord(0, 0.625, 0, 0.6875)
 		tex:SetBlendMode("ADD")
-		tex:SetVertexColor(1.0, 0.82, 0.15, 0.85)
-		tex:SetPoint("TOPLEFT", -6, 6)
-		tex:SetPoint("BOTTOMRIGHT", 6, -6)
+		tex:SetVertexColor(1.0, 0.82, 0.15, 0.65)
+		tex:SetAllPoints(saveBtn)
 		glowFrame.Tex = tex
 
 		local hint = glowFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
@@ -345,6 +356,9 @@ local function SetSaveButtonGlowShown(shown)
 		saveBtn.BCCGlowFrame = glowFrame
 	end
 	if saveBtn.BCCGlowFrame then
+		if saveBtn.BCCGlowFrame.Hint then
+			saveBtn.BCCGlowFrame.Hint:SetText(Colors.HEADER_SUB .. L["SAVE_BUTTON_GLOW_HINT"] .. Colors.RESET)
+		end
 		saveBtn.BCCGlowFrame:SetShown(shown and true or false)
 	end
 end

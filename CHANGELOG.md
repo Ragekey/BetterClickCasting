@@ -3,6 +3,7 @@
 ## [0.7.2] (2026-11-11)
 ### Fixed
 - **Hover Overlay vs. Character Panel Stat Rows (`PaperDollFrame`):** Fixed the Unit Frame Hover Overlay appearing when hovering over Movement Speed or Weapon Damage stat rows in the Character / Pet / Inspect panel (where Blizzard sets `statFrame.unit = "player"` on the text row). `FindHoveredUnitFrame` now strictly verifies that a hovered frame is an actual clickable Unit Button (`SecureButton_GetUnit`, `ClickCastFrames`, or HUD UnitFrame) and ignores Character, Inspect, and Spellbook panels.
+- **Full-Width Save Button Glow:** Replaced the square tutorial slot atlas on `ClickBindingFrame.SaveButton` with Blizzard's `UI-TutorialFrame-CalloutGlow` border and `UI-Panel-Button-Highlight` overlay so the golden highlight spans the full width of the Save button at any resolution.
 
 ## [0.7.1] (2026-11-11)
 ### Fixed
