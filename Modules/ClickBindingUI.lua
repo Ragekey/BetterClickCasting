@@ -325,28 +325,31 @@ local function SetSaveButtonGlowShown(shown)
 	end
 	local saveBtn = ClickBindingFrame.SaveButton
 	if shown and not saveBtn.BCCGlowFrame then
-		local glowFrame = CreateFrame("Frame", nil, saveBtn, "BackdropTemplate")
-		glowFrame:SetPoint("TOPLEFT", saveBtn, "TOPLEFT", -6, 6)
-		glowFrame:SetPoint("BOTTOMRIGHT", saveBtn, "BOTTOMRIGHT", 6, -6)
+		-- Exaktes 3-Slice YellowGlow-Pattern aus Blizzard_SharedTalentFrameTemplates.xml (CommitButton.YellowGlow)
+		local glowFrame = CreateFrame("Frame", nil, saveBtn)
+		glowFrame:SetSize(1, 1)
+		glowFrame:SetPoint("LEFT", saveBtn, "LEFT", -12, 0)
+		glowFrame:SetPoint("RIGHT", saveBtn, "RIGHT", 12, 0)
 		glowFrame:SetFrameLevel(saveBtn:GetFrameLevel() + 2)
 
-		if glowFrame.SetBackdrop then
-			glowFrame:SetBackdrop({
-				edgeFile = "Interface\\TutorialFrame\\UI-TutorialFrame-CalloutGlow",
-				edgeSize = 14,
-				tileEdge = true,
-			})
-			glowFrame:SetBackdropBorderColor(1.0, 0.85, 0.20, 0.95)
-		end
+		local left = glowFrame:CreateTexture(nil, "ARTWORK")
+		left:SetAtlas("newplayertutorial-yellowGlow-redbutton-left", true)
+		left:SetBlendMode("ADD")
+		left:SetPoint("LEFT")
+		glowFrame.Left = left
 
-		-- Vollflächiger goldener Highlight-Schein über die gesamte Breite des UIPanelButtons
-		local tex = glowFrame:CreateTexture(nil, "OVERLAY")
-		tex:SetTexture("Interface\\Buttons\\UI-Panel-Button-Highlight")
-		tex:SetTexCoord(0, 0.625, 0, 0.6875)
-		tex:SetBlendMode("ADD")
-		tex:SetVertexColor(1.0, 0.82, 0.15, 0.65)
-		tex:SetAllPoints(saveBtn)
-		glowFrame.Tex = tex
+		local right = glowFrame:CreateTexture(nil, "ARTWORK")
+		right:SetAtlas("newplayertutorial-yellowGlow-redbutton-right", true)
+		right:SetBlendMode("ADD")
+		right:SetPoint("RIGHT")
+		glowFrame.Right = right
+
+		local middle = glowFrame:CreateTexture(nil, "ARTWORK")
+		middle:SetAtlas("newplayertutorial-yellowGlow-redbutton-middle", false)
+		middle:SetBlendMode("ADD")
+		middle:SetPoint("TOPLEFT", left, "TOPRIGHT")
+		middle:SetPoint("BOTTOMRIGHT", right, "BOTTOMLEFT")
+		glowFrame.Middle = middle
 
 		local hint = glowFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
 		hint:SetPoint("BOTTOMRIGHT", saveBtn, "TOPRIGHT", 0, 5)
