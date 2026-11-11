@@ -102,14 +102,16 @@ local function IsLikelyUnitFrameByName(frame)
 		or string.find(name, "^TargetFrame")
 		or string.find(name, "^FocusFrame")
 		or string.find(name, "^PartyMemberFrame")
-		or string.find(name, "^PetFrame") then
+		or string.find(name, "^PetFrame")
+		or string.find(name, "^Boss%d+TargetFrame") then
 		return true
 	end
 	return false
 end
 
--- Schließt Nicht-UnitFrame-Fenster aus, deren Unter-Elemente (wie Bewegungstempo oder Waffenschaden
--- in PaperDollFrame.lua) intern ein .unit = "player"-Feld für ihre eigenen Tooltips speichern.
+-- Schließt Nicht-UnitFrame-Fenster und HUD-Leisten aus, deren Unter-Elemente (wie Bewegungstempo
+-- in PaperDollFrame.lua oder AuraButtonTemplate in BuffFrame.lua) intern ein .unit = "player"-Feld
+-- für ihre eigenen Tooltips oder Rechtsklick-Aktionen speichern.
 local function IsNonUnitPanelFrame(frame)
 	if not frame then
 		return false
@@ -119,7 +121,12 @@ local function IsNonUnitPanelFrame(frame)
 		or frame == _G.PetPaperDollFrame
 		or frame == _G.InspectFrame
 		or frame == _G.PlayerSpellsFrame
-		or frame == _G.SpellBookFrame then
+		or frame == _G.SpellBookFrame
+		or frame == _G.BuffFrame
+		or frame == _G.DebuffFrame
+		or frame == _G.ExternalDefensivesFrame
+		or frame == _G.DeadlyDebuffFrame
+		or frame == _G.TotemFrame then
 		return true
 	end
 	return false
@@ -154,10 +161,6 @@ local function IsGenuineUnitFrame(frame, hasSecureUnit)
 		return true
 	end
 	if _G.ClickCastFrames and _G.ClickCastFrames[frame] then
-		return true
-	end
-	local okBtn, isBtn = pcall(frame.IsObjectType, frame, "Button")
-	if okBtn and isBtn then
 		return true
 	end
 	return false
