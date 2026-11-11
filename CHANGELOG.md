@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.7.3] (2026-11-11)
+### Fixed
+- **Hover Overlay vs. Player Buff & Debuff Icons (`BuffFrame` / `DebuffFrame`):** Fixed the Unit Frame Hover Overlay appearing when hovering over the player's own Buff, Debuff, or Totem icons (where Blizzard attaches `self.unit = PlayerFrame.unit` to each `AuraButtonTemplate` button). `IsGenuineUnitFrame` now requires a genuine `SecureUnitButton` (`SecureButton_GetUnit`, `ClickCastFrames`, or named HUD UnitFrame) and explicitly excludes `BuffFrame`, `DebuffFrame`, `ExternalDefensivesFrame`, `DeadlyDebuffFrame`, and `TotemFrame`.
+
 ## [0.7.2] (2026-11-11)
 ### Fixed
 - **Hover Overlay vs. Character Panel Stat Rows (`PaperDollFrame`):** Fixed the Unit Frame Hover Overlay appearing when hovering over Movement Speed or Weapon Damage stat rows in the Character / Pet / Inspect panel (where Blizzard sets `statFrame.unit = "player"` on the text row). `FindHoveredUnitFrame` now strictly verifies that a hovered frame is an actual clickable Unit Button (`SecureButton_GetUnit`, `ClickCastFrames`, or HUD UnitFrame) and ignores Character, Inspect, and Spellbook panels.

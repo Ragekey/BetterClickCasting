@@ -5,7 +5,7 @@
 ## Notes-esES: Mejora el lanzamiento con clic nativo de Blizzard con rangos de hechizos, selector de rango, agrupación, panel flotante, perfiles y botón en el minimapa.
 ## Notes-esMX: Mejora el lanzamiento con clic nativo de Blizzard con rangos de hechizos, selector de rango, agrupación, panel flotante, perfiles y botón en el minimapa.
 ## Author: Ragekey
-## Version: 0.7.2
+## Version: 0.7.3
 ## SavedVariables: BetterClickCastingDB, BetterClickCastingsDB
 ## IconAtlas: clickcast-icon-mouse
 ## AddonCompartmentFunc: BetterClickCasting_OnAddonCompartmentClick
