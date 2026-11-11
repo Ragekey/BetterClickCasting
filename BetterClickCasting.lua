@@ -65,6 +65,9 @@ loaderFrame:SetScript("OnEvent", function(self, event, arg1)
 		end
 	elseif event == "PLAYER_ENTERING_WORLD" then
 		SpellRanks.InvalidateCache()
+		if C_Timer and C_Timer.After and Database and Database.SaveCharacterSnapshot then
+			C_Timer.After(1.0, Database.SaveCharacterSnapshot)
+		end
 		if ClickBindingUI and ClickBindingUI.ScheduleSmartRuleCheck then
 			ClickBindingUI.ScheduleSmartRuleCheck(1.2, false)
 		end
@@ -137,6 +140,7 @@ local GROUP_CYCLE = { "modifier", "button", "type", "none" }
 local HOVER_MODE_CYCLE = { "off", "modifier", "always" }
 local HOVER_ANCHOR_CYCLE = { "cursor", "top", "bottom", "left", "right", "free" }
 local TRAINER_BEHAVIOR_CYCLE = { "card", "auto", "off" }
+local LOCALE_CYCLE = { "auto", "enUS", "deDE", "esES" }
 
 local function CycleOrSetOption(dbKey, currentVal, cycleList, aliasMap, arg)
 	if arg and arg ~= "" and aliasMap[arg] then
@@ -271,10 +275,64 @@ SlashCmdList["BETTERCLICKCASTING"] = function(msg)
 		end
 	elseif cmd == "autotab" or cmd == "tab" then
 		ToggleBoolCommand("autoSelectPrimarySpellTab", "SETTING_AUTO_SELECT_PRIMARY_TAB")
-	elseif cmd == "list" or cmd == "export" or cmd == "summary" then
+	elseif cmd == "list" or cmd == "summary" then
 		if ClickBindingUI and ClickBindingUI.ShowBindingsExportPopup then
 			ClickBindingUI.ShowBindingsExportPopup()
 		end
+	elseif cmd == "export" then
+		local scope = "all"
+		if arg == "bindings" or arg == "binds" or arg == "keys" or arg == "keybinds" then
+			scope = "bindings"
+		elseif arg == "settings" or arg == "cfg" or arg == "config" then
+			scope = "settings"
+		end
+		if ClickBindingUI and ClickBindingUI.ShowExportStringPopup then
+			ClickBindingUI.ShowExportStringPopup(scope)
+		end
+	elseif cmd == "import" then
+		local scope = "all"
+		if arg == "bindings" or arg == "binds" or arg == "keys" or arg == "keybinds" then
+			scope = "bindings"
+		elseif arg == "settings" or arg == "cfg" or arg == "config" then
+			scope = "settings"
+		end
+		if ClickBindingUI and ClickBindingUI.ShowImportStringPopup then
+			ClickBindingUI.ShowImportStringPopup(scope)
+		end
+	elseif cmd == "copy" then
+		local firstWord, restWords = string.match(arg, "^(%S+)%s*(.-)$")
+		local scope = "all"
+		local charQuery = arg
+		if firstWord == "all" or firstWord == "bindings" or firstWord == "binds" or firstWord == "keys" or firstWord == "settings" then
+			if firstWord == "bindings" or firstWord == "binds" or firstWord == "keys" then
+				scope = "bindings"
+			elseif firstWord == "settings" then
+				scope = "settings"
+			end
+			charQuery = restWords or ""
+		end
+		if not charQuery or charQuery == "" then
+			if ns.SettingsUI and ns.SettingsUI.OpenSettingsTab then
+				ns.SettingsUI.OpenSettingsTab(4)
+			end
+		else
+			local prof = Database.FindCharProfile(charQuery)
+			if prof and ClickBindingUI and ClickBindingUI.CopyFromCharacterProfile then
+				ClickBindingUI.CopyFromCharacterProfile(prof, scope)
+			elseif DEFAULT_CHAT_FRAME then
+				DEFAULT_CHAT_FRAME:AddMessage(string.format(L["CHAT_PROFILE_NOT_FOUND_FORMAT"], charQuery))
+			end
+		end
+	elseif cmd == "profile" or cmd == "profiles" then
+		if ns.SettingsUI and ns.SettingsUI.OpenSettingsTab then
+			ns.SettingsUI.OpenSettingsTab(4)
+		end
+	elseif cmd == "charsettings" or cmd == "charspecific" then
+		local newVal = not Database.IsUsingCharSettings()
+		Database.SetUsingCharSettings(newVal)
+		PrintSettingState("SETTING_USE_CHAR_SETTINGS", newVal)
+	elseif cmd == "merge" then
+		ToggleBoolCommand("importMergeBindings", "SETTING_IMPORT_MERGE_BINDINGS")
 	elseif cmd == "rules" or cmd == "smartrules" then
 		ToggleBoolCommand("enableSmartRankRules", "SETTING_ENABLE_SMART_RULES")
 	elseif cmd == "ranks" then
@@ -291,8 +349,22 @@ SlashCmdList["BETTERCLICKCASTING"] = function(msg)
 		ToggleBoolCommand("autoShowAllRanks", "SETTING_AUTO_SHOW_ALL_RANKS")
 	elseif cmd == "minimap" or cmd == "mm" then
 		ToggleBoolCommand("showMinimapButton", "SETTING_SHOW_MINIMAP_BUTTON")
+	elseif cmd == "lang" or cmd == "locale" or cmd == "language" then
+		local aliases = {
+			auto = "auto", client = "auto", default = "auto",
+			en = "enUS", enus = "enUS", engb = "enUS", english = "enUS",
+			de = "deDE", dede = "deDE", deutsch = "deDE", german = "deDE",
+			es = "esES", eses = "esES", esmx = "esES", espanol = "esES", spanish = "esES",
+		}
+		CycleOrSetOption("addonLocale", Database.Get("addonLocale") or "auto", LOCALE_CYCLE, aliases, arg)
+		if DEFAULT_CHAT_FRAME and ns.SettingsUI and ns.SettingsUI.GetCurrentLocaleShortLabel then
+			DEFAULT_CHAT_FRAME:AddMessage(string.format(L["CHAT_LOCALE_CHANGED_FORMAT"], ns.SettingsUI.GetCurrentLocaleShortLabel()))
+		end
 	elseif cmd == "status" then
 		if DEFAULT_CHAT_FRAME and ns.SettingsUI then
+			if ns.SettingsUI.GetCurrentLocaleShortLabel then
+				PrintSettingValue("LOCALE_MENU_TITLE", ns.SettingsUI.GetCurrentLocaleShortLabel())
+			end
 			PrintSettingValue("GROUP_MENU_TITLE", ns.SettingsUI.GetCurrentGroupShortLabel())
 			if ns.SettingsUI.GetCurrentTrainerBehaviorShortLabel then
 				PrintSettingValue("TRAINER_BEHAVIOR_MENU_TITLE", ns.SettingsUI.GetCurrentTrainerBehaviorShortLabel())
@@ -323,6 +395,7 @@ SlashCmdList["BETTERCLICKCASTING"] = function(msg)
 			DEFAULT_CHAT_FRAME:AddMessage(L["CHAT_HELP_LINE_5"])
 			DEFAULT_CHAT_FRAME:AddMessage(L["CHAT_HELP_LINE_6"])
 			DEFAULT_CHAT_FRAME:AddMessage(L["CHAT_HELP_LINE_7"])
+			DEFAULT_CHAT_FRAME:AddMessage(L["SLASH_HELP_LANG"])
 		end
 	else
 		if DEFAULT_CHAT_FRAME then

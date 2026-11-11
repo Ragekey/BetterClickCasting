@@ -35,13 +35,68 @@ local TRAINER_BEHAVIOR_OPTIONS = {
 	{ value = "off",  labelKey = "TRAINER_BEHAVIOR_OFF",  shortKey = "TRAINER_BEHAVIOR_OFF_SHORT",  descKey = "TRAINER_BEHAVIOR_OFF_DESC" },
 }
 
+local SHARE_SCOPE_OPTIONS = {
+	{ value = "all",      labelKey = "SHARE_SCOPE_ALL",      shortKey = "SHARE_SCOPE_ALL_SHORT" },
+	{ value = "bindings", labelKey = "SHARE_SCOPE_BINDINGS", shortKey = "SHARE_SCOPE_BINDINGS_SHORT" },
+	{ value = "settings", labelKey = "SHARE_SCOPE_SETTINGS", shortKey = "SHARE_SCOPE_SETTINGS_SHORT" },
+}
+
+local LOCALE_OPTIONS = {
+	{ value = "auto", labelKey = "LOCALE_OPT_AUTO", shortKey = "LOCALE_OPT_AUTO_SHORT" },
+	{ value = "enUS", labelKey = "LOCALE_OPT_ENUS", shortKey = "LOCALE_OPT_ENUS_SHORT" },
+	{ value = "deDE", labelKey = "LOCALE_OPT_DEDE", shortKey = "LOCALE_OPT_DEDE_SHORT" },
+	{ value = "esES", labelKey = "LOCALE_OPT_ESES", shortKey = "LOCALE_OPT_ESES_SHORT" },
+}
+
 SettingsUI.GROUP_MODES = GROUP_MODES
 SettingsUI.UNITHOVER_MODES = UNITHOVER_MODES
 SettingsUI.UNITHOVER_ANCHORS = UNITHOVER_ANCHORS
 SettingsUI.TRAINER_BEHAVIOR_OPTIONS = TRAINER_BEHAVIOR_OPTIONS
+SettingsUI.SHARE_SCOPE_OPTIONS = SHARE_SCOPE_OPTIONS
+SettingsUI.LOCALE_OPTIONS = LOCALE_OPTIONS
 
 local settingsWindow = nil
 local activeTabIndex = 1
+local selectedSourceCharKey = nil
+local selectedShareScope = "all"
+
+local function FormatCharProfileLabel(prof, currentKey)
+	if not prof then
+		return L["PROFILE_NO_CHAR_SAVED"] or "None"
+	end
+	local nameText = prof.name or prof.key or "?"
+	if prof.classFile and C_ClassColor and C_ClassColor.GetClassColor then
+		local color = C_ClassColor.GetClassColor(prof.classFile)
+		if color and color.WrapTextInColorCode then
+			nameText = color:WrapTextInColorCode(nameText)
+		end
+	end
+	local bindCount = (type(prof.bindings) == "table") and #prof.bindings or 0
+	local activeTag = (prof.key == currentKey) and (" " .. (L["PROFILE_CURRENT_TAG"] or "(Active)")) or ""
+	return string.format("%s (%d)%s", nameText, bindCount, activeTag)
+end
+
+local function GetSelectedCharProfile()
+	local list, currentKey = Database.GetSavedCharProfiles()
+	if selectedSourceCharKey then
+		for _, prof in ipairs(list) do
+			if prof.key == selectedSourceCharKey then
+				return prof, currentKey
+			end
+		end
+	end
+	for _, prof in ipairs(list) do
+		if prof.key ~= currentKey then
+			selectedSourceCharKey = prof.key
+			return prof, currentKey
+		end
+	end
+	if list[1] then
+		selectedSourceCharKey = list[1].key
+		return list[1], currentKey
+	end
+	return nil, currentKey
+end
 
 local function GetShortLabelFromList(list, currentVal, fallbackKey)
 	for _, entry in ipairs(list) do
@@ -70,6 +125,75 @@ end
 function SettingsUI.GetCurrentTrainerBehaviorShortLabel()
 	local current = Database.Get("trainerUpgradeBehavior") or "card"
 	return GetShortLabelFromList(TRAINER_BEHAVIOR_OPTIONS, current, "TRAINER_BEHAVIOR_CARD_SHORT")
+end
+
+function SettingsUI.GetCurrentShareScopeShortLabel()
+	return GetShortLabelFromList(SHARE_SCOPE_OPTIONS, selectedShareScope or "all", "SHARE_SCOPE_ALL_SHORT")
+end
+
+function SettingsUI.GetCurrentLocaleShortLabel()
+	local current = Database.Get("addonLocale") or "auto"
+	return GetShortLabelFromList(LOCALE_OPTIONS, current, "LOCALE_OPT_AUTO_SHORT")
+end
+
+function SettingsUI.OpenSourceCharMenu(ownerRegion)
+	if not MenuUtil or not MenuUtil.CreateContextMenu then
+		return
+	end
+	if Database and Database.SaveCharacterSnapshot then
+		Database.SaveCharacterSnapshot()
+	end
+	MenuUtil.CreateContextMenu(ownerRegion, function(_, rootDescription)
+		rootDescription:CreateTitle(L["PROFILE_SOURCE_MENU_TITLE"])
+		local list, currentKey = Database.GetSavedCharProfiles()
+		if #list == 0 then
+			rootDescription:CreateTitle(L["PROFILE_NO_CHAR_SAVED"])
+			return
+		end
+
+		local function IsSelected(key)
+			local prof = GetSelectedCharProfile()
+			return prof and prof.key == key
+		end
+
+		local function SetSelected(key)
+			selectedSourceCharKey = key
+			SettingsUI.RefreshWindow()
+		end
+
+		for _, prof in ipairs(list) do
+			local label = FormatCharProfileLabel(prof, currentKey)
+			local radio = rootDescription:CreateRadio(label, IsSelected, SetSelected, prof.key)
+			if prof.key ~= currentKey then
+				radio:CreateButton(L["PROFILE_DELETE_SNAPSHOT"], function()
+					Database.DeleteCharProfile(prof.key)
+					if selectedSourceCharKey == prof.key then
+						selectedSourceCharKey = nil
+					end
+					SettingsUI.RefreshWindow()
+				end)
+			end
+		end
+	end)
+end
+
+function SettingsUI.OpenShareScopeMenu(ownerRegion)
+	if not MenuUtil or not MenuUtil.CreateContextMenu then
+		return
+	end
+	MenuUtil.CreateContextMenu(ownerRegion, function(_, rootDescription)
+		rootDescription:CreateTitle(L["SHARE_SCOPE_MENU_TITLE"])
+		local function IsSelected(val)
+			return (selectedShareScope or "all") == val
+		end
+		local function SetSelected(val)
+			selectedShareScope = val
+			SettingsUI.RefreshWindow()
+		end
+		for _, entry in ipairs(SHARE_SCOPE_OPTIONS) do
+			rootDescription:CreateRadio(L[entry.labelKey], IsSelected, SetSelected, entry.value)
+		end
+	end)
 end
 
 local function PopulateRadioMenu(rootDescription, titleKey, dbKey, defaultValue, list, descKey)
@@ -117,20 +241,33 @@ function SettingsUI.OpenTrainerBehaviorMenu(ownerRegion)
 	end)
 end
 
+function SettingsUI.OpenLocaleMenu(ownerRegion)
+	if not MenuUtil or not MenuUtil.CreateContextMenu then
+		return
+	end
+	MenuUtil.CreateContextMenu(ownerRegion, function(_, rootDescription)
+		PopulateRadioMenu(rootDescription, "LOCALE_MENU_TITLE", "addonLocale", "auto", LOCALE_OPTIONS, "LOCALE_TOOLTIP_DESC")
+	end)
+end
+
 --------------------------------------------------------------------------------
 -- UI-Bausteine für das eigene Einstellungs-Fenster (BCCSettingsWindow)
 --------------------------------------------------------------------------------
 
-local function CreateSectionHeader(parent, text, yOffset)
+local function CreateSectionHeader(parent, labelKey, yOffset)
 	local label = parent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
 	label:SetPoint("TOPLEFT", parent, "TOPLEFT", 18, yOffset)
-	label:SetText("|cffffd100" .. text .. "|r")
+	label:SetText("|cffffd100" .. (L[labelKey] or labelKey) .. "|r")
 
 	local line = parent:CreateTexture(nil, "ARTWORK")
 	line:SetHeight(1)
 	line:SetPoint("TOPLEFT", parent, "TOPLEFT", 18, yOffset - 16)
 	line:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -18, yOffset - 16)
 	line:SetColorTexture(0.65, 0.55, 0.30, 0.30)
+
+	label.RefreshValue = function(self)
+		self:SetText("|cffffd100" .. (L[labelKey] or labelKey) .. "|r")
+	end
 
 	return label, line
 end
@@ -170,6 +307,7 @@ local function CreateCheckboxControl(parent, yOffset, labelKey, descKey, getterF
 		local checked = getterFunc() and true or false
 		self:SetChecked(checked)
 		if self.Label then
+			self.Label:SetText(L[labelKey])
 			if checked then
 				self.Label:SetTextColor(1.0, 0.96, 0.85)
 			else
@@ -310,7 +448,7 @@ end
 
 local function CreateSliderControl(parent, yOffset, dbKey, minVal, maxVal, stepVal, formatKey)
 	local container = CreateFrame("Frame", nil, parent)
-	container:SetSize(390, 42)
+	container:SetSize(460, 42)
 	container:SetPoint("TOPLEFT", parent, "TOPLEFT", 18, yOffset)
 
 	local title = container:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
@@ -328,7 +466,7 @@ local function CreateSliderControl(parent, yOffset, dbKey, minVal, maxVal, stepV
 
 	local slider = CreateFrame("Slider", nil, container, "BackdropTemplate")
 	slider:SetOrientation("HORIZONTAL")
-	slider:SetSize(386, 12)
+	slider:SetSize(456, 12)
 	slider:SetPoint("TOPLEFT", container, "TOPLEFT", 2, -16)
 	slider:SetMinMaxValues(minVal, maxVal)
 	slider:SetValueStep(stepVal)
@@ -426,7 +564,7 @@ local function EnsureSettingsWindow()
 	end
 
 	local win = CreateFrame("Frame", "BetterClickCastingSettingsFrame", UIParent, "BackdropTemplate")
-	win:SetSize(430, 445)
+	win:SetSize(496, 445)
 	win:SetFrameStrata("DIALOG")
 	win:SetFrameLevel(130)
 	win:SetClampedToScreen(true)
@@ -465,26 +603,29 @@ local function EnsureSettingsWindow()
 	local title = win:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
 	title:SetPoint("LEFT", icon, "RIGHT", 8, 0)
 	title:SetText(string.format("%s  |cff888888v%s|r", L["SETTINGS_MENU_TITLE"], Constants.VERSION))
+	win.TitleText = title
 
 	local closeBtn = CreateFrame("Button", nil, win, "UIPanelCloseButton")
 	closeBtn:SetPoint("TOPRIGHT", win, "TOPRIGHT", -4, -4)
 
-	-- 3 Reiter-Buttons oben
-	local tabLabels = {
-		L["SETTINGS_TAB_CLICKCAST"],
-		L["SETTINGS_TAB_SPELLBOOK"],
-		L["SETTINGS_TAB_UNITHOVER"],
+	-- 4 Reiter-Buttons oben
+	local tabLabelKeys = {
+		"SETTINGS_TAB_CLICKCAST",
+		"SETTINGS_TAB_SPELLBOOK",
+		"SETTINGS_TAB_UNITHOVER",
+		"SETTINGS_TAB_PROFILES",
 	}
 	win.TabButtons = {}
 	win.Pages = {}
 	win.Controls = {}
 
-	local tabWidth = 128
-	for i, tabTitle in ipairs(tabLabels) do
+	local tabWidth = 110
+	for i, tabKey in ipairs(tabLabelKeys) do
 		local tabBtn = CreateFrame("Button", nil, win)
 		tabBtn:SetSize(tabWidth, 26)
-		tabBtn:SetPoint("TOPLEFT", win, "TOPLEFT", 16 + ((i - 1) * (tabWidth + 7)), -44)
+		tabBtn:SetPoint("TOPLEFT", win, "TOPLEFT", 16 + ((i - 1) * (tabWidth + 8)), -44)
 		tabBtn:RegisterForClicks("LeftButtonUp")
+		tabBtn.labelKey = tabKey
 
 		local bg = tabBtn:CreateTexture(nil, "BACKGROUND")
 		bg:SetAllPoints()
@@ -504,7 +645,7 @@ local function EnsureSettingsWindow()
 
 		local text = tabBtn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
 		text:SetPoint("CENTER", tabBtn, "CENTER", 0, 0)
-		text:SetText(tabTitle)
+		text:SetText(L[tabKey])
 		tabBtn.Text = text
 
 		tabBtn:SetScript("OnClick", function()
@@ -530,12 +671,12 @@ local function EnsureSettingsWindow()
 	-- TAB 1: Klickbelegung & Ränge
 	----------------------------------------------------------------------------
 	local page1 = win.Pages[1]
-	CreateSectionHeader(page1, L["SETTINGS_HEADER_CLICKCAST"], -6)
+	RegisterControl(CreateSectionHeader(page1, "SETTINGS_HEADER_CLICKCAST", -6))
 
 	RegisterControl(CreatePillSelectorButton(
 		page1,
 		-30,
-		192,
+		224,
 		function()
 			return string.format(L["GROUP_BUTTON_FORMAT"], SettingsUI.GetCurrentGroupShortLabel())
 		end,
@@ -549,7 +690,7 @@ local function EnsureSettingsWindow()
 	local trainerBtn = RegisterControl(CreatePillSelectorButton(
 		page1,
 		-30,
-		192,
+		224,
 		function()
 			return string.format(L["TRAINER_BEHAVIOR_BUTTON_FORMAT"], SettingsUI.GetCurrentTrainerBehaviorShortLabel())
 		end,
@@ -560,7 +701,7 @@ local function EnsureSettingsWindow()
 		"TRAINER_BEHAVIOR_TOOLTIP_DESC"
 	))
 	trainerBtn:ClearAllPoints()
-	trainerBtn:SetPoint("TOPLEFT", page1, "TOPLEFT", 220, -30)
+	trainerBtn:SetPoint("TOPLEFT", page1, "TOPLEFT", 254, -30)
 
 	RegisterControl(CreateDBCheckbox(page1, -64, "showRankInName", "SETTING_SHOW_RANK_IN_NAME", "SETTING_SHOW_RANK_IN_NAME_DESC"))
 	RegisterControl(CreateDBCheckbox(page1, -92, "highlightDownranks", "SETTING_HIGHLIGHT_DOWNRANKS", "SETTING_HIGHLIGHT_DOWNRANKS_DESC"))
@@ -573,7 +714,7 @@ local function EnsureSettingsWindow()
 	local upgradeBtn = RegisterControl(CreateActionButton(
 		page1,
 		-272,
-		394,
+		460,
 		function()
 			if ClickBindingFrame and ClickBindingFrame:IsShown() and ns.ClickBindingUI and ns.ClickBindingUI.CountUpgradeableBindings then
 				local count = ns.ClickBindingUI.CountUpgradeableBindings()
@@ -599,7 +740,7 @@ local function EnsureSettingsWindow()
 	RegisterControl(CreateActionButton(
 		page1,
 		-308,
-		192,
+		224,
 		function()
 			return L["SETTINGS_OPEN_CLICKCAST_BTN"]
 		end,
@@ -614,7 +755,7 @@ local function EnsureSettingsWindow()
 	local exportBtn = RegisterControl(CreateActionButton(
 		page1,
 		-308,
-		192,
+		224,
 		function()
 			return L["SETTINGS_EXPORT_BINDINGS_BTN"]
 		end,
@@ -626,26 +767,40 @@ local function EnsureSettingsWindow()
 		"SETTINGS_EXPORT_BINDINGS_DESC"
 	))
 	exportBtn:ClearAllPoints()
-	exportBtn:SetPoint("TOPLEFT", page1, "TOPLEFT", 220, -308)
+	exportBtn:SetPoint("TOPLEFT", page1, "TOPLEFT", 254, -308)
 
 	----------------------------------------------------------------------------
 	-- TAB 2: Zauberbuch & Allgemein
 	----------------------------------------------------------------------------
 	local page2 = win.Pages[2]
-	CreateSectionHeader(page2, L["SETTINGS_HEADER_SPELLBOOK"], -6)
+	RegisterControl(CreateSectionHeader(page2, "SETTINGS_HEADER_SPELLBOOK", -6))
 
 	RegisterControl(CreateDBCheckbox(page2, -30, "quickBindSpellbook", "SETTING_QUICK_BIND_SPELLBOOK", "SETTING_QUICK_BIND_SPELLBOOK_DESC"))
 	RegisterControl(CreateDBCheckbox(page2, -58, "showSpellbookBadges", "SETTING_SHOW_SPELLBOOK_BADGES", "SETTING_SHOW_SPELLBOOK_BADGES_DESC"))
 	RegisterControl(CreateDBCheckbox(page2, -86, "autoShowAllRanks", "SETTING_AUTO_SHOW_ALL_RANKS", "SETTING_AUTO_SHOW_ALL_RANKS_DESC"))
 	RegisterControl(CreateDBCheckbox(page2, -114, "autoSelectPrimarySpellTab", "SETTING_AUTO_SELECT_PRIMARY_TAB", "SETTING_AUTO_SELECT_PRIMARY_TAB_DESC"))
 
-	CreateSectionHeader(page2, L["SETTINGS_HEADER_GENERAL"], -152)
+	RegisterControl(CreateSectionHeader(page2, "SETTINGS_HEADER_GENERAL", -152))
 	RegisterControl(CreateDBCheckbox(page2, -176, "showMinimapButton", "SETTING_SHOW_MINIMAP_BUTTON", "SETTING_SHOW_MINIMAP_BUTTON_DESC"))
+
+	RegisterControl(CreatePillSelectorButton(
+		page2,
+		-210,
+		460,
+		function()
+			return string.format(L["LOCALE_BUTTON_FORMAT"], SettingsUI.GetCurrentLocaleShortLabel())
+		end,
+		function(owner)
+			SettingsUI.OpenLocaleMenu(owner)
+		end,
+		"LOCALE_MENU_TITLE",
+		"LOCALE_TOOLTIP_DESC"
+	))
 
 	RegisterControl(CreateActionButton(
 		page2,
-		-214,
-		246,
+		-248,
+		290,
 		function()
 			if SettingsUI.IsOverlaysUnlocked() then
 				return L["OVERLAY_UNLOCK_BTN_LOCK_ALL"]
@@ -660,8 +815,8 @@ local function EnsureSettingsWindow()
 
 	local resetPosBtn = RegisterControl(CreateActionButton(
 		page2,
-		-214,
-		140,
+		-248,
+		158,
 		function()
 			return L["OVERLAY_UNLOCK_BTN_RESET_POS"]
 		end,
@@ -671,12 +826,12 @@ local function EnsureSettingsWindow()
 		"OVERLAY_UNLOCK_BTN_RESET_POS_DESC"
 	))
 	resetPosBtn:ClearAllPoints()
-	resetPosBtn:SetPoint("TOPLEFT", page2, "TOPLEFT", 272, -214)
+	resetPosBtn:SetPoint("TOPLEFT", page2, "TOPLEFT", 320, -248)
 
 	RegisterControl(CreateActionButton(
 		page2,
-		-250,
-		394,
+		-284,
+		460,
 		function()
 			return L["SETTINGS_RUN_DEBUG_BTN"]
 		end,
@@ -692,12 +847,12 @@ local function EnsureSettingsWindow()
 	-- TAB 3: Unit-Frame Hover-Overlay
 	----------------------------------------------------------------------------
 	local page3 = win.Pages[3]
-	CreateSectionHeader(page3, L["SETTINGS_HEADER_UNITHOVER"], -6)
+	RegisterControl(CreateSectionHeader(page3, "SETTINGS_HEADER_UNITHOVER", -6))
 
 	RegisterControl(CreatePillSelectorButton(
 		page3,
 		-30,
-		192,
+		224,
 		function()
 			return string.format(L["UNITHOVER_MODE_BUTTON_FORMAT"], SettingsUI.GetCurrentUnitHoverModeShortLabel())
 		end,
@@ -715,7 +870,7 @@ local function EnsureSettingsWindow()
 	local anchorBtn = RegisterControl(CreatePillSelectorButton(
 		page3,
 		-30,
-		192,
+		224,
 		function()
 			return string.format(L["UNITHOVER_ANCHOR_BUTTON_FORMAT"], SettingsUI.GetCurrentUnitHoverAnchorShortLabel())
 		end,
@@ -730,7 +885,7 @@ local function EnsureSettingsWindow()
 		"UNITHOVER_ANCHOR_TOOLTIP_DESC"
 	))
 	anchorBtn:ClearAllPoints()
-	anchorBtn:SetPoint("TOPLEFT", page3, "TOPLEFT", 220, -30)
+	anchorBtn:SetPoint("TOPLEFT", page3, "TOPLEFT", 254, -30)
 
 	RegisterControl(CreateSliderControl(page3, -68, "unitHoverScale", 70, 150, 5, "SETTING_UNITHOVER_SCALE_FORMAT"))
 	RegisterControl(CreateSliderControl(page3, -118, "unitHoverAlpha", 30, 100, 5, "SETTING_UNITHOVER_ALPHA_FORMAT"))
@@ -753,6 +908,160 @@ local function EnsureSettingsWindow()
 		end
 	))
 	win.UnlockMoveCheckbox = unlockMoveCb
+
+	----------------------------------------------------------------------------
+	-- TAB 4: Profile, Charakter-Übernahme & Import/Export
+	----------------------------------------------------------------------------
+	local page4 = win.Pages[4]
+	RegisterControl(CreateSectionHeader(page4, "SETTINGS_HEADER_PROFILES", -6))
+
+	RegisterControl(CreateCheckboxControl(
+		page4,
+		-30,
+		"SETTING_USE_CHAR_SETTINGS",
+		"SETTING_USE_CHAR_SETTINGS_DESC",
+		function()
+			return Database.IsUsingCharSettings()
+		end,
+		function(val)
+			Database.SetUsingCharSettings(val)
+		end
+	))
+
+	RegisterControl(CreateDBCheckbox(page4, -58, "importMergeBindings", "SETTING_IMPORT_MERGE_BINDINGS", "SETTING_IMPORT_MERGE_BINDINGS_DESC"))
+
+	RegisterControl(CreatePillSelectorButton(
+		page4,
+		-94,
+		460,
+		function()
+			local prof, currentKey = GetSelectedCharProfile()
+			return string.format(L["PROFILE_SOURCE_CHAR_FORMAT"], FormatCharProfileLabel(prof, currentKey))
+		end,
+		function(owner)
+			SettingsUI.OpenSourceCharMenu(owner)
+		end,
+		"PROFILE_SOURCE_MENU_TITLE",
+		"PROFILE_SOURCE_CHAR_DESC"
+	))
+
+	RegisterControl(CreateActionButton(
+		page4,
+		-130,
+		148,
+		function()
+			return L["PROFILE_BTN_COPY_ALL"]
+		end,
+		function()
+			local prof = GetSelectedCharProfile()
+			if prof and ns.ClickBindingUI and ns.ClickBindingUI.CopyFromCharacterProfile then
+				ns.ClickBindingUI.CopyFromCharacterProfile(prof, "all")
+				SettingsUI.RefreshWindow()
+			end
+		end,
+		"PROFILE_BTN_COPY_ALL_DESC"
+	))
+
+	local copyBindsBtn = RegisterControl(CreateActionButton(
+		page4,
+		-130,
+		148,
+		function()
+			return L["PROFILE_BTN_COPY_BINDINGS"]
+		end,
+		function()
+			local prof = GetSelectedCharProfile()
+			if prof and ns.ClickBindingUI and ns.ClickBindingUI.CopyFromCharacterProfile then
+				ns.ClickBindingUI.CopyFromCharacterProfile(prof, "bindings")
+				SettingsUI.RefreshWindow()
+			end
+		end,
+		"PROFILE_BTN_COPY_BINDINGS_DESC"
+	))
+	copyBindsBtn:ClearAllPoints()
+	copyBindsBtn:SetPoint("TOPLEFT", page4, "TOPLEFT", 174, -130)
+
+	local copySettingsBtn = RegisterControl(CreateActionButton(
+		page4,
+		-130,
+		148,
+		function()
+			return L["PROFILE_BTN_COPY_SETTINGS"]
+		end,
+		function()
+			local prof = GetSelectedCharProfile()
+			if prof and ns.ClickBindingUI and ns.ClickBindingUI.CopyFromCharacterProfile then
+				ns.ClickBindingUI.CopyFromCharacterProfile(prof, "settings")
+				SettingsUI.RefreshWindow()
+			end
+		end,
+		"PROFILE_BTN_COPY_SETTINGS_DESC"
+	))
+	copySettingsBtn:ClearAllPoints()
+	copySettingsBtn:SetPoint("TOPLEFT", page4, "TOPLEFT", 330, -130)
+
+	RegisterControl(CreateSectionHeader(page4, "SETTINGS_HEADER_SHARE", -176))
+
+	RegisterControl(CreatePillSelectorButton(
+		page4,
+		-200,
+		460,
+		function()
+			return string.format(L["SHARE_SCOPE_BUTTON_FORMAT"], SettingsUI.GetCurrentShareScopeShortLabel())
+		end,
+		function(owner)
+			SettingsUI.OpenShareScopeMenu(owner)
+		end,
+		"SHARE_SCOPE_MENU_TITLE",
+		"SHARE_SCOPE_TOOLTIP_DESC"
+	))
+
+	RegisterControl(CreateActionButton(
+		page4,
+		-236,
+		224,
+		function()
+			return L["SHARE_BTN_EXPORT_STRING"]
+		end,
+		function()
+			if ns.ClickBindingUI and ns.ClickBindingUI.ShowExportStringPopup then
+				ns.ClickBindingUI.ShowExportStringPopup(selectedShareScope or "all")
+			end
+		end,
+		"SHARE_BTN_EXPORT_STRING_DESC"
+	))
+
+	local importStrBtn = RegisterControl(CreateActionButton(
+		page4,
+		-236,
+		224,
+		function()
+			return L["SHARE_BTN_IMPORT_STRING"]
+		end,
+		function()
+			if ns.ClickBindingUI and ns.ClickBindingUI.ShowImportStringPopup then
+				ns.ClickBindingUI.ShowImportStringPopup(selectedShareScope or "all")
+			end
+		end,
+		"SHARE_BTN_IMPORT_STRING_DESC"
+	))
+	importStrBtn:ClearAllPoints()
+	importStrBtn:SetPoint("TOPLEFT", page4, "TOPLEFT", 254, -236)
+
+	RegisterControl(CreateActionButton(
+		page4,
+		-272,
+		460,
+		function()
+			return L["SETTINGS_EXPORT_BINDINGS_BTN"]
+		end,
+		function()
+			if ns.ClickBindingUI and ns.ClickBindingUI.ShowBindingsExportPopup then
+				ns.ClickBindingUI.ShowBindingsExportPopup()
+			end
+		end,
+		"SETTINGS_EXPORT_BINDINGS_DESC"
+	))
 
 	win:Hide()
 	settingsWindow = win
@@ -806,6 +1115,16 @@ function SettingsUI.RefreshWindow()
 	if not settingsWindow or not settingsWindow:IsShown() then
 		return
 	end
+	if settingsWindow.TitleText then
+		settingsWindow.TitleText:SetText(string.format("%s  |cff888888v%s|r", L["SETTINGS_MENU_TITLE"], Constants.VERSION))
+	end
+	if settingsWindow.TabButtons then
+		for _, tabBtn in ipairs(settingsWindow.TabButtons) do
+			if tabBtn.Text and tabBtn.labelKey then
+				tabBtn.Text:SetText(L[tabBtn.labelKey])
+			end
+		end
+	end
 	for _, ctrl in ipairs(settingsWindow.Controls) do
 		if ctrl.RefreshValue then
 			ctrl:RefreshValue()
@@ -815,11 +1134,14 @@ end
 
 function SettingsUI.OpenSettingsTab(tabIndex)
 	local win = EnsureSettingsWindow()
+	if Database and Database.SaveCharacterSnapshot then
+		Database.SaveCharacterSnapshot()
+	end
 	if not win:IsShown() then
 		PositionSettingsWindow(win)
 		win:Show()
 	end
-	if tabIndex and tabIndex >= 1 and tabIndex <= 3 then
+	if tabIndex and tabIndex >= 1 and tabIndex <= 4 then
 		SelectTab(tabIndex)
 	end
 	SettingsUI.RefreshWindow()
@@ -830,6 +1152,9 @@ function SettingsUI.OpenSettingsMenu()
 	if win:IsShown() then
 		win:Hide()
 	else
+		if Database and Database.SaveCharacterSnapshot then
+			Database.SaveCharacterSnapshot()
+		end
 		PositionSettingsWindow(win)
 		win:Show()
 		SettingsUI.RefreshWindow()
@@ -987,6 +1312,18 @@ function SettingsUI.RegisterBlizzardOptions()
 			SettingsUI.OpenSettingsTab(3)
 		end,
 		{ "Hover", "Unit Frame", "Einheitenfenster", "Overlay", "Tooltip", "Cursor" }
+	)
+
+	-- 4. Tab 4: Profile, Charakter-Übernahme & Import/Export
+	AddActionRow(
+		L["BLIZZ_SETTINGS_ROW_PROFILES"],
+		L["BLIZZ_SETTINGS_OPEN_BTN"],
+		L["PROFILE_SOURCE_CHAR_DESC"],
+		function()
+			CloseBlizzardSettingsIfSafe()
+			SettingsUI.OpenSettingsTab(4)
+		end,
+		{ "Profile", "Profil", "Import", "Export", "Copy", "Kopieren", "Share", "Teilen" }
 	)
 
 	-- 4. Direkt Blizzards Klickbelegungs-Fenster (/bcc) öffnen

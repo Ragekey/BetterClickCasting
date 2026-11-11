@@ -95,6 +95,7 @@ function UnitHoverTooltip.ResetPosition()
 	if type(BetterClickCastingDB) == "table" then
 		BetterClickCastingDB.unitHoverPos = nil
 	end
+	Database.Set("unitHoverPos", nil)
 	if hoverCard and hoverCard:IsShown() then
 		EvaluateHoverState(true)
 	end
@@ -337,18 +338,18 @@ end
 
 local function SaveFreeCardPosition(card)
 	local point, _, relativePoint, xOfs, yOfs = card:GetPoint(1)
-	if point and type(BetterClickCastingDB) == "table" then
-		BetterClickCastingDB.unitHoverPos = {
+	if point then
+		Database.Set("unitHoverPos", {
 			point = point,
 			relativePoint = relativePoint or point,
 			x = xOfs or 0,
 			y = yOfs or 0,
-		}
+		})
 	end
 end
 
 local function ApplySavedFreePosition(card)
-	local pos = (type(BetterClickCastingDB) == "table") and BetterClickCastingDB.unitHoverPos or nil
+	local pos = Database.Get("unitHoverPos")
 	if type(pos) == "table" and pos.point then
 		card:SetPoint(pos.point, UIParent, pos.relativePoint or pos.point, pos.x or 0, pos.y or 0)
 	else
@@ -361,10 +362,12 @@ local function EnsureHoverCard()
 		return hoverCard
 	end
 
-	-- Komplett passives, maus-durchlässiges Overlay-Frame (0 % Taint auf GameTooltip oder UnitFrames)
+	-- Komplett passives, maus-durchlässiges Overlay-Frame (0 % Taint auf GameTooltip oder UnitFrames).
+	-- Liegt auf DIALOG (Level 50): über allen UnitFrames (MEDIUM/HIGH), aber unterhalb von Kontextmenüs (FULLSCREEN_DIALOG),
+	-- GameTooltip (TOOLTIP) und unserem Einstellungsfenster (DIALOG Level 200).
 	local card = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
-	card:SetFrameStrata("TOOLTIP")
-	card:SetFrameLevel(120)
+	card:SetFrameStrata("DIALOG")
+	card:SetFrameLevel(50)
 	card:SetClampedToScreen(true)
 	card:SetMovable(true)
 	card:EnableMouse(false)
@@ -658,6 +661,23 @@ local function HideHoverCard()
 	end
 end
 
+-- Prüft komplett read-only, ob aktuell ein Blizzard-Kontextmenü oder Dropdown geöffnet ist
+local function IsAnyContextMenuOpen()
+	if Menu and Menu.GetManager then
+		local ok, manager = pcall(Menu.GetManager)
+		if ok and manager and manager.IsAnyMenuOpen then
+			local okOpen, isOpen = pcall(manager.IsAnyMenuOpen, manager)
+			if okOpen and isOpen then
+				return true
+			end
+		end
+	end
+	if DropDownList1 and DropDownList1.IsShown and DropDownList1:IsShown() then
+		return true
+	end
+	return false
+end
+
 local function EvaluateHoverState(forceRedraw)
 	local mode = Database.Get("unitHoverMode") or "off"
 	local freeMove = IsFreeMoveActive()
@@ -679,6 +699,12 @@ local function EvaluateHoverState(forceRedraw)
 			lastModifierMask = modMask
 			RenderHoverCard(nil, modMask)
 		end
+		return
+	end
+
+	-- Automatisch ausblenden, solange ein Rechtsklick-Kontextmenü (Handeln, Inspizieren, Flüstern) offen ist
+	if IsAnyContextMenuOpen() then
+		HideHoverCard()
 		return
 	end
 
@@ -773,7 +799,8 @@ function UnitHoverTooltip.OnSettingChanged(key)
 		or key == "unitHoverShowMana"
 		or key == "unitHoverShowRankTags"
 		or key == "unitHoverShowInCombat"
-		or key == "unitHoverShowInteractions" then
+		or key == "unitHoverShowInteractions"
+		or key == "addonLocale" then
 		UnitHoverTooltip.UpdateTrackingState()
 	end
 end

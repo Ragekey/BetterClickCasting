@@ -1,12 +1,55 @@
 local _, ns = ...
 
-local L = setmetatable({}, {
-	__index = function(t, k)
-		return k
+ns.Locales = ns.Locales or {}
+local enUS = {}
+ns.Locales["enUS"] = enUS
+
+local ActiveL = setmetatable({}, {
+	__index = function(_, k)
+		return enUS[k] or k
 	end,
 })
 
-ns.L = L
+ns.L = ActiveL
+
+-- Löst die effektive AddOn-Sprache auf ("auto" nutzt GetLocale(), Fallback ist immer "enUS")
+function ns.ResolveEffectiveLocale(preferred)
+	local code = preferred
+	if not code or code == "auto" or code == "" then
+		code = (GetLocale and GetLocale()) or "enUS"
+	end
+	if code == "deDE" then
+		return "deDE"
+	elseif code == "esES" or code == "esMX" then
+		return "esES"
+	end
+	return "enUS"
+end
+
+-- Aktualisiert ns.L in-place mit englischem 100%-Fallback, sodass alle Module sofort die neue Sprache nutzen
+function ns.ApplyLocale(preferred)
+	local effective = ns.ResolveEffectiveLocale(preferred)
+	if wipe then
+		wipe(ActiveL)
+	else
+		for k in pairs(ActiveL) do
+			ActiveL[k] = nil
+		end
+	end
+	for k, v in pairs(enUS) do
+		ActiveL[k] = v
+	end
+	local dict = ns.Locales and ns.Locales[effective]
+	if dict and dict ~= enUS then
+		for k, v in pairs(dict) do
+			ActiveL[k] = v
+		end
+	end
+	ns.activeLocale = effective
+	return effective
+end
+
+local L = enUS
 
 -- Englischer Standard-Fallback (enUS / enGB)
 L["ADDON_TITLE"] = "Better Click Casting"
@@ -220,18 +263,86 @@ L["CHAT_OVERLAYS_LOCKED"] = "|cff99ccffBetter Click Casting:|r All overlays lock
 L["CHAT_OVERLAYS_RESET"] = "|cff40ff59Better Click Casting:|r Reset all overlay positions to default."
 L["CHAT_COMBAT_ERR"] = "|cffff5555Better Click Casting:|r Cannot perform this action during combat."
 L["CHAT_HELP_HEADER"] = "|cff99ccffBetter Click Casting|r |cffffffffSlash Commands (/bcc):|r"
-L["CHAT_HELP_LINE_1"] = "  |cffffd100/bcc|r (Click Cast UI)  |  |cffffd100/bcc cfg [1-3]|r (Settings Window)"
-L["CHAT_HELP_LINE_2"] = "  |cffffd100/bcc move|r or |cffffd100lock|r (Unlock/Lock Overlays)  |  |cffffd100/bcc reset|r (Reset Positions)"
+L["CHAT_HELP_LINE_1"] = "  |cffffd100/bcc|r (Click Cast UI)  |  |cffffd100/bcc cfg [1-4]|r (Settings Window)"
+L["CHAT_HELP_LINE_2"] = "  |cffffd100/bcc export [all|bindings|settings]|r  |  |cffffd100/bcc import|r  |  |cffffd100/bcc copy <Name>|r"
 L["CHAT_HELP_LINE_3"] = "  |cffffd100/bcc max|r (Upgrade All)  |  |cffffd100/bcc list|r (Summary)  |  |cffffd100/bcc trainer [card|auto|off]|r"
 L["CHAT_HELP_LINE_4"] = "  |cffffd100/bcc group [mod|button|type|none]|r  |  |cffffd100/bcc hover [off|mod|always]|r  |  |cffffd100/bcc anchor [cursor|top|bottom|left|right|free]|r"
-L["CHAT_HELP_LINE_5"] = "  |cffffd100/bcc scale <70-150>|r  |  |cffffd100/bcc alpha <30-100>|r"
+L["CHAT_HELP_LINE_5"] = "  |cffffd100/bcc move|r or |cffffd100lock|r (Overlays)  |  |cffffd100/bcc reset|r  |  |cffffd100/bcc scale <70-150>|r  |  |cffffd100/bcc alpha <30-100>|r"
 L["CHAT_HELP_LINE_6"] = "  |cffffd100/bcc qb|r, |cffffd100mana|r, |cffffd100bottom|r, |cffffd100autotab|r, |cffffd100rules|r, |cffffd100ranks|r, |cffffd100downrank|r, |cffffd100switcher|r, |cffffd100tooltips|r, |cffffd100badges|r, |cffffd100allranks|r, |cffffd100mm|r"
-L["CHAT_HELP_LINE_7"] = "  |cffffd100/bcc status|r (Current Settings)  |  |cffffd100/bcc debug|r (Taint Check)"
+L["CHAT_HELP_LINE_7"] = "  |cffffd100/bcc charsettings|r, |cffffd100merge|r  |  |cffffd100/bcc status|r  |  |cffffd100/bcc debug|r"
 
 -- Native Blizzard Options (Esc -> Options -> AddOns)
 L["BLIZZ_SETTINGS_OPEN_BTN"] = "Open Settings"
 L["BLIZZ_SETTINGS_ROW_CLICKCAST"] = "Click Cast & Spell Ranks (/bcc cfg 1)"
 L["BLIZZ_SETTINGS_ROW_SPELLBOOK"] = "Spellbook & General (/bcc cfg 2)"
 L["BLIZZ_SETTINGS_ROW_UNITHOVER"] = "Unit Frame Hover Overlay (/bcc cfg 3)"
+L["BLIZZ_SETTINGS_ROW_PROFILES"] = "Profiles, Character Copy & Import/Export (/bcc cfg 4)"
 L["BLIZZ_SETTINGS_ROW_WINDOW"] = "Click Cast Bindings Window (/bcc)"
 L["BLIZZ_SETTINGS_ROW_MOVE"] = "Unlock / Lock All Overlays (/bcc move)"
+
+-- Tab 4: Profiles, Character Copy & Import/Export
+L["SETTINGS_TAB_PROFILES"] = "Profiles & Share"
+L["SETTINGS_HEADER_PROFILES"] = "Character Profiles & Direct Copy"
+L["SETTINGS_HEADER_SHARE"] = "String Export & Import"
+L["SETTING_USE_CHAR_SETTINGS"] = "Use Character-Specific Settings for This Character"
+L["SETTING_USE_CHAR_SETTINGS_DESC"] = "When enabled, changes to Better Click Casting settings on this character only apply to this character instead of account-wide."
+L["SETTING_IMPORT_MERGE_BINDINGS"] = "Merge Keybinds Instead of Replacing on Copy / Import"
+L["SETTING_IMPORT_MERGE_BINDINGS_DESC"] = "When enabled, copying or importing keybinds keeps your existing bindings and only adds or overwrites the imported mouse button combinations."
+L["PROFILE_SOURCE_MENU_TITLE"] = "Select Saved Character Profile"
+L["PROFILE_SOURCE_CHAR_FORMAT"] = "Source Character: %s"
+L["PROFILE_SOURCE_CHAR_DESC"] = "Select any character on your account that has logged in with Better Click Casting to copy its Settings and/or Click Cast Keybinds (including full first and last name)."
+L["PROFILE_NO_CHAR_SAVED"] = "No Saved Characters Found"
+L["PROFILE_CURRENT_TAG"] = "[Active]"
+L["PROFILE_DELETE_SNAPSHOT"] = "Remove Saved Character Snapshot"
+L["PROFILE_BTN_COPY_ALL"] = "Copy All"
+L["PROFILE_BTN_COPY_ALL_DESC"] = "Copies both AddOn Settings and compatible Click Cast Keybinds (with automatic rank and Smart Rule matching) from the selected character."
+L["PROFILE_BTN_COPY_BINDINGS"] = "Keybinds Only"
+L["PROFILE_BTN_COPY_BINDINGS_DESC"] = "Copies only Click Cast Keybinds and Smart Rules from the selected character into the Click Cast window (click Save in /bcc to confirm)."
+L["PROFILE_BTN_COPY_SETTINGS"] = "Settings Only"
+L["PROFILE_BTN_COPY_SETTINGS_DESC"] = "Copies only the Better Click Casting AddOn settings and overlay positions from the selected character."
+
+L["SHARE_SCOPE_MENU_TITLE"] = "Select Export / Import Scope"
+L["SHARE_SCOPE_BUTTON_FORMAT"] = "Scope: %s"
+L["SHARE_SCOPE_TOOLTIP_DESC"] = "Choose whether to export or import both Settings and Keybinds together, only Keybinds, or only AddOn Settings."
+L["SHARE_SCOPE_ALL"] = "Settings + Keybinds (Complete)"
+L["SHARE_SCOPE_ALL_SHORT"] = "Settings + Keybinds"
+L["SHARE_SCOPE_BINDINGS"] = "Keybinds & Smart Rules Only"
+L["SHARE_SCOPE_BINDINGS_SHORT"] = "Keybinds Only"
+L["SHARE_SCOPE_SETTINGS"] = "AddOn Settings Only"
+L["SHARE_SCOPE_SETTINGS_SHORT"] = "Settings Only"
+L["SHARE_BTN_EXPORT_STRING"] = "Generate Export String"
+L["SHARE_BTN_EXPORT_STRING_DESC"] = "Creates a compact, shareable !BCC1!...! string for the selected scope that you can copy with Ctrl+C."
+L["SHARE_BTN_IMPORT_STRING"] = "Import from String"
+L["SHARE_BTN_IMPORT_STRING_DESC"] = "Opens a dialog where you can paste a !BCC1!...! string to import Settings and/or Keybinds."
+
+L["EXPORT_STRING_TITLE_ALL"] = "Export String: Settings + Keybinds (Ctrl+C to Copy)"
+L["EXPORT_STRING_TITLE_BINDINGS"] = "Export String: Keybinds Only (Ctrl+C to Copy)"
+L["EXPORT_STRING_TITLE_SETTINGS"] = "Export String: Settings Only (Ctrl+C to Copy)"
+L["IMPORT_POPUP_TITLE"] = "Import Better Click Casting Data"
+L["IMPORT_POPUP_HINT"] = "Paste a !BCC1:...!-Export String below (Ctrl+V) and click Import:"
+L["IMPORT_BTN_CONFIRM"] = "Import Now"
+
+L["CHAT_PROFILE_COPIED_SETTINGS_FORMAT"] = "|cff40ff59Better Click Casting:|r Applied %d setting(s) from |cffffd100%s|r."
+L["CHAT_PROFILE_COPIED_BINDINGS_FORMAT"] = "|cff40ff59Better Click Casting:|r Loaded %d keybind(s) from |cffffd100%s|r (%d unknown skipped). Click |cffffd100Save|r in the Click Cast window to confirm!"
+L["CHAT_PROFILE_COPIED_ALL_FORMAT"] = "|cff40ff59Better Click Casting:|r Applied %d setting(s) and %d keybind(s) from |cffffd100%s|r (%d unknown skipped). Click |cffffd100Save|r to confirm keybinds!"
+L["CHAT_PROFILE_NOT_FOUND_FORMAT"] = "|cffff5555Better Click Casting:|r Character profile '%s' not found."
+L["CHAT_IMPORT_ERR_INVALID"] = "|cffff5555Better Click Casting:|r Invalid or corrupted !BCC1!...! import string."
+L["CHAT_IMPORT_NOTHING_APPLIED_FORMAT"] = "|cffffb833Better Click Casting:|r No compatible settings or spells found in import string (%d unknown spell/macro entries skipped)."
+
+-- Sprachauswahl (Locale Override)
+L["LOCALE_MENU_TITLE"] = "AddOn Language"
+L["LOCALE_BUTTON_FORMAT"] = "Language: %s"
+L["LOCALE_TOOLTIP_DESC"] = "Choose the display language for Better Click Casting. 'Automatic (Client)' detects your WoW client language and always uses English as fallback."
+L["LOCALE_OPT_AUTO"] = "Automatic (Client)"
+L["LOCALE_OPT_AUTO_SHORT"] = "Auto (Client)"
+L["LOCALE_OPT_ENUS"] = "English (enUS / enGB)"
+L["LOCALE_OPT_ENUS_SHORT"] = "English"
+L["LOCALE_OPT_DEDE"] = "Deutsch (deDE)"
+L["LOCALE_OPT_DEDE_SHORT"] = "Deutsch"
+L["LOCALE_OPT_ESES"] = "Español (esES / esMX)"
+L["LOCALE_OPT_ESES_SHORT"] = "Español"
+L["CHAT_LOCALE_CHANGED_FORMAT"] = "|cff40ff59Better Click Casting:|r Language set to |cffffd100%s|r."
+L["SLASH_HELP_LANG"] = "  |cffffd100/bcc lang [auto|en|de|es]|r : Set AddOn display language"
+L["STATUS_LOCALE_LABEL"] = "Language"
+
+ns.ApplyLocale("auto")

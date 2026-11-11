@@ -1,10 +1,8 @@
 local _, ns = ...
 
-if GetLocale() ~= "deDE" then
-	return
-end
-
-local L = ns.L
+ns.Locales = ns.Locales or {}
+local L = {}
+ns.Locales["deDE"] = L
 
 L["ADDON_TITLE"] = "Better Click Casting"
 L["RANK_FALLBACK_FORMAT"] = "Rang %d"
@@ -217,18 +215,88 @@ L["CHAT_OVERLAYS_LOCKED"] = "|cff99ccffBetter Click Casting:|r Alle Overlays ges
 L["CHAT_OVERLAYS_RESET"] = "|cff40ff59Better Click Casting:|r Alle Overlay-Positionen auf Standard zurückgesetzt."
 L["CHAT_COMBAT_ERR"] = "|cffff5555Better Click Casting:|r Diese Aktion ist während des Kampfes nicht möglich."
 L["CHAT_HELP_HEADER"] = "|cff99ccffBetter Click Casting|r |cffffffffSlash-Befehle (/bcc):|r"
-L["CHAT_HELP_LINE_1"] = "  |cffffd100/bcc|r (Klickbelegung)  |  |cffffd100/bcc cfg [1-3]|r (Einstellungsfenster)"
-L["CHAT_HELP_LINE_2"] = "  |cffffd100/bcc move|r oder |cffffd100lock|r (Overlays entsperren/sperren)  |  |cffffd100/bcc reset|r (Positionen zurücksetzen)"
+L["CHAT_HELP_LINE_1"] = "  |cffffd100/bcc|r (Klickbelegung)  |  |cffffd100/bcc cfg [1-4]|r (Einstellungsfenster)"
+L["CHAT_HELP_LINE_2"] = "  |cffffd100/bcc export [all|bindings|settings]|r  |  |cffffd100/bcc import|r  |  |cffffd100/bcc copy <Name>|r"
 L["CHAT_HELP_LINE_3"] = "  |cffffd100/bcc max|r (Alle auf MAX)  |  |cffffd100/bcc list|r (Übersicht)  |  |cffffd100/bcc trainer [card|auto|off]|r"
 L["CHAT_HELP_LINE_4"] = "  |cffffd100/bcc group [mod|button|type|none]|r  |  |cffffd100/bcc hover [off|mod|always]|r  |  |cffffd100/bcc anchor [cursor|top|bottom|left|right|free]|r"
-L["CHAT_HELP_LINE_5"] = "  |cffffd100/bcc scale <70-150>|r  |  |cffffd100/bcc alpha <30-100>|r"
+L["CHAT_HELP_LINE_5"] = "  |cffffd100/bcc move|r oder |cffffd100lock|r (Overlays)  |  |cffffd100/bcc reset|r  |  |cffffd100/bcc scale <70-150>|r  |  |cffffd100/bcc alpha <30-100>|r"
 L["CHAT_HELP_LINE_6"] = "  |cffffd100/bcc qb|r, |cffffd100mana|r, |cffffd100bottom|r, |cffffd100autotab|r, |cffffd100rules|r, |cffffd100ranks|r, |cffffd100downrank|r, |cffffd100switcher|r, |cffffd100tooltips|r, |cffffd100badges|r, |cffffd100allranks|r, |cffffd100mm|r"
-L["CHAT_HELP_LINE_7"] = "  |cffffd100/bcc status|r (Aktive Einstellungen)  |  |cffffd100/bcc debug|r (Taint-Diagnose)"
+L["CHAT_HELP_LINE_7"] = "  |cffffd100/bcc charsettings|r, |cffffd100merge|r  |  |cffffd100/bcc status|r  |  |cffffd100/bcc debug|r"
 
 -- Native Blizzard-Optionen (Esc -> Optionen -> AddOns)
 L["BLIZZ_SETTINGS_OPEN_BTN"] = "Einstellungen öffnen"
 L["BLIZZ_SETTINGS_ROW_CLICKCAST"] = "Klickbelegung & Zauberränge (/bcc cfg 1)"
 L["BLIZZ_SETTINGS_ROW_SPELLBOOK"] = "Zauberbuch & Allgemein (/bcc cfg 2)"
 L["BLIZZ_SETTINGS_ROW_UNITHOVER"] = "Unit-Frame Hover-Overlay (/bcc cfg 3)"
+L["BLIZZ_SETTINGS_ROW_PROFILES"] = "Profile, Charakter-Übernahme & Import/Export (/bcc cfg 4)"
 L["BLIZZ_SETTINGS_ROW_WINDOW"] = "Klickbelegungs-Fenster öffnen (/bcc)"
 L["BLIZZ_SETTINGS_ROW_MOVE"] = "Alle Overlays entsperren / sperren (/bcc move)"
+
+-- Tab 4: Profile, Charakter-Übernahme & Import/Export
+L["SETTINGS_TAB_PROFILES"] = "Profile & Teilen"
+L["SETTINGS_HEADER_PROFILES"] = "Charakter-Profile & Direkt-Übernahme"
+L["SETTINGS_HEADER_SHARE"] = "String-Export & -Import"
+L["SETTING_USE_CHAR_SETTINGS"] = "Charakterspezifische Einstellungen für diesen Charakter nutzen"
+L["SETTING_USE_CHAR_SETTINGS_DESC"] = "Wenn aktiv, gelten Einstellungsänderungen auf diesem Charakter nur für diesen Charakter statt Account-weit."
+L["SETTING_IMPORT_MERGE_BINDINGS"] = "Keybinds beim Kopieren / Importieren zusammenführen statt ersetzen"
+L["SETTING_IMPORT_MERGE_BINDINGS_DESC"] = "Wenn aktiv, bleiben deine bestehenden Klickbelegungen erhalten und werden durch die importierten Maustasten-Kombinationen ergänzt bzw. aktualisiert."
+L["PROFILE_SOURCE_MENU_TITLE"] = "Gespeicherten Charakter auswählen"
+L["PROFILE_SOURCE_CHAR_FORMAT"] = "Quell-Charakter: %s"
+L["PROFILE_SOURCE_CHAR_DESC"] = "Wähle einen deiner gespeicherten Charaktere (inkl. Vor- und Nachname) aus, um dessen Einstellungen und/oder Klickbelegungen direkt zu übernehmen."
+L["PROFILE_NO_CHAR_SAVED"] = "Noch kein Charakter gespeichert"
+L["PROFILE_CURRENT_TAG"] = "[Aktiv]"
+L["PROFILE_DELETE_SNAPSHOT"] = "Gespeicherten Charakter-Snapshot entfernen"
+L["PROFILE_BTN_COPY_ALL"] = "Alles kopieren"
+L["PROFILE_BTN_COPY_ALL_DESC"] = "Übernimmt sowohl die AddOn-Einstellungen als auch alle kompatiblen Klickbelegungen (mit automatischer Zauberrang- und Smart-Rule-Auflösung) vom gewählten Charakter."
+L["PROFILE_BTN_COPY_BINDINGS"] = "Nur Keybinds"
+L["PROFILE_BTN_COPY_BINDINGS_DESC"] = "Übernimmt nur die Klickbelegungen und Smart-Rules vom gewählten Charakter in das Klickbelegungs-Fenster (anschließend dort auf Speichern klicken)."
+L["PROFILE_BTN_COPY_SETTINGS"] = "Nur Settings"
+L["PROFILE_BTN_COPY_SETTINGS_DESC"] = "Übernimmt nur die Better Click Casting Einstellungen und Overlay-Positionen vom gewählten Charakter."
+
+L["SHARE_SCOPE_MENU_TITLE"] = "Export- / Import-Umfang wählen"
+L["SHARE_SCOPE_BUTTON_FORMAT"] = "Umfang: %s"
+L["SHARE_SCOPE_TOOLTIP_DESC"] = "Wähle aus, ob Einstellungen und Keybinds gemeinsam, nur die Keybinds oder nur die AddOn-Einstellungen exportiert bzw. importiert werden sollen."
+L["SHARE_SCOPE_ALL"] = "Settings + Keybinds (Komplett)"
+L["SHARE_SCOPE_ALL_SHORT"] = "Settings + Keybinds"
+L["SHARE_SCOPE_BINDINGS"] = "Nur Keybinds & Smart-Rules"
+L["SHARE_SCOPE_BINDINGS_SHORT"] = "Nur Keybinds"
+L["SHARE_SCOPE_SETTINGS"] = "Nur AddOn-Einstellungen"
+L["SHARE_SCOPE_SETTINGS_SHORT"] = "Nur Settings"
+L["SHARE_BTN_EXPORT_STRING"] = "Export-String erzeugen"
+L["SHARE_BTN_EXPORT_STRING_DESC"] = "Erzeugt einen kompakten, teilbaren !BCC1!...!-String für den gewählten Umfang zum Kopieren per Strg+C."
+L["SHARE_BTN_IMPORT_STRING"] = "Import-String einfügen"
+L["SHARE_BTN_IMPORT_STRING_DESC"] = "Öffnet ein Eingabefenster, in das du einen !BCC1!...!-String einfügen und importieren kannst."
+
+L["EXPORT_STRING_TITLE_ALL"] = "Export-String: Settings + Keybinds (Strg+C zum Kopieren)"
+L["EXPORT_STRING_TITLE_BINDINGS"] = "Export-String: Nur Keybinds (Strg+C zum Kopieren)"
+L["EXPORT_STRING_TITLE_SETTINGS"] = "Export-String: Nur Settings (Strg+C zum Kopieren)"
+L["IMPORT_POPUP_TITLE"] = "Better Click Casting Daten importieren"
+L["IMPORT_POPUP_HINT"] = "Füge unten einen !BCC1:...!-Export-String ein (Strg+V) und klicke auf Importieren:"
+L["IMPORT_BTN_CONFIRM"] = "Jetzt importieren"
+
+L["CHAT_PROFILE_COPIED_SETTINGS_FORMAT"] = "|cff40ff59Better Click Casting:|r %d Einstellung(en) von |cffffd100%s|r übernommen."
+L["CHAT_PROFILE_COPIED_BINDINGS_FORMAT"] = "|cff40ff59Better Click Casting:|r %d Klickbelegung(en) von |cffffd100%s|r geladen (%d unbekannte übersprungen). Klicke im Klickbelegungs-Fenster auf |cffffd100Speichern|r!"
+L["CHAT_PROFILE_COPIED_ALL_FORMAT"] = "|cff40ff59Better Click Casting:|r %d Einstellung(en) und %d Klickbelegung(en) von |cffffd100%s|r übernommen (%d unbekannte übersprungen). Klicke auf |cffffd100Speichern|r zum Bestätigen!"
+L["CHAT_PROFILE_NOT_FOUND_FORMAT"] = "|cffff5555Better Click Casting:|r Charakter-Profil '%s' wurde nicht gefunden."
+L["CHAT_IMPORT_ERR_INVALID"] = "|cffff5555Better Click Casting:|r Ungültiger oder beschädigter !BCC1!...!-Import-String."
+L["CHAT_IMPORT_NOTHING_APPLIED_FORMAT"] = "|cffffb833Better Click Casting:|r Keine kompatiblen Einstellungen oder Zauber im Import-String gefunden (%d unbekannte Zauber/Makros übersprungen)."
+
+-- Sprachauswahl (Locale Override)
+L["LOCALE_MENU_TITLE"] = "AddOn-Sprache"
+L["LOCALE_BUTTON_FORMAT"] = "Sprache: %s"
+L["LOCALE_TOOLTIP_DESC"] = "Wählt die Anzeigesprache für Better Click Casting. 'Automatisch (Client)' erkennt die Sprache deines WoW-Clients und nutzt immer Englisch als Fallback."
+L["LOCALE_OPT_AUTO"] = "Automatisch (Client)"
+L["LOCALE_OPT_AUTO_SHORT"] = "Auto (Client)"
+L["LOCALE_OPT_ENUS"] = "English (enUS / enGB)"
+L["LOCALE_OPT_ENUS_SHORT"] = "English"
+L["LOCALE_OPT_DEDE"] = "Deutsch (deDE)"
+L["LOCALE_OPT_DEDE_SHORT"] = "Deutsch"
+L["LOCALE_OPT_ESES"] = "Español (esES / esMX)"
+L["LOCALE_OPT_ESES_SHORT"] = "Español"
+L["CHAT_LOCALE_CHANGED_FORMAT"] = "|cff40ff59Better Click Casting:|r Sprache gesetzt auf |cffffd100%s|r."
+L["SLASH_HELP_LANG"] = "  |cffffd100/bcc lang [auto|en|de|es]|r : AddOn-Sprache umschalten"
+L["STATUS_LOCALE_LABEL"] = "Sprache"
+
+if ns.ApplyLocale then
+	ns.ApplyLocale("auto")
+end

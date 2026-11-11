@@ -4,7 +4,7 @@ local Constants = {}
 ns.Constants = Constants
 
 Constants.ADDON_NAME = addonName or "BetterClickCasting"
-Constants.VERSION = "0.6.0"
+Constants.VERSION = "0.7.0"
 -- Nativer gemipmappter Blizzard-Atlas aus Blizzard_ClickBindingUI.lua
 Constants.ICON_ATLAS = "clickcast-icon-mouse"
 
@@ -167,4 +167,123 @@ function Constants.GetFullBindingString(bindingInfo)
 		return modifierText .. "-" .. buttonString
 	end
 	return buttonString
+end
+
+-- Prüft ein Namenspaar (n, s) aus einer WoW-Unit-API auf Vor- und Nachname in WoW Forever
+local function TryExtractFullName(n, s, realm, normRealm)
+	if type(n) ~= "string" or n == "" then
+		return nil
+	end
+	local sep = (_G.Constants and _G.Constants.CharacterNameSeparatorConsts and _G.Constants.CharacterNameSeparatorConsts.CHARACTERNAME_SURNAME_SEPARATOR) or " "
+
+	-- Fall 1: Nachname wird als 2. Rückgabewert geliefert (z. B. UnitFullName("player"))
+	if type(s) == "string" and s ~= "" and s ~= realm and s ~= normRealm then
+		if string.find(n, s, 1, true) then
+			return string.gsub(n, "%-", " ")
+		end
+		return n .. " " .. s
+	end
+
+	-- Fall 2: Vor- und Nachname stecken bereits mit Leerzeichen getrennt im 1. Rückgabewert (z. B. UnitName("player"))
+	if string.find(n, " ", 1, true) then
+		return n
+	end
+
+	-- Fall 3: Vor- und Nachname sind durch CHARACTERNAME_SURNAME_SEPARATOR getrennt
+	if sep ~= " " and sep ~= "" and string.find(n, sep, 1, true) then
+		local first, last = string.match(n, "^(.-)" .. sep .. "(.+)$")
+		if first and last and last ~= "" and last ~= realm and last ~= normRealm then
+			return first .. " " .. last
+		end
+	end
+
+	-- Fall 4: Vor- und Nachname sind durch Bindestrich getrennt (sofern der 2. Teil nicht der Realm ist)
+	if string.find(n, "-", 1, true) then
+		local first, last = string.match(n, "^([^-]+)-(.+)$")
+		if first and last and last ~= "" and last ~= realm and last ~= normRealm then
+			return first .. " " .. last
+		end
+	end
+
+	return nil
+end
+
+-- Liefert ausschließlich den Vornamen des Spielers (für Legacy-Profil-Migration)
+function Constants.GetPlayerFirstName()
+	local name = (UnitNameUnmodified and UnitNameUnmodified("player")) or (UnitName and UnitName("player"))
+	if type(name) == "string" and name ~= "" then
+		local first = string.match(name, "^([^%s%-]+)")
+		return first or name
+	end
+	return "Player"
+end
+
+-- Liefert den vollständigen Spielernamen inkl. Nachname in WoW Forever (z. B. "Rage Key")
+function Constants.GetPlayerDisplayName()
+	local realm = (GetRealmName and GetRealmName()) or ""
+	local normRealm = (GetNormalizedRealmName and GetNormalizedRealmName()) or ""
+	local fallbackFirst = nil
+
+	local function CheckPair(n, s)
+		if type(n) == "string" and n ~= "" and not fallbackFirst then
+			fallbackFirst = n
+		end
+		return TryExtractFullName(n, s, realm, normRealm)
+	end
+
+	-- 1. UnitFullName("player") liefert auch für "player" den 2. Rückgabewert (in WoW Forever den Nachnamen)
+	if UnitFullName then
+		local full = CheckPair(UnitFullName("player"))
+		if full then return full end
+	end
+
+	-- 2. UnitName("player") und UnitNameUnmodified("player") (Camelot NameUtil.lua)
+	if UnitName then
+		local full = CheckPair(UnitName("player"))
+		if full then return full end
+	end
+	if UnitNameUnmodified then
+		local full = CheckPair(UnitNameUnmodified("player"))
+		if full then return full end
+	end
+
+	-- 3. GUID-basierte Abfragen (UnitNameFromGUID / GetPlayerInfoByGUID)
+	local guid = UnitGUID and UnitGUID("player")
+	if guid then
+		if UnitNameFromGUID then
+			local full = CheckPair(UnitNameFromGUID(guid))
+			if full then return full end
+		end
+		if GetPlayerInfoByGUID then
+			local _, _, _, _, _, gName, gSurname = GetPlayerInfoByGUID(guid)
+			local full = CheckPair(gName, gSurname)
+			if full then return full end
+		end
+	end
+
+	-- 4. C_PlayerInfo.GetName(PlayerLocation:CreateFromUnit("player"))
+	if C_PlayerInfo and C_PlayerInfo.GetName and PlayerLocation and PlayerLocation.CreateFromUnit then
+		local ok, loc = pcall(PlayerLocation.CreateFromUnit, PlayerLocation, "player")
+		if ok and loc then
+			local full = CheckPair(C_PlayerInfo.GetName(loc), nil)
+			if full then return full end
+		end
+	end
+
+	return fallbackFirst or "Player"
+end
+
+-- Liefert einen eindeutigen Charakter-Schlüssel (inkl. Vorname, Nachname und Realm) für SavedVariables
+function Constants.GetPlayerProfileKey()
+	local fullName = Constants.GetPlayerDisplayName()
+	local realm = (GetRealmName and GetRealmName()) or "Realm"
+	return fullName .. " (" .. realm .. ")"
+end
+
+function Constants.GetPlayerClassInfo()
+	if UnitClass then
+		local className, classFile = UnitClass("player")
+		return className or "", classFile or ""
+	end
+	return "", ""
 end
