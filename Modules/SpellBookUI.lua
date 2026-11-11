@@ -312,6 +312,7 @@ function SpellBookUI.UpdateQuickBindCheckbox()
 	local isChecked = Database.Get("quickBindSpellbook") and true or false
 	cb:SetChecked(isChecked)
 	if cb.Label then
+		cb.Label:SetText(L["SPELLBOOK_QUICK_BIND_CHECKBOX"])
 		if isChecked then
 			cb.Label:SetTextColor(0.35, 1.0, 0.45)
 		else

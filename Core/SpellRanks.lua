@@ -288,11 +288,96 @@ function SpellRanks.MakeBindingRuleKey(bindingInfo, rankEntry)
 		return nil
 	end
 	local spellBank = (rankEntry and rankEntry.spellBank) or 0
-	local charName = (UnitName and UnitName("player")) or "Player"
+	local charName = (Constants.GetPlayerDisplayName and Constants.GetPlayerDisplayName()) or (UnitName and UnitName("player")) or "Player"
 	local realmName = (GetRealmName and GetRealmName()) or "Realm"
 	local modNum = tonumber(bindingInfo.modifiers) or 0
 
 	return string.format("%s-%s|%d:%s|%s:%s", charName, realmName, modNum, tostring(bindingInfo.button), tostring(spellBank), spellName)
+end
+
+local function MakeLegacyFirstNameRuleKey(bindingInfo, rankEntry)
+	if not bindingInfo or not bindingInfo.button or not Constants.IsSpellOrPetBinding(bindingInfo) then
+		return nil
+	end
+	rankEntry = rankEntry or SpellRanks.GetRankEntryForAction(bindingInfo.actionID)
+	local spellName = (rankEntry and rankEntry.name) or SpellRanks.GetSpellBaseNameForAction(bindingInfo.actionID)
+	if not spellName or spellName == "" then
+		return nil
+	end
+	local spellBank = (rankEntry and rankEntry.spellBank) or 0
+	local firstName = (UnitName and UnitName("player")) or "Player"
+	local realmName = (GetRealmName and GetRealmName()) or "Realm"
+	local modNum = tonumber(bindingInfo.modifiers) or 0
+
+	return string.format("%s-%s|%d:%s|%s:%s", firstName, realmName, modNum, tostring(bindingInfo.button), tostring(spellBank), spellName)
+end
+
+-- Löst einen importierten oder von einem anderen Charakter kopierten Zauber-Eintrag
+-- intelligent auf den passenden gelernten Rang des aktuellen Charakters auf.
+function SpellRanks.ResolveImportedSpellBinding(importedEntry)
+	if type(importedEntry) ~= "table" then
+		return nil, nil
+	end
+	local currentCache = SpellRanks.EnsureCache()
+	local bType = tonumber(importedEntry.type) or 0
+	local spellBank = (Enum and Enum.ClickBindingType and bType == Enum.ClickBindingType.PetAction)
+		and (Enum.SpellBookSpellBank and Enum.SpellBookSpellBank.Pet or 1)
+		or (Enum and Enum.SpellBookSpellBank and Enum.SpellBookSpellBank.Player or 0)
+
+	local directEntry = importedEntry.actionID and SpellRanks.GetRankEntryForAction(importedEntry.actionID)
+	local group = directEntry and directEntry.group
+
+	if not group then
+		local baseName = importedEntry.spellName
+		if (not baseName or baseName == "") and importedEntry.actionID then
+			baseName = SpellRanks.GetSpellBaseNameForAction(importedEntry.actionID)
+		end
+		if baseName and baseName ~= "" then
+			local groupKey = MakeSpellGroupKey(spellBank, baseName)
+			group = currentCache.bySpellKey[groupKey]
+		end
+	end
+
+	if not group or not group.entries or #group.entries == 0 then
+		return nil, nil
+	end
+
+	local ruleMode = importedEntry.ruleMode
+	if not ruleMode or not VALID_RULES[ruleMode] then
+		ruleMode = SpellRanks.RULE_MAX
+	end
+
+	-- Bei aktiver Smart-Regel (MAX, MAX-1 usw.) auf den Ziel-Rang des aktuellen Charakters auflösen
+	if ruleMode ~= SpellRanks.RULE_FIXED then
+		if #group.entries == 1 then
+			return group.entries[1], ruleMode
+		end
+		local targetEntry = SpellRanks.GetTargetEntryForRule(group, ruleMode)
+		if targetEntry then
+			return targetEntry, ruleMode
+		end
+	end
+
+	-- Bei Fester-Rang-Regel (FIXED): Exakten Rang bevorzugen, sonst nächstniedrigeren gelernten Rang wählen
+	if directEntry then
+		return directEntry, ruleMode
+	end
+	local wantedRank = tonumber(importedEntry.rankNum) or 0
+	if wantedRank > 0 then
+		local bestMatch = nil
+		for _, entry in ipairs(group.entries) do
+			if entry.rankNum == wantedRank then
+				return entry, ruleMode
+			elseif entry.rankNum and entry.rankNum < wantedRank then
+				bestMatch = entry
+			end
+		end
+		if bestMatch then
+			return bestMatch, ruleMode
+		end
+	end
+
+	return group.maxEntry or group.entries[#group.entries], ruleMode
 end
 
 function SpellRanks.GetRuleForBinding(bindingInfo, rankEntry)
@@ -324,6 +409,13 @@ function SpellRanks.GetRuleForBinding(bindingInfo, rankEntry)
 	local saved = rules[key]
 	if saved and VALID_RULES[saved] then
 		return saved
+	end
+
+	-- Automatische Übernahme aus altem Vorname-Key (vor v0.7.0), falls vorhanden
+	local legacyKey = MakeLegacyFirstNameRuleKey(bindingInfo, rankEntry)
+	if legacyKey and legacyKey ~= key and rules[legacyKey] and VALID_RULES[rules[legacyKey]] then
+		rules[key] = rules[legacyKey]
+		return rules[key]
 	end
 
 	-- Smart-Hybrid (Option A): Bestehende Max-Rang-Belegungen starten als "Immer MAX",

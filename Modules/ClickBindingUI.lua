@@ -1424,7 +1424,7 @@ local heroCardPreviewUnlocked = false
 
 local function ApplySavedHeroCardPosition(card)
 	card:ClearAllPoints()
-	local savedPos = (type(BetterClickCastingDB) == "table") and BetterClickCastingDB.heroCardPos or nil
+	local savedPos = Database.Get("heroCardPos")
 	if type(savedPos) == "table" and savedPos.point and savedPos.relativePoint and type(savedPos.x) == "number" and type(savedPos.y) == "number" then
 		card:SetPoint(savedPos.point, UIParent, savedPos.relativePoint, savedPos.x, savedPos.y)
 	else
@@ -1450,13 +1450,13 @@ local function EnsureHeroCardFrame()
 	card:SetScript("OnDragStop", function(self)
 		self:StopMovingOrSizing()
 		local point, _, relativePoint, xOfs, yOfs = self:GetPoint(1)
-		if point and relativePoint and xOfs and yOfs and type(BetterClickCastingDB) == "table" then
-			BetterClickCastingDB.heroCardPos = {
+		if point and relativePoint and xOfs and yOfs then
+			Database.Set("heroCardPos", {
 				point = point,
 				relativePoint = relativePoint,
 				x = math.floor(xOfs + 0.5),
 				y = math.floor(yOfs + 0.5),
-			}
+			})
 		end
 	end)
 	card:SetScript("OnMouseUp", function(_, mouseButton)
@@ -1650,6 +1650,7 @@ function ClickBindingUI.ResetHeroCardPosition()
 	if type(BetterClickCastingDB) == "table" then
 		BetterClickCastingDB.heroCardPos = nil
 	end
+	Database.Set("heroCardPos", nil)
 	if heroCardFrame then
 		ApplySavedHeroCardPosition(heroCardFrame)
 	end
@@ -1957,7 +1958,7 @@ local function ShowDebugCopyPopup(reportText, customTitle)
 	end
 
 	if debugCopyFrame.Title then
-		debugCopyFrame.Title:SetText(customTitle or "Better Click Casting Debug (Strg+C zum Kopieren)")
+		debugCopyFrame.Title:SetText(customTitle or "Better Click Casting Debug (Ctrl+C to Copy)")
 	end
 	debugCopyFrame:Show()
 	debugCopyFrame.EditBox:SetText(reportText or "")
@@ -2009,7 +2010,7 @@ function ClickBindingUI.ShowBindingsExportPopup()
 		return tostring(a.actionID or 0) < tostring(b.actionID or 0)
 	end)
 
-	local playerName = (UnitName and UnitName("player")) or "Player"
+	local playerName = Constants.GetPlayerDisplayName()
 	local classLoc = (UnitClass and select(1, UnitClass("player"))) or ""
 	local lines = {
 		string.format("Better Click Casting v%s (%s, %s, %d Bindings)", Constants.VERSION, playerName, classLoc, #bindings),
@@ -2069,6 +2070,362 @@ function ClickBindingUI.ShowBindingsExportPopup()
 	ShowDebugCopyPopup(table.concat(lines, "\n"), L["EXPORT_POPUP_TITLE"])
 end
 
+-- Öffnet das Kopier-Popup mit einem teilbaren !BCC1:...!-Export-String für "all", "bindings" oder "settings"
+function ClickBindingUI.ShowExportStringPopup(scope)
+	scope = (scope == "bindings" or scope == "settings") and scope or "all"
+	local exportStr = Database.ExportToString(scope)
+	local titleKey = "EXPORT_STRING_TITLE_ALL"
+	if scope == "bindings" then
+		titleKey = "EXPORT_STRING_TITLE_BINDINGS"
+	elseif scope == "settings" then
+		titleKey = "EXPORT_STRING_TITLE_SETTINGS"
+	end
+	ShowDebugCopyPopup(exportStr, L[titleKey] or L["EXPORT_POPUP_TITLE"])
+end
+
+-- Spielt eine Liste importierter/kopierter Klickbelegungen taintfrei in ClickBindingFrame.dataProvider ein
+function ClickBindingUI.ApplyImportedBindings(importedBindings, mergeMode)
+	if InCombatLockdown and InCombatLockdown() then
+		if DEFAULT_CHAT_FRAME then
+			DEFAULT_CHAT_FRAME:AddMessage(L["CHAT_COMBAT_ERR"])
+		end
+		return 0, 0, false
+	end
+	if type(importedBindings) ~= "table" then
+		return 0, 0, false
+	end
+
+	if not ClickBindingFrame and ClickBindingFrame_LoadUI then
+		ClickBindingFrame_LoadUI()
+	end
+	ClickBindingUI.SetupHooks()
+
+	if ClickBindingFrame and not ClickBindingFrame:IsShown() then
+		ClickBindingUI.EnsureSpellBookTabForClickBinding()
+		if ToggleClickBindingFrame then
+			ToggleClickBindingFrame()
+		elseif ShowUIPanel then
+			ShowUIPanel(ClickBindingFrame)
+		end
+	end
+
+	if not ClickBindingFrame or not ClickBindingFrame.dataProvider then
+		return 0, 0, false
+	end
+
+	SpellRanks.InvalidateCache()
+	SpellRanks.EnsureCache()
+
+	local resolvedCustom = {}
+	local resolvedInteractions = {}
+	local resolvedRules = {}
+	local seenCombo = {}
+	local appliedCount = 0
+	local skippedCount = 0
+
+	for _, entry in ipairs(importedBindings) do
+		local bType = tonumber(entry.type) or 0
+		local button = entry.button
+		local modifiers = tonumber(entry.modifiers) or 0
+		if bType > 0 and type(button) == "string" and button ~= "" then
+			local comboKey = tostring(modifiers) .. ":" .. button
+			if not seenCombo[comboKey] then
+				if bType == Enum.ClickBindingType.Interaction then
+					local actID = tonumber(entry.actionID) or 0
+					if actID == Enum.ClickBindingInteraction.Target or actID == Enum.ClickBindingInteraction.OpenContextMenu then
+						resolvedInteractions[actID] = {
+							type = bType,
+							actionID = actID,
+							button = button,
+							modifiers = modifiers,
+						}
+						seenCombo[comboKey] = true
+						appliedCount = appliedCount + 1
+					end
+				elseif Constants.IsSpellOrPetBinding(entry) then
+					local targetEntry, ruleMode = SpellRanks.ResolveImportedSpellBinding(entry)
+					if targetEntry and targetEntry.actionID then
+						local bindInfo = {
+							type = bType,
+							actionID = targetEntry.actionID,
+							button = button,
+							modifiers = modifiers,
+						}
+						table.insert(resolvedCustom, bindInfo)
+						if ruleMode then
+							table.insert(resolvedRules, { bindInfo = bindInfo, ruleMode = ruleMode, rankEntry = targetEntry })
+						end
+						seenCombo[comboKey] = true
+						appliedCount = appliedCount + 1
+					else
+						skippedCount = skippedCount + 1
+					end
+				elseif bType == Enum.ClickBindingType.Macro then
+					local macroIdx = nil
+					if entry.macroName and entry.macroName ~= "" and GetMacroIndexByName then
+						local idx = GetMacroIndexByName(entry.macroName)
+						if idx and idx > 0 then
+							macroIdx = idx
+						end
+					end
+					if not macroIdx and entry.actionID and GetMacroInfo then
+						local mName = GetMacroInfo(entry.actionID)
+						if mName and mName ~= "" then
+							macroIdx = entry.actionID
+						end
+					end
+					if macroIdx and macroIdx > 0 then
+						table.insert(resolvedCustom, {
+							type = bType,
+							actionID = macroIdx,
+							button = button,
+							modifiers = modifiers,
+						})
+						seenCombo[comboKey] = true
+						appliedCount = appliedCount + 1
+					else
+						skippedCount = skippedCount + 1
+					end
+				end
+			end
+		end
+	end
+
+	if appliedCount == 0 then
+		return 0, skippedCount, true
+	end
+
+	local provider = ClickBindingFrame.dataProvider
+	local toRemove = {}
+
+	for _, element in provider:Enumerate() do
+		if element.elementType == ElementDataTypes.CustomsBinding then
+			if not mergeMode then
+				table.insert(toRemove, element)
+			elseif element.bindingInfo and element.bindingInfo.button then
+				local cKey = tostring( tonumber(element.bindingInfo.modifiers) or 0 ) .. ":" .. tostring(element.bindingInfo.button)
+				if seenCombo[cKey] then
+					table.insert(toRemove, element)
+				end
+			end
+		elseif element.elementType == ElementDataTypes.InteractionBinding and element.bindingInfo then
+			local actID = element.bindingInfo.actionID
+			if resolvedInteractions[actID] then
+				element.bindingInfo.button = resolvedInteractions[actID].button
+				element.bindingInfo.modifiers = resolvedInteractions[actID].modifiers
+				element.unbound = false
+			elseif element.bindingInfo.button then
+				local cKey = tostring( tonumber(element.bindingInfo.modifiers) or 0 ) .. ":" .. tostring(element.bindingInfo.button)
+				if seenCombo[cKey] then
+					element.bindingInfo.button = nil
+					element.bindingInfo.modifiers = nil
+					element.unbound = true
+				end
+			end
+		end
+	end
+
+	if #toRemove > 0 then
+		provider:Remove(unpack(toRemove))
+	end
+
+	for _, bindInfo in ipairs(resolvedCustom) do
+		provider:Insert({
+			elementType = ElementDataTypes.CustomsBinding,
+			bindingInfo = bindInfo,
+			unbound = false,
+		})
+	end
+
+	for _, r in ipairs(resolvedRules) do
+		SpellRanks.SetRuleForBinding(r.bindInfo, r.ruleMode, r.rankEntry)
+	end
+
+	if ClickBindingFrame.ClearUnboundText then
+		ClickBindingFrame:ClearUnboundText()
+	end
+	ClickBindingFrame.pendingChanges = true
+	SetSaveButtonGlowShown(true)
+	ClickBindingUI.RebuildGroups()
+	ClickBindingUI.RefreshVisibleLines()
+	if SpellBookUI and SpellBookUI.RefreshBadges then
+		SpellBookUI.RefreshBadges()
+	end
+
+	return appliedCount, skippedCount, true
+end
+
+-- Übernimmt Settings und/oder Keybinds direkt von einem gespeicherten Charakter-Profil
+function ClickBindingUI.CopyFromCharacterProfile(charProfile, scope, mergeMode)
+	if type(charProfile) ~= "table" then
+		return false
+	end
+	scope = (scope == "bindings" or scope == "settings") and scope or "all"
+	if mergeMode == nil then
+		mergeMode = Database.Get("importMergeBindings")
+	end
+
+	local settingsCount = 0
+	local appliedBindings = 0
+	local skippedBindings = 0
+
+	if (scope == "all" or scope == "settings") and type(charProfile.settings) == "table" then
+		settingsCount = Database.ApplySettingsSnapshot(charProfile.settings)
+	end
+
+	if (scope == "all" or scope == "bindings") and type(charProfile.bindings) == "table" then
+		local ok
+		appliedBindings, skippedBindings, ok = ClickBindingUI.ApplyImportedBindings(charProfile.bindings, mergeMode)
+		if not ok then
+			return false
+		end
+	end
+
+	if DEFAULT_CHAT_FRAME then
+		local srcName = charProfile.name or charProfile.key or "?"
+		if scope == "settings" then
+			DEFAULT_CHAT_FRAME:AddMessage(string.format(L["CHAT_PROFILE_COPIED_SETTINGS_FORMAT"], settingsCount, srcName))
+		elseif scope == "bindings" then
+			DEFAULT_CHAT_FRAME:AddMessage(string.format(L["CHAT_PROFILE_COPIED_BINDINGS_FORMAT"], appliedBindings, srcName, skippedBindings))
+		else
+			DEFAULT_CHAT_FRAME:AddMessage(string.format(L["CHAT_PROFILE_COPIED_ALL_FORMAT"], settingsCount, appliedBindings, srcName, skippedBindings))
+		end
+	end
+	return true
+end
+
+-- Verarbeitet einen eingefügten !BCC1:...!-Import-String für den gewünschten Umfang
+function ClickBindingUI.ExecuteImportString(rawStr, scopeOverride, mergeOverride)
+	local parsed, err = Database.ParseImportString(rawStr)
+	if not parsed then
+		if DEFAULT_CHAT_FRAME then
+			DEFAULT_CHAT_FRAME:AddMessage(L["CHAT_IMPORT_ERR_INVALID"])
+		end
+		return false
+	end
+
+	local scope = scopeOverride or parsed.scope or "all"
+	local mergeMode = (mergeOverride ~= nil) and mergeOverride or Database.Get("importMergeBindings")
+	local settingsCount = 0
+	local appliedBindings = 0
+	local skippedBindings = 0
+
+	if (scope == "all" or scope == "settings") and type(parsed.settings) == "table" then
+		settingsCount = Database.ApplySettingsSnapshot(parsed.settings)
+	end
+
+	if (scope == "all" or scope == "bindings") and type(parsed.bindings) == "table" then
+		local ok
+		appliedBindings, skippedBindings, ok = ClickBindingUI.ApplyImportedBindings(parsed.bindings, mergeMode)
+		if not ok then
+			return false
+		end
+	end
+
+	if settingsCount == 0 and appliedBindings == 0 then
+		if DEFAULT_CHAT_FRAME then
+			DEFAULT_CHAT_FRAME:AddMessage(string.format(L["CHAT_IMPORT_NOTHING_APPLIED_FORMAT"], skippedBindings))
+		end
+		return false
+	end
+
+	if DEFAULT_CHAT_FRAME then
+		local srcName = (parsed.meta and parsed.meta.n and parsed.meta.n ~= "") and parsed.meta.n or "Import"
+		if scope == "settings" or not parsed.bindings then
+			DEFAULT_CHAT_FRAME:AddMessage(string.format(L["CHAT_PROFILE_COPIED_SETTINGS_FORMAT"], settingsCount, srcName))
+		elseif scope == "bindings" or not parsed.settings then
+			DEFAULT_CHAT_FRAME:AddMessage(string.format(L["CHAT_PROFILE_COPIED_BINDINGS_FORMAT"], appliedBindings, srcName, skippedBindings))
+		else
+			DEFAULT_CHAT_FRAME:AddMessage(string.format(L["CHAT_PROFILE_COPIED_ALL_FORMAT"], settingsCount, appliedBindings, srcName, skippedBindings))
+		end
+	end
+	return true
+end
+
+local importPopupFrame = nil
+
+function ClickBindingUI.ShowImportStringPopup(defaultScope)
+	if not importPopupFrame then
+		local f = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
+		f:SetSize(520, 270)
+		f:SetPoint("CENTER", UIParent, "CENTER", 0, 120)
+		f:SetFrameStrata("DIALOG")
+		f:SetFrameLevel(210)
+		f:EnableMouse(true)
+		f:SetMovable(true)
+		f:RegisterForDrag("LeftButton")
+		f:SetScript("OnDragStart", f.StartMoving)
+		f:SetScript("OnDragStop", f.StopMovingOrSizing)
+		if f.SetBackdrop then
+			f:SetBackdrop({
+				bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark",
+				edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
+				tile = true,
+				tileSize = 32,
+				edgeSize = 24,
+				insets = { left = 6, right = 6, top = 6, bottom = 6 },
+			})
+		end
+
+		local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+		title:SetPoint("TOPLEFT", f, "TOPLEFT", 16, -14)
+		f.Title = title
+
+		local hint = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+		hint:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -4)
+		hint:SetTextColor(0.75, 0.75, 0.75)
+		f.Hint = hint
+
+		local closeBtn = CreateFrame("Button", nil, f, "UIPanelCloseButton")
+		closeBtn:SetPoint("TOPRIGHT", f, "TOPRIGHT", -4, -4)
+
+		local scrollFrame = CreateFrame("ScrollFrame", nil, f, "UIPanelScrollFrameTemplate")
+		scrollFrame:SetPoint("TOPLEFT", f, "TOPLEFT", 16, -54)
+		scrollFrame:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -34, 48)
+
+		local editBox = CreateFrame("EditBox", nil, scrollFrame)
+		editBox:SetMultiLine(true)
+		editBox:SetAutoFocus(false)
+		editBox:SetFontObject(ChatFontNormal or GameFontHighlightSmall)
+		editBox:SetWidth(460)
+		editBox:SetScript("OnEscapePressed", function()
+			f:Hide()
+		end)
+		scrollFrame:SetScrollChild(editBox)
+		f.EditBox = editBox
+
+		local importBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+		importBtn:SetSize(160, 26)
+		importBtn:SetPoint("BOTTOMRIGHT", f, "BOTTOM", -6, 14)
+		importBtn:SetScript("OnClick", function()
+			local raw = f.EditBox:GetText() or ""
+			if ClickBindingUI.ExecuteImportString(raw, f.targetScope) then
+				f:Hide()
+			end
+		end)
+		f.ImportBtn = importBtn
+
+		local cancelBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+		cancelBtn:SetSize(130, 26)
+		cancelBtn:SetPoint("BOTTOMLEFT", f, "BOTTOM", 6, 14)
+		cancelBtn:SetText(CANCEL or "Cancel")
+		cancelBtn:SetScript("OnClick", function()
+			f:Hide()
+		end)
+		f.CancelBtn = cancelBtn
+
+		importPopupFrame = f
+	end
+
+	importPopupFrame.targetScope = defaultScope
+	importPopupFrame.Title:SetText(L["IMPORT_POPUP_TITLE"])
+	importPopupFrame.Hint:SetText(L["IMPORT_POPUP_HINT"])
+	importPopupFrame.ImportBtn:SetText(L["IMPORT_BTN_CONFIRM"])
+	importPopupFrame:Show()
+	importPopupFrame.EditBox:SetText("")
+	importPopupFrame.EditBox:SetFocus()
+end
+
 -- Diagnose-Werkzeug (/bcc debug, /bcc debug taintlog):
 -- Prüft mit Blizzards issecurevariable() sofort außerhalb des Kampfes, ob globale Highlight-Tabellen,
 -- Aktionsleisten (inkl. PetActionBar), EditModeManagerFrame oder PlayerSpellsFrame getaintete Felder besitzen.
@@ -2080,12 +2437,12 @@ function ClickBindingUI.RunTaintDiagnostics(subArg)
 		local current = tostring(GetCVar("taintLog") or "0")
 		local nextVal = (current == "0") and "1" or "0"
 		SetCVar("taintLog", nextVal)
-		DEFAULT_CHAT_FRAME:AddMessage("|cff40ff40Better Click Casting (Debug):|r CVar taintLog = " .. nextVal .. " (Logdatei: Logs/taint.log nach Reload/Logout).")
+		DEFAULT_CHAT_FRAME:AddMessage("|cff40ff40Better Click Casting (Debug):|r CVar taintLog = " .. nextVal .. " (Log file: Logs/taint.log after Reload/Logout).")
 		return
 	end
 
 	if not issecurevariable then
-		DEFAULT_CHAT_FRAME:AddMessage("|cffff4040Better Click Casting (Debug):|r issecurevariable ist in dieser Umgebung nicht verfügbar.")
+		DEFAULT_CHAT_FRAME:AddMessage("|cffff4040Better Click Casting (Debug):|r issecurevariable is not available in this environment.")
 		return
 	end
 
@@ -2096,18 +2453,18 @@ function ClickBindingUI.RunTaintDiagnostics(subArg)
 		end
 		local ok, taintSource = issecurevariable(tbl, key)
 		if not ok then
-			table.insert(findings, string.format("%s.%s (von %s)", label, tostring(key), tostring(taintSource or "unbekannt")))
+			table.insert(findings, string.format("%s.%s (by %s)", label, tostring(key), tostring(taintSource or "unknown")))
 		end
 	end
 
 	-- 1. Globale Highlight-Tabellen prüfen
 	local okPetGlobal, srcPetGlobal = issecurevariable("PET_ACTION_HIGHLIGHT_MARKS")
 	if not okPetGlobal then
-		table.insert(findings, string.format("_G.PET_ACTION_HIGHLIGHT_MARKS (von %s)", tostring(srcPetGlobal or "unbekannt")))
+		table.insert(findings, string.format("_G.PET_ACTION_HIGHLIGHT_MARKS (by %s)", tostring(srcPetGlobal or "unknown")))
 	end
 	local okBarGlobal, srcBarGlobal = issecurevariable("ON_BAR_HIGHLIGHT_MARKS")
 	if not okBarGlobal then
-		table.insert(findings, string.format("_G.ON_BAR_HIGHLIGHT_MARKS (von %s)", tostring(srcBarGlobal or "unbekannt")))
+		table.insert(findings, string.format("_G.ON_BAR_HIGHLIGHT_MARKS (by %s)", tostring(srcBarGlobal or "unknown")))
 	end
 
 	-- 2. Kritische Felder auf Aktionsleisten und EditMode-Systemen prüfen
@@ -2153,13 +2510,13 @@ function ClickBindingUI.RunTaintDiagnostics(subArg)
 					if type(snapKey) == "string" then
 						local okSnap, srcSnap = issecurevariable(bar.snappedFrames, snapKey)
 						if not okSnap then
-							table.insert(findings, string.format("%s.snappedFrames[%s] (von %s)", entry.name, snapKey, tostring(srcSnap or "unbekannt")))
+							table.insert(findings, string.format("%s.snappedFrames[%s] (by %s)", entry.name, snapKey, tostring(srcSnap or "unknown")))
 						end
 					elseif type(snapKey) == "table" then
 						local okSnapTo, srcSnapTo = issecurevariable(snapKey, "snappedToFrame")
 						if not okSnapTo then
 							local snapName = (snapKey.GetName and snapKey:GetName()) or tostring(snapKey)
-							table.insert(findings, string.format("%s.snappedFrames->%s.snappedToFrame (von %s)", entry.name, snapName, tostring(srcSnapTo or "unbekannt")))
+							table.insert(findings, string.format("%s.snappedFrames->%s.snappedToFrame (by %s)", entry.name, snapName, tostring(srcSnapTo or "unknown")))
 						end
 					end
 				end
@@ -2202,7 +2559,7 @@ function ClickBindingUI.RunTaintDiagnostics(subArg)
 			if sbFrame.lastActiveTabID ~= nil then
 				local okTab, srcTab = issecurevariable(sbFrame, "lastActiveTabID")
 				if not okTab then
-					table.insert(infoNotes, string.format("SpellBookFrame.lastActiveTabID (von %s, harmlos)", tostring(srcTab or "unbekannt")))
+					table.insert(infoNotes, string.format("SpellBookFrame.lastActiveTabID (by %s, harmless)", tostring(srcTab or "unknown")))
 				end
 			end
 			if sbFrame.PagedSpellsFrame and sbFrame.PagedSpellsFrame.EnumerateFrames then
@@ -2222,7 +2579,7 @@ function ClickBindingUI.RunTaintDiagnostics(subArg)
 					end
 				end
 				if taintedItems > 0 then
-					local itemSummary = string.format("SpellBookFrame.PagedSpellsFrame: %d Item(s) mit getaintetem elementData (%d durch Overlay abgeschirmt, von %s)", taintedItems, shieldedItems, tostring(firstTaintSource or "unbekannt"))
+					local itemSummary = string.format("SpellBookFrame.PagedSpellsFrame: %d item(s) with tainted elementData (%d shielded by overlay, by %s)", taintedItems, shieldedItems, tostring(firstTaintSource or "unknown"))
 					if shieldedItems < taintedItems then
 						table.insert(findings, itemSummary)
 					else
@@ -2236,7 +2593,7 @@ function ClickBindingUI.RunTaintDiagnostics(subArg)
 	local taintLogVal = (GetCVar and GetCVar("taintLog")) or "0"
 	local reportLines = {}
 	if #findings == 0 then
-		local okMsg = string.format("0 kritische Taints auf PetActionBar, ActionBars, EditModeManagerFrame und Highlight-Globals gefunden! (taintLog=%s)", tostring(taintLogVal))
+		local okMsg = string.format("0 critical taints found on PetActionBar, ActionBars, EditModeManagerFrame, and highlight globals! (taintLog=%s)", tostring(taintLogVal))
 		DEFAULT_CHAT_FRAME:AddMessage("|cff40ff40Better Click Casting (Debug):|r " .. okMsg)
 		table.insert(reportLines, okMsg)
 		for _, note in ipairs(infoNotes) do
@@ -2244,7 +2601,7 @@ function ClickBindingUI.RunTaintDiagnostics(subArg)
 			table.insert(reportLines, "- Info: " .. note)
 		end
 	else
-		local headerMsg = string.format("%d getaintete(s) Feld(er) gefunden (taintLog=%s):", #findings, tostring(taintLogVal))
+		local headerMsg = string.format("%d tainted field(s) found (taintLog=%s):", #findings, tostring(taintLogVal))
 		DEFAULT_CHAT_FRAME:AddMessage("|cffff4040Better Click Casting (Debug):|r " .. headerMsg)
 		table.insert(reportLines, headerMsg)
 		for _, line in ipairs(findings) do
@@ -2495,7 +2852,19 @@ function ClickBindingUI.SetupHooks()
 			if SpellBookUI and SpellBookUI.RefreshBadges then
 				SpellBookUI.RefreshBadges()
 			end
+			if Database and Database.SaveCharacterSnapshot then
+				Database.SaveCharacterSnapshot()
+			end
 		end)
+	end
+
+	if ClickBindingFrame.SaveButton and not ClickBindingFrame.SaveButton._bccSnapshotHooked then
+		ClickBindingFrame.SaveButton:HookScript("OnClick", function()
+			if C_Timer and C_Timer.After and Database and Database.SaveCharacterSnapshot then
+				C_Timer.After(0.1, Database.SaveCharacterSnapshot)
+			end
+		end)
+		ClickBindingFrame.SaveButton._bccSnapshotHooked = true
 	end
 
 	if ClickBindingFrame.CleanDataProvider then

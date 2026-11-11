@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.7.0] (2026-11-11)
+### Added
+- **Character Profiles, Direct Copy & `!BCC1:...!` String Import/Export (Tab 4: `Profiles & Share`):**
+  - **Direct Character Copy (`/bcc copy`):** Automatically snapshots your Settings, Click Cast Keybinds, and Smart Rules per character (including full *WoW Forever* first and last names). Copy **Settings + Keybinds**, **Keybinds Only**, or **Settings Only** from any character on your account with 1 click.
+  - **Intelligent Cross-Character Spell Rank & Macro Resolution:** Imported or copied spell bindings automatically resolve to the highest compatible learned rank or Smart Rule (`MAX`, `MAX-1`, `MAX-2`, `MAX-3`, `FIXED`) on the target character and match macros by name, preparing all bindings directly in `ClickBindingFrame` with the native **Save** button highlighted.
+  - **Compact `!BCC1:...!` Export & Import Strings (`/bcc export`, `/bcc import`):** Share or back up **Settings + Keybinds** (`all`), **Keybinds Only** (`bindings`), or **Settings Only** (`settings`) via safe, URL-escaped strings without `loadstring`.
+  - **Character-Specific Settings (`/bcc charsettings`) & Merge Mode (`/bcc merge`):** Optionally isolate settings for individual characters instead of account-wide, and choose whether importing/copying keybinds replaces or merges with your current bindings.
+- **Full Spanish Localization (`esES` / `esMX`) & Live Language Switcher (`/bcc lang`):**
+  - Added complete Spanish (`esES` and `esMX`) localization alongside English (`enUS` / `enGB`) and German (`deDE`), always backed by a 100% English fallback.
+  - Added a live **AddOn Language** selector in Tab 2 (`Auto (Client)`, `English`, `Deutsch`, `Español`) and `/bcc lang [auto|en|de|es]` that switches all UI text on the fly without `/reload`.
+
+### Fixed
+- **Hover Overlay vs. Right-Click Context Menus:** Lowered the Unit Frame Hover Overlay from the `TOOLTIP` layer to the `DIALOG` layer (above all unit frames, but strictly below Blizzard's `FULLSCREEN_DIALOG` context menus, dropdowns, and `GameTooltip`) and added automatic hiding while any right-click context menu (`Menu.GetManager():IsAnyMenuOpen()`) is open.
+- **Unified English Output for `/bcc debug`:** Standardized all live taint diagnostic messages and copyable reports in `/bcc debug` to English for easier international bug reporting.
+
 ## [0.6.0] (2026-11-10)
 ### Added
 - **Dedicated 3-Tab Settings Window (`BetterClickCastingSettingsFrame` & `/bcc cfg`):**
