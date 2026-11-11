@@ -14,5 +14,6 @@ ignore:
   - .agents
   - .gitignore
   - Assets
+  - wiki
   - BetterClickCastings.toc
   - BetterClickCastings.lua
