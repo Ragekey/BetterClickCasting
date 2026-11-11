@@ -108,6 +108,23 @@ local function IsLikelyUnitFrameByName(frame)
 	return false
 end
 
+-- Schließt Nicht-UnitFrame-Fenster aus, deren Unter-Elemente (wie Bewegungstempo oder Waffenschaden
+-- in PaperDollFrame.lua) intern ein .unit = "player"-Feld für ihre eigenen Tooltips speichern.
+local function IsNonUnitPanelFrame(frame)
+	if not frame then
+		return false
+	end
+	if frame == _G.CharacterFrame
+		or frame == _G.PaperDollFrame
+		or frame == _G.PetPaperDollFrame
+		or frame == _G.InspectFrame
+		or frame == _G.PlayerSpellsFrame
+		or frame == _G.SpellBookFrame then
+		return true
+	end
+	return false
+end
+
 -- Ermittelt passiv und ohne Schreibzugriff das aktuell gehoverte UnitFrame.
 -- Wandert bei Unter-Frames (z. B. Buff-Icons oder HealthBars) bis zum äußersten UnitFrame
 -- derselben Einheit hoch, damit Kanten-Anker (Top/Bottom/Left/Right) nicht an Buff-Icons springen.
@@ -117,7 +134,7 @@ local function ExtractUnitFromFrame(frame)
 		local ok, res = pcall(SecureButton_GetUnit, frame)
 		if ok and type(res) == "string" and res ~= "" then
 			if not canaccessvalue or canaccessvalue(res) then
-				return res
+				return res, true
 			end
 		end
 	end
@@ -126,10 +143,24 @@ local function ExtractUnitFromFrame(frame)
 	end)
 	if okUnit and type(rawUnit) == "string" and rawUnit ~= "" then
 		if not canaccessvalue or canaccessvalue(rawUnit) then
-			return rawUnit
+			return rawUnit, false
 		end
 	end
-	return nil
+	return nil, false
+end
+
+local function IsGenuineUnitFrame(frame, hasSecureUnit)
+	if hasSecureUnit or IsLikelyUnitFrameByName(frame) then
+		return true
+	end
+	if _G.ClickCastFrames and _G.ClickCastFrames[frame] then
+		return true
+	end
+	local okBtn, isBtn = pcall(frame.IsObjectType, frame, "Button")
+	if okBtn and isBtn then
+		return true
+	end
+	return false
 end
 
 local function FindHoveredUnitFrame()
@@ -153,13 +184,16 @@ local function FindHoveredUnitFrame()
 		if current.IsForbidden and current:IsForbidden() then
 			break
 		end
+		if IsNonUnitPanelFrame(current) then
+			return nil
+		end
 
-		local unit = ExtractUnitFromFrame(current)
+		local unit, hasSecureUnit = ExtractUnitFromFrame(current)
 		if unit and string.find(unit, "^nameplate") then
 			return nil
 		end
 
-		if unit then
+		if unit and IsGenuineUnitFrame(current, hasSecureUnit) then
 			if (UnitExists and UnitExists(unit))
 				or (EditModeManagerFrame and EditModeManagerFrame:IsShown())
 				or IsLikelyUnitFrameByName(current) then
