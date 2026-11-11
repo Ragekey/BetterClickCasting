@@ -79,28 +79,6 @@ local function IsFreeMoveActive()
 	return (ClickBindingFrame and ClickBindingFrame:IsShown()) and true or false
 end
 
-function UnitHoverTooltip.IsMoveUnlocked()
-	return isMoveUnlocked
-end
-
-function UnitHoverTooltip.SetMoveUnlocked(unlocked)
-	isMoveUnlocked = unlocked and true or false
-	UnitHoverTooltip.UpdateTrackingState()
-	if ns.SettingsUI and ns.SettingsUI.RefreshWindow then
-		ns.SettingsUI.RefreshWindow()
-	end
-end
-
-function UnitHoverTooltip.ResetPosition()
-	if type(BetterClickCastingDB) == "table" then
-		BetterClickCastingDB.unitHoverPos = nil
-	end
-	Database.Set("unitHoverPos", nil)
-	if hoverCard and hoverCard:IsShown() then
-		EvaluateHoverState(true)
-	end
-end
-
 local function GetModifierHeaderText(modMask)
 	if modMask == 0 then
 		return L["UNITHOVER_NO_MODIFIER"]
@@ -789,6 +767,32 @@ function UnitHoverTooltip.UpdateTrackingState()
 		f:Show()
 	end
 	EvaluateHoverState(true)
+end
+
+function UnitHoverTooltip.IsMoveUnlocked()
+	return isMoveUnlocked
+end
+
+function UnitHoverTooltip.SetMoveUnlocked(unlocked)
+	isMoveUnlocked = unlocked and true or false
+	UnitHoverTooltip.UpdateTrackingState()
+	if ns.SettingsUI and ns.SettingsUI.RefreshWindow then
+		ns.SettingsUI.RefreshWindow()
+	end
+end
+
+function UnitHoverTooltip.ToggleMoveUnlocked()
+	UnitHoverTooltip.SetMoveUnlocked(not isMoveUnlocked)
+end
+
+function UnitHoverTooltip.ResetPosition()
+	if type(BetterClickCastingDB) == "table" then
+		BetterClickCastingDB.unitHoverPos = nil
+	end
+	Database.Set("unitHoverPos", nil)
+	if hoverCard and hoverCard:IsShown() then
+		EvaluateHoverState(true)
+	end
 end
 
 function UnitHoverTooltip.OnSettingChanged(key)

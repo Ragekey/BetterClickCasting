@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.7.1] (2026-11-11)
+### Fixed
+- **Hover Overlay Position Reset (`UnitHoverTooltip.ResetPosition`):** Fixed a Lua function declaration order issue when resetting the unlocked Unit Frame Hover Overlay position via Right-Click or `/bcc resetpos`.
+
 ## [0.7.0] (2026-11-11)
 ### Added
 - **Character Profiles, Direct Copy & `!BCC1:...!` String Import/Export (Tab 4: `Profiles & Share`):**
