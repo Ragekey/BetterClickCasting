@@ -12,6 +12,7 @@ _agent/
 
 # External store assets and local dev-reload shims not shipped inside the in-game addon
 Assets/Icon.tga
+Assets/tmp/
 BetterClickCastings.toc
 BetterClickCastings.lua
 
