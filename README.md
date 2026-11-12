@@ -15,7 +15,7 @@ Sadly, the menu never got any love from Blizzard (even Blizzard's native tooltip
 
 ### Features
 
-**Better Click Casting** upgrades Blizzard's native Click Cast window and Spellbook with full **Spell Rank support** and quality-of-life features for Classic and *WoW Forever*, without replacing Blizzard's system or requiring heavy unitframe add-ons like VuhDo, Cell, or HealBot.
+**Better Click Casting** upgrades Blizzard's native Click Cast window and Spellbook with full **Spell Rank support** and quality-of-life features for *WoW Forever*, without replacing Blizzard's system or requiring heavy unitframe add-ons like VuhDo, Cell, or HealBot.
 
 * **Visible Spell Ranks & Live Mana Costs:** Shows the exact bound rank right next to every spell name, such as **Flash Heal (Rank 4)**, plus live mana costs directly in the Click Cast row.
 * **Max-Rank & Downrank Detection:** Marks spells at your highest learned rank with a green **[MAX]** tag and highlights lower ranks in orange with a max-rank hint like **(Rank 2 / Max 4)**.
