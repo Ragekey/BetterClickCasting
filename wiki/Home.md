@@ -1,6 +1,6 @@
 # Better Click Casting Wiki
 
-Welcome to the official documentation for **Better Click Casting** for *WoW Forever* (and modern Classic clients).
+Welcome to the official documentation for **Better Click Casting** for *WoW Forever*.
 
 **Better Click Casting** upgrades Blizzard's built-in **Click Cast Bindings** (`ClickBindingFrame`) and **Spellbook** (`PlayerSpellsFrame`) with full **Spell Rank support**, **Smart Rank Rules**, **1-Click Spellbook Binding**, a **Unit Frame Hover Overlay**, and **Character Profile Sharing**, all while staying 100% native and taint-free.
 
@@ -33,7 +33,7 @@ When you open `/bcc`, **Better Click Casting** automatically opens your Spellboo
 
 ## 3. Spell Ranks, Smart Rank Rules & Trainer Upgrades
 
-In Classic and *WoW Forever*, spells have multiple ranks with different healing/damage values and mana costs.
+In *WoW Forever*, spells have multiple ranks with different healing/damage values and mana costs.
 
 ### Visual Rank Indicators & Inline Rank Switcher
 * **Rank & Live Mana Display**: Every spell row in `ClickBindingFrame` shows its exact bound rank and current mana cost.
