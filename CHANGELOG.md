@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.8.0] (2026-11-13)
+### Added
+- **Per-Character Binding Presets / Loadouts (`/bcc preset`):**
+  - Save and switch between multiple named Click Cast setups on the same character (such as **Raid**, **Dungeon**, or **Solo / Off-Spec**).
+  - Switch presets directly via the **`Preset: ...`** selector in the top-left header of `ClickBindingFrame`, manage them in Tab 4 (`Profiles & Share`), or use `/bcc preset [load|save|del|list] <Name>`.
+- **Visual Free Keys Matrix (`4x5` / `8x5` Cheat-Sheet, `/bcc keys`):**
+  - Added a movable visual grid showing all bound and **`[FREE]`** mouse button combinations across `LMB`, `RMB`, `MMB`, `MB4`, and `MB5` (`Direct`, `Shift`, `Ctrl`, `Alt`), with live spell icons, rank tags, and full spell tooltips.
+  - **Expandable `8x5` Combo Grid (`/bcc keys combos`):** Toggle **`Show modifier combinations (8x5)`** inside the matrix window to expand the grid from 20 slots (`4x5`) to 40 slots (`8x5`, adding `Shift+Ctrl`, `Shift+Alt`, `Ctrl+Alt`, and `S+C+A`).
+  - **Quick Access & Auto-Open (`/bcc keys auto`):** Open the matrix via the **`Matrix`** header button inside `ClickBindingFrame`, Right-Clicking the settings gear icon, `/bcc keys`, or enable **`Auto-open with /bcc`** inside the matrix window so it opens automatically alongside `ClickBindingFrame`.
+- **Compact Binding Rows (`/bcc compact`, Default: On):**
+  - Reduces row height in `ClickBindingFrame` from `46 px` to `32 px` so almost twice as many bound spells fit on screen without scrolling (toggleable in Tab 1 or via `/bcc compact`).
+- **Unlearned Spell Detection After Talent Respec (`[NOT LEARNED]`):**
+  - Automatically detects bound spells that are currently not learned in your Spellbook (for example after a talent respec) and flags them with a desaturated icon, red **`[NOT LEARNED]`** tag, and tooltip warning in `ClickBindingFrame`, the Free Keys Matrix, and the Unit Frame Hover Overlay.
+- **Live Out-of-Range Indicator in Unit Frame Hover Overlay (`[OOR]`, `/bcc range`):**
+  - Checks live spell range against the hovered unit (`C_Spell.IsSpellInRange`) and marks out-of-range spells with a dimmed row and red **`[OOR]`** tag (toggleable in Tab 3 or via `/bcc range`).
+
+### Fixed
+- **Gamepad Mode Protection (`SetPreferredGamepadInteractTarget`):** Added `InputUtil.IsGamepadUIEnabled()` guards before automatic Spellbook tab switches so `Blizzard_GamepadSharedUtility/FrameControlsManager` never taints `shownFrames` when Gamepad mode is active, and added Gamepad taint checks to `/bcc debug`.
+- **Overlay Unlock (`/bcc move`) & Hover Anchor Persistence:** Integrated the Free Keys Matrix into `/bcc move` (unlocking all 3 movable frames at once) and prevented dragging the Hover Overlay during `/bcc move` from overwriting `Anchor: Cursor` with `Free Position`.
+- **Companion Window Z-Order & Auto-Close:** Set `BetterClickCastingSettingsFrame` and the Free Keys Matrix to `MEDIUM` strata with `SetToplevel(true)` so clicking any open window brings it naturally to the front, and both companion windows automatically close when `ClickBindingFrame` closes.
+
 ## [0.7.3] (2026-11-11)
 ### Fixed
 - **Hover Overlay vs. Player Buff & Debuff Icons (`BuffFrame` / `DebuffFrame`):** Fixed the Unit Frame Hover Overlay appearing when hovering over the player's own Buff, Debuff, or Totem icons (where Blizzard attaches `self.unit = PlayerFrame.unit` to each `AuraButtonTemplate` button). `IsGenuineUnitFrame` now requires a genuine `SecureUnitButton` (`SecureButton_GetUnit`, `ClickCastFrames`, or named HUD UnitFrame) and explicitly excludes `BuffFrame`, `DebuffFrame`, `ExternalDefensivesFrame`, `DeadlyDebuffFrame`, and `TotemFrame`.

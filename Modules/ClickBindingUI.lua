@@ -534,7 +534,8 @@ function ClickBindingUI.CountUpgradeableBindings()
 		local info = element and element.bindingInfo
 		if info and Constants.IsSpellOrPetBinding(info) and info.actionID then
 			local rankEntry = SpellRanks.GetRankEntryForAction(info.actionID)
-			local maxEntry = rankEntry and rankEntry.group and rankEntry.group.maxEntry
+			local group = (rankEntry and rankEntry.group) or SpellRanks.GetSpellGroupForAction(info.actionID, info.type)
+			local maxEntry = group and group.maxEntry
 			if maxEntry and maxEntry.actionID ~= info.actionID then
 				count = count + 1
 			end
@@ -552,7 +553,8 @@ function ClickBindingUI.UpgradeAllBindingsToMaxRank()
 		local info = element and element.bindingInfo
 		if info and Constants.IsSpellOrPetBinding(info) and info.actionID then
 			local rankEntry = SpellRanks.GetRankEntryForAction(info.actionID)
-			local maxEntry = rankEntry and rankEntry.group and rankEntry.group.maxEntry
+			local group = (rankEntry and rankEntry.group) or SpellRanks.GetSpellGroupForAction(info.actionID, info.type)
+			local maxEntry = group and group.maxEntry
 			if maxEntry and maxEntry.actionID ~= info.actionID then
 				info.actionID = maxEntry.actionID
 				SpellRanks.SetRuleForBinding(info, SpellRanks.RULE_MAX, maxEntry)
@@ -630,26 +632,31 @@ function ClickBindingUI.ApplySmartRulesToDataProvider(silentChat)
 end
 
 local function OpenRankContextMenu(rankButton, lineFrame, elementData, rankEntry)
-	if not MenuUtil or not MenuUtil.CreateContextMenu or not rankEntry or not rankEntry.group then
+	if not MenuUtil or not MenuUtil.CreateContextMenu then
 		return
 	end
 
-	local group = rankEntry.group
-	if #group.entries <= 1 then
+	local group = (rankEntry and rankEntry.group)
+		or (elementData and elementData.bindingInfo and SpellRanks.GetSpellGroupForAction(elementData.bindingInfo.actionID, elementData.bindingInfo.type))
+	if not group or not group.entries or #group.entries == 0 then
 		return
 	end
+	if rankEntry and #group.entries <= 1 then
+		return
+	end
+	local refEntry = rankEntry or group.maxEntry or group.entries[1]
 
 	MenuUtil.CreateContextMenu(rankButton, function(_, rootDescription)
 		-- 1. Sektion: Smarte Rang-Regeln (wenn für diese gebundene Zeile aktiv)
-		if Database.Get("enableSmartRankRules") and elementData and elementData.bindingInfo and elementData.bindingInfo.button then
+		if Database.Get("enableSmartRankRules") and elementData and elementData.bindingInfo and elementData.bindingInfo.button and #group.entries > 1 then
 			rootDescription:CreateTitle(L["SMART_RULE_HEADER"])
 
 			local function IsRuleSelected(modeValue)
-				return SpellRanks.GetRuleForBinding(elementData.bindingInfo, rankEntry) == modeValue
+				return SpellRanks.GetRuleForBinding(elementData.bindingInfo, refEntry) == modeValue
 			end
 
 			local function SetRuleSelected(modeValue)
-				SpellRanks.SetRuleForBinding(elementData.bindingInfo, modeValue, rankEntry)
+				SpellRanks.SetRuleForBinding(elementData.bindingInfo, modeValue, refEntry)
 				local targetEntry = SpellRanks.GetTargetEntryForRule(group, modeValue)
 				if targetEntry and targetEntry.actionID then
 					SetLineSpellRank(lineFrame, elementData, targetEntry.actionID, modeValue)
@@ -738,6 +745,7 @@ function ClickBindingUI.ShowLineTooltip(lineFrame)
 
 	if bType == Enum.ClickBindingType.Spell or bType == Enum.ClickBindingType.PetAction then
 		local rankEntry = SpellRanks.GetRankEntryForAction(actionID)
+		local isLearned = SpellRanks.IsBindingSpellLearned(bindingInfo)
 		if rankEntry and rankEntry.slotIndex and rankEntry.spellBank then
 			GameTooltip:SetSpellBookItem(rankEntry.slotIndex, rankEntry.spellBank)
 		else
@@ -748,7 +756,19 @@ function ClickBindingUI.ShowLineTooltip(lineFrame)
 		local bindText = Constants.GetFullBindingString(bindingInfo)
 		GameTooltip:AddDoubleLine(L["TOOLTIP_CLICK_BINDING_LABEL"], bindText, 0.8, 0.8, 0.8, 1, 1, 1)
 
-		if rankEntry and rankEntry.group and #rankEntry.group.entries > 1 then
+		if not isLearned then
+			GameTooltip:AddDoubleLine(
+				L["TOOLTIP_RANK_STATUS_LABEL"],
+				L["TOOLTIP_STATUS_NOT_LEARNED"],
+				0.8, 0.8, 0.8,
+				1.0, 0.33, 0.33
+			)
+			GameTooltip:AddLine(L["TOOLTIP_NOT_LEARNED_HINT"], 1.0, 0.5, 0.5, true)
+			local fallbackGroup = SpellRanks.GetSpellGroupForAction(actionID, bType)
+			if fallbackGroup and fallbackGroup.entries and #fallbackGroup.entries >= 1 and Database.Get("showRankSwitcher") then
+				GameTooltip:AddLine(L["TOOLTIP_SWITCH_RANK_HINT"], 0.6, 0.85, 1.0, true)
+			end
+		elseif rankEntry and rankEntry.group and #rankEntry.group.entries > 1 then
 			local group = rankEntry.group
 			local maxEntry = group.maxEntry
 			if maxEntry and maxEntry.actionID == rankEntry.actionID then
@@ -800,7 +820,7 @@ end
 
 local function EnsureHeaderGroupWidgets(headerFrame)
 	if headerFrame.BCCGroupButton then
-		return headerFrame.BCCGroupButton, headerFrame.BCCSubDivider
+		return headerFrame.BCCGroupButton, headerFrame.BCCMatrixButton, headerFrame.BCCSubDivider
 	end
 
 	-- Dezent schimmernde Trennlinie unter eigenen Untergruppen-Headern
@@ -874,7 +894,62 @@ local function EnsureHeaderGroupWidgets(headerFrame)
 
 	btn:Hide()
 	headerFrame.BCCGroupButton = btn
-	return btn, divider
+
+	-- 1-Klick-Pill-Button für die Tasten-Matrix direkt links neben dem Group-Dropdown
+	local matrixBtn = CreateFrame("Button", nil, headerFrame)
+	matrixBtn:SetSize(64, 19)
+	matrixBtn:SetPoint("RIGHT", btn, "LEFT", -6, 0)
+	matrixBtn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+
+	local mBg = matrixBtn:CreateTexture(nil, "BACKGROUND")
+	mBg:SetAtlas("common-dropdown-c-button")
+	mBg:SetPoint("TOPLEFT", -3, 3)
+	mBg:SetPoint("BOTTOMRIGHT", 3, -3)
+	matrixBtn.Bg = mBg
+
+	local mHl = matrixBtn:CreateTexture(nil, "HIGHLIGHT")
+	mHl:SetAtlas("common-dropdown-c-button-hover-1")
+	mHl:SetBlendMode("ADD")
+	mHl:SetAlpha(0.45)
+	mHl:SetPoint("TOPLEFT", -3, 3)
+	mHl:SetPoint("BOTTOMRIGHT", 3, -3)
+
+	local mLabel = matrixBtn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+	mLabel:SetPoint("LEFT", matrixBtn, "LEFT", 6, 0)
+	mLabel:SetPoint("RIGHT", matrixBtn, "RIGHT", -6, 0)
+	mLabel:SetJustifyH("CENTER")
+	mLabel:SetWordWrap(false)
+	matrixBtn.Text = mLabel
+
+	matrixBtn:SetScript("OnMouseDown", function(self)
+		self.Text:SetPoint("LEFT", self, "LEFT", 7, -1)
+		self.Text:SetPoint("RIGHT", self, "RIGHT", -5, -1)
+	end)
+
+	matrixBtn:SetScript("OnMouseUp", function(self)
+		self.Text:SetPoint("LEFT", self, "LEFT", 6, 0)
+		self.Text:SetPoint("RIGHT", self, "RIGHT", -6, 0)
+	end)
+
+	matrixBtn:SetScript("OnClick", function()
+		PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
+		ClickBindingUI.ToggleFreeKeysMatrix()
+	end)
+
+	matrixBtn:SetScript("OnEnter", function(self)
+		GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+		GameTooltip_SetTitle(GameTooltip, L["SETTINGS_FREE_KEYS_MATRIX_BTN"])
+		GameTooltip_AddNormalLine(GameTooltip, L["SETTINGS_FREE_KEYS_MATRIX_DESC"], true)
+		GameTooltip:Show()
+	end)
+
+	matrixBtn:SetScript("OnLeave", function()
+		GameTooltip:Hide()
+	end)
+
+	matrixBtn:Hide()
+	headerFrame.BCCMatrixButton = matrixBtn
+	return btn, matrixBtn, divider
 end
 
 local function UpdateHeaderFrame(headerFrame, elementData)
@@ -882,10 +957,14 @@ local function UpdateHeaderFrame(headerFrame, elementData)
 		return
 	end
 	elementData = elementData or (headerFrame.GetElementData and headerFrame:GetElementData())
-	local groupBtn, divider = EnsureHeaderGroupWidgets(headerFrame)
+	local groupBtn, matrixBtn, divider = EnsureHeaderGroupWidgets(headerFrame)
+	local compact = Database.Get("compactListMode") and true or false
+	local hHeight = (compact and elementData and elementData.isBCCGroupHeader) and 17 or 20
+	headerFrame:SetHeight(hHeight)
 
 	-- Zuerst eigene Elemente zurücksetzen (ScrollBox-Recycling-Hygiene)
 	groupBtn:Hide()
+	matrixBtn:Hide()
 	divider:Hide()
 	if headerFrame.Name then
 		headerFrame.Name:ClearAllPoints()
@@ -911,6 +990,8 @@ local function UpdateHeaderFrame(headerFrame, elementData)
 			groupBtn.Text:SetText(string.format(L["GROUP_BUTTON_FORMAT"], SettingsUI.GetCurrentGroupShortLabel()))
 			groupBtn:Show()
 		end
+		matrixBtn.Text:SetText("|cffffd100" .. (L["MATRIX_HEADER_BTN"] or "Matrix") .. "|r")
+		matrixBtn:Show()
 	end
 end
 
@@ -951,8 +1032,8 @@ local function EnsureDeleteButtonStyled(lineFrame)
 		end
 	end
 
-	-- In der 2. Zeile (auf derselben vertikalen Achse y = -8 wie BindingText) rechts außen platzieren,
-	-- damit Zeile 1 (Zaubername + Rang) die volle Zeilenbreite ohne Überlappung nutzen kann.
+	-- In der 2. Zeile rechts außen platzieren, damit Zeile 1 (Zaubername + Rang)
+	-- die volle Zeilenbreite ohne Überlappung nutzen kann.
 	delBtn:SetSize(22, 18)
 	delBtn:ClearAllPoints()
 	delBtn:SetPoint("RIGHT", lineFrame, "RIGHT", -6, -8)
@@ -1018,6 +1099,117 @@ local function EnsureDeleteButtonStyled(lineFrame)
 	return delBtn
 end
 
+local function ApplyLineCompactMetrics(lineFrame)
+	if not lineFrame then
+		return
+	end
+	local compact = Database.Get("compactListMode") and true or false
+	local lineH = compact and 32 or 46
+	local iconSize = compact and 26 or 35
+	local topRowY = compact and 6 or 9
+	local bottomRowY = compact and -6 or -8
+	local btnH = compact and 15 or 18
+	local delW = compact and 20 or 22
+	local rankW = compact and 88 or 92
+
+	lineFrame._bccTopRowY = topRowY
+	lineFrame._bccBottomRowY = bottomRowY
+	lineFrame:SetHeight(lineH)
+
+	if lineFrame.Icon then
+		lineFrame.Icon:SetSize(iconSize, iconSize)
+	end
+	if lineFrame.Background and lineFrame.Background.SetHeight then
+		lineFrame.Background:SetHeight(lineH)
+	end
+	if lineFrame.FrameHighlight and lineFrame.FrameHighlight.SetHeight then
+		lineFrame.FrameHighlight:SetHeight(lineH)
+	end
+	if lineFrame.NewOutline and lineFrame.NewOutline.SetHeight then
+		lineFrame.NewOutline:SetHeight(lineH)
+	end
+	if lineFrame.IconHighlight and lineFrame.IconHighlight.SetSize then
+		local hlSize = compact and 30 or 40
+		lineFrame.IconHighlight:SetSize(hlSize, hlSize)
+	end
+	if lineFrame.Name and lineFrame.Name.SetFontObject then
+		lineFrame.Name:SetFontObject(compact and "GameFontNormalSmall" or "GameFontNormal")
+	end
+	if lineFrame.BindingText and lineFrame.Icon then
+		lineFrame.BindingText:ClearAllPoints()
+		lineFrame.BindingText:SetPoint("LEFT", lineFrame.Icon, "RIGHT", 5, bottomRowY)
+		lineFrame.BindingText:SetWordWrap(false)
+	end
+	if lineFrame.DeleteButton then
+		lineFrame.DeleteButton:SetSize(delW, btnH)
+		lineFrame.DeleteButton:ClearAllPoints()
+		lineFrame.DeleteButton:SetPoint("RIGHT", lineFrame, "RIGHT", -6, bottomRowY)
+	end
+	if lineFrame.BCCRankButton then
+		lineFrame.BCCRankButton:SetSize(rankW, btnH)
+		lineFrame.BCCRankButton:ClearAllPoints()
+		if lineFrame.DeleteButton then
+			lineFrame.BCCRankButton:SetPoint("RIGHT", lineFrame.DeleteButton, "LEFT", -4, 0)
+		else
+			lineFrame.BCCRankButton:SetPoint("RIGHT", lineFrame, "RIGHT", -6, bottomRowY)
+		end
+	end
+	if lineFrame.BCCManaText then
+		lineFrame.BCCManaText:ClearAllPoints()
+		lineFrame.BCCManaText:SetPoint("RIGHT", lineFrame, "RIGHT", -8, topRowY)
+	end
+end
+
+function ClickBindingUI.ApplyScrollBoxLayout()
+	if not ClickBindingFrame or not ClickBindingFrame.ScrollBox or not ClickBindingFrame.ScrollBox.GetView then
+		return
+	end
+	local view = ClickBindingFrame.ScrollBox:GetView()
+	if not view then
+		return
+	end
+
+	local compact = Database.Get("compactListMode") and true or false
+	if view.SetPadding then
+		view:SetPadding(compact and 5 or 7, compact and 40 or 53, 7, 7, compact and 2 or 4)
+	end
+	if view.SetElementExtentCalculator then
+		view:SetElementExtentCalculator(function(_, elementData)
+			local isCompact = Database.Get("compactListMode") and true or false
+			local eType = elementData and elementData.elementType
+			if eType == ElementDataTypes.DefaultsHeader or eType == ElementDataTypes.CustomsHeader then
+				if isCompact and elementData and elementData.isBCCGroupHeader then
+					return 17
+				end
+				return 20
+			end
+			return isCompact and 32 or 46
+		end)
+	end
+
+	if ClickBindingFrame.ScrollBox.ForEachFrame then
+		ClickBindingFrame.ScrollBox:ForEachFrame(function(frame)
+			local elementData = frame.GetElementData and frame:GetElementData()
+			local eType = elementData and elementData.elementType
+			if eType == ElementDataTypes.DefaultsHeader or eType == ElementDataTypes.CustomsHeader then
+				local hHeight = (compact and elementData and elementData.isBCCGroupHeader) and 17 or 20
+				frame:SetHeight(hHeight)
+			else
+				ApplyLineCompactMetrics(frame)
+			end
+		end)
+	end
+
+	if ClickBindingFrame:IsShown() then
+		if ClickBindingFrame.ScrollBox.Rebuild and view.GetDataProvider and view:GetDataProvider() then
+			ClickBindingFrame.ScrollBox:Rebuild(true)
+		elseif ClickBindingFrame.ScrollBox.FullUpdate then
+			ClickBindingFrame.ScrollBox:FullUpdate(ScrollBoxConstants and ScrollBoxConstants.UpdateImmediately or true)
+		end
+		ClickBindingUI.RefreshVisibleLines()
+	end
+end
+
 local function EnsureLineRankButton(lineFrame)
 	if lineFrame.BCCRankButton then
 		return lineFrame.BCCRankButton
@@ -1077,12 +1269,14 @@ local function EnsureLineRankButton(lineFrame)
 			return
 		end
 		local rankEntry = SpellRanks.GetRankEntryForAction(elementData.bindingInfo.actionID)
-		if not rankEntry or not rankEntry.group then
+		local group = (rankEntry and rankEntry.group)
+			or SpellRanks.GetSpellGroupForAction(elementData.bindingInfo.actionID, elementData.bindingInfo.type)
+		if not group then
 			return
 		end
 
 		if mouseButton == "RightButton" then
-			local maxEntry = rankEntry.group.maxEntry
+			local maxEntry = group.maxEntry
 			if maxEntry then
 				SetLineSpellRank(lineFrame, elementData, maxEntry.actionID, SpellRanks.RULE_MAX)
 				ClickBindingUI.ShowLineTooltip(lineFrame)
@@ -1098,16 +1292,21 @@ local function EnsureLineRankButton(lineFrame)
 		end
 		local elementData = lineFrame.GetElementData and lineFrame:GetElementData()
 		local rankEntry = elementData and elementData.bindingInfo and SpellRanks.GetRankEntryForAction(elementData.bindingInfo.actionID)
+		local group = (rankEntry and rankEntry.group)
+			or (elementData and elementData.bindingInfo and SpellRanks.GetSpellGroupForAction(elementData.bindingInfo.actionID, elementData.bindingInfo.type))
 
 		GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
 		GameTooltip_SetTitle(GameTooltip, L["RANK_SWITCHER_TOOLTIP_TITLE"])
-		if rankEntry and rankEntry.group and rankEntry.group.maxEntry then
-			local maxEntry = rankEntry.group.maxEntry
+		if rankEntry and group and group.maxEntry then
+			local maxEntry = group.maxEntry
 			GameTooltip:AddLine(string.format(L["RANK_SWITCHER_CURRENT_FORMAT"], rankEntry.subName or "?", maxEntry.subName or "?"), 1, 1, 1)
 			if Database.Get("enableSmartRankRules") and elementData.bindingInfo.button then
 				local ruleMode = SpellRanks.GetRuleForBinding(elementData.bindingInfo, rankEntry)
 				GameTooltip:AddLine(string.format(L["RANK_SWITCHER_RULE_FORMAT"], GetRuleDisplayName(ruleMode)), 0.6, 0.85, 1.0)
 			end
+		elseif not rankEntry and group and group.maxEntry then
+			local unlearnedSub = SpellRanks.GetSpellSubtextForAction(elementData.bindingInfo.actionID) or L["TOOLTIP_STATUS_NOT_LEARNED"]
+			GameTooltip:AddLine(string.format(L["RANK_SWITCHER_CURRENT_FORMAT"], unlearnedSub, group.maxEntry.subName or "?"), 1.0, 0.4, 0.4)
 		end
 		GameTooltip:AddLine(L["RANK_SWITCHER_HINT_LEFT"], 0.6, 0.85, 1.0)
 		GameTooltip:AddLine(L["RANK_SWITCHER_HINT_RIGHT"], 0.25, 1.0, 0.25)
@@ -1170,12 +1369,20 @@ local function ApplyRankToLine(lineFrame, elementData, subtext)
 	end
 
 	local isDisabled = elementData.unbound
+	local isLearned = SpellRanks.IsBindingSpellLearned(elementData.bindingInfo)
+	if lineFrame.Icon and lineFrame.Icon.SetDesaturated then
+		local shouldDesaturate = (isDisabled and elementData.elementType ~= ElementDataTypes.NewSlot) or (not isLearned)
+		lineFrame.Icon:SetDesaturated(shouldDesaturate)
+	end
 
 	-- Live-Manakosten rechtsbündig in Zeile 1 einblenden (Option 1A)
+	local topRowY = lineFrame._bccTopRowY or 9
 	if manaText then
+		manaText:ClearAllPoints()
+		manaText:SetPoint("RIGHT", lineFrame, "RIGHT", -8, topRowY)
 		local costStr = Database.Get("showLineManaCost") and SpellRanks.GetSpellPowerCostString(actionID) or nil
 		if costStr and costStr ~= "" then
-			if isDisabled then
+			if isDisabled or not isLearned then
 				manaText:SetText("|cff777777" .. costStr .. "|r")
 			else
 				manaText:SetText("|cff80c8ff" .. costStr .. "|r")
@@ -1183,15 +1390,15 @@ local function ApplyRankToLine(lineFrame, elementData, subtext)
 			manaText:Show()
 			if lineFrame.Name and lineFrame.Icon then
 				lineFrame.Name:ClearAllPoints()
-				lineFrame.Name:SetPoint("LEFT", lineFrame.Icon, "RIGHT", 5, 9)
+				lineFrame.Name:SetPoint("LEFT", lineFrame.Icon, "RIGHT", 5, topRowY)
 				lineFrame.Name:SetPoint("RIGHT", manaText, "LEFT", -6, 0)
 			end
 		else
 			manaText:Hide()
 			if lineFrame.Name and lineFrame.Icon then
 				lineFrame.Name:ClearAllPoints()
-				lineFrame.Name:SetPoint("LEFT", lineFrame.Icon, "RIGHT", 5, 9)
-				lineFrame.Name:SetPoint("RIGHT", lineFrame, "RIGHT", -8, 9)
+				lineFrame.Name:SetPoint("LEFT", lineFrame.Icon, "RIGHT", 5, topRowY)
+				lineFrame.Name:SetPoint("RIGHT", lineFrame, "RIGHT", -8, topRowY)
 			end
 		end
 	end
@@ -1201,16 +1408,44 @@ local function ApplyRankToLine(lineFrame, elementData, subtext)
 		subtext = rankEntry.subName
 	end
 
+	local showRankInName = Database.Get("showRankInName")
+	local highlightDownranks = Database.Get("highlightDownranks")
+	local showRankSwitcher = Database.Get("showRankSwitcher")
+
+	-- Nicht gelernter Zauber (z. B. nach Talent-Respec, während das ClickBindingFrame geschlossen war):
+	-- Funktioniert auch für ranglose Talent-Zauber (ohne Subtext) und hebt die Zeile in Rot hervor.
+	if not isLearned then
+		local unlearnedName
+		if showRankInName and subtext and subtext ~= "" then
+			unlearnedName = string.format("|cff999999%s (%s)|r %s%s%s", baseName, subtext, Colors.WARN_UNLEARNED, L["TAG_NOT_LEARNED"], Colors.RESET)
+		else
+			unlearnedName = string.format("|cff999999%s|r %s%s%s", baseName, Colors.WARN_UNLEARNED, L["TAG_NOT_LEARNED"], Colors.RESET)
+		end
+		if lineFrame.Name then
+			lineFrame.Name:SetText(unlearnedName)
+		end
+		if rankBtn then
+			local fallbackGroup = SpellRanks.GetSpellGroupForAction(actionID, elementData.bindingInfo.type)
+			if showRankSwitcher and fallbackGroup and fallbackGroup.entries and #fallbackGroup.entries >= 1 then
+				local shortRank = (subtext and subtext ~= "" and (SpellRanks.ExtractShortRankText(subtext) or subtext)) or "?"
+				rankBtn.Text:SetText(string.format("%s%s (!)%s", Colors.WARN_UNLEARNED, shortRank, Colors.RESET))
+				if rankBtn.Bg then
+					rankBtn.Bg:SetVertexColor(1.0, 0.72, 0.72, 1.0)
+				end
+				rankBtn:Show()
+			else
+				rankBtn:Hide()
+			end
+		end
+		return
+	end
+
 	if not subtext or subtext == "" then
 		if rankBtn then
 			rankBtn:Hide()
 		end
 		return
 	end
-
-	local showRankInName = Database.Get("showRankInName")
-	local highlightDownranks = Database.Get("highlightDownranks")
-	local showRankSwitcher = Database.Get("showRankSwitcher")
 
 	local hasMultipleRanks = rankEntry and rankEntry.group and #rankEntry.group.entries > 1
 	local maxEntry = hasMultipleRanks and rankEntry.group.maxEntry or nil
@@ -1293,6 +1528,8 @@ function ClickBindingUI.UpdateLineWithRank(lineFrame, elementData)
 
 	elementData = elementData or (lineFrame.GetElementData and lineFrame:GetElementData())
 	local delBtn = EnsureDeleteButtonStyled(lineFrame)
+	ApplyLineCompactMetrics(lineFrame)
+	local topRowY = lineFrame._bccTopRowY or 9
 	local showDelete = ShouldShowDeleteButton(lineFrame, elementData)
 	if delBtn then
 		delBtn._bccAllowHide = not showDelete
@@ -1306,10 +1543,14 @@ function ClickBindingUI.UpdateLineWithRank(lineFrame, elementData)
 	if lineFrame.BCCManaText then
 		lineFrame.BCCManaText:Hide()
 	end
+	if lineFrame.Icon and lineFrame.Icon.SetDesaturated then
+		local isUnboundAction = (elementData and elementData.unbound and elementData.elementType ~= ElementDataTypes.NewSlot) and true or false
+		lineFrame.Icon:SetDesaturated(isUnboundAction)
+	end
 	if lineFrame.Name and lineFrame.Icon then
 		lineFrame.Name:ClearAllPoints()
-		lineFrame.Name:SetPoint("LEFT", lineFrame.Icon, "RIGHT", 5, 9)
-		lineFrame.Name:SetPoint("RIGHT", lineFrame, "RIGHT", -8, 9)
+		lineFrame.Name:SetPoint("LEFT", lineFrame.Icon, "RIGHT", 5, topRowY)
+		lineFrame.Name:SetPoint("RIGHT", lineFrame, "RIGHT", -8, topRowY)
 	end
 
 	if not elementData or not elementData.bindingInfo or not Constants.IsSpellOrPetBinding(elementData.bindingInfo) then
@@ -1402,6 +1643,12 @@ local function HookLineFrame(lineFrame)
 end
 
 function ClickBindingUI.RefreshVisibleLines()
+	if ClickBindingFrame and ClickBindingFrame:IsShown() then
+		ClickBindingUI.UpdatePresetDropdownButton()
+	end
+	if ClickBindingUI.RefreshFreeKeysMatrix then
+		ClickBindingUI.RefreshFreeKeysMatrix()
+	end
 	if ClickBindingFrame
 		and ClickBindingFrame:IsShown()
 		and ClickBindingFrame.ScrollBox
@@ -1925,6 +2172,8 @@ function ClickBindingUI.PrepareSmartRuleTest()
 end
 
 local debugCopyFrame = nil
+local importPopupFrame = nil
+local newPresetPopupFrame = nil
 
 local function ShowDebugCopyPopup(reportText, customTitle)
 	if not debugCopyFrame then
@@ -2084,7 +2333,648 @@ function ClickBindingUI.ShowBindingsExportPopup()
 		table.insert(lines, string.format("[%s] %s: %s%s", shortBind, fullBind, actionDesc, detailSuffix))
 	end
 
+	local freeKeysList = ClickBindingUI.GetFreeKeysSummaryList and ClickBindingUI.GetFreeKeysSummaryList(bindings) or {}
+	if #freeKeysList > 0 then
+		table.insert(lines, "")
+		table.insert(lines, string.format("%s (%d): %s", L["FREE_KEYS_SUMMARY_PREFIX"] or "Free Slots (4x5 Grid)", #freeKeysList, table.concat(freeKeysList, ", ")))
+	end
+
 	ShowDebugCopyPopup(table.concat(lines, "\n"), L["EXPORT_POPUP_TITLE"])
+end
+
+--------------------------------------------------------------------------------
+-- "Freie Tasten"-Spickzettel (4x5 Free Keys Matrix, Option A)
+--------------------------------------------------------------------------------
+
+local freeKeysMatrixFrame = nil
+local matrixPreviewUnlocked = false
+local matrixWasShownBeforePreview = false
+
+local MATRIX_COLUMNS = {
+	{ button = "LeftButton", short = "LMB" },
+	{ button = "RightButton", short = "RMB" },
+	{ button = "MiddleButton", short = "MMB" },
+	{ button = "Button4", short = "MB4" },
+	{ button = "Button5", short = "MB5" },
+}
+
+local MATRIX_MOD_ROWS = {
+	{ modOrder = 1, shortPrefix = "", labelKey = "MATRIX_ROW_DIRECT", fallback = "Direct", isCombo = false },
+	{ modOrder = 2, shortPrefix = "S-", labelKey = "MATRIX_ROW_SHIFT", fallback = "Shift", isCombo = false },
+	{ modOrder = 3, shortPrefix = "C-", labelKey = "MATRIX_ROW_CTRL", fallback = "Ctrl", isCombo = false },
+	{ modOrder = 4, shortPrefix = "A-", labelKey = "MATRIX_ROW_ALT", fallback = "Alt", isCombo = false },
+	{ modOrder = 5, shortPrefix = "SC-", labelKey = "MATRIX_ROW_SHIFT_CTRL", fallback = "Shift + Ctrl", isCombo = true },
+	{ modOrder = 6, shortPrefix = "SA-", labelKey = "MATRIX_ROW_SHIFT_ALT", fallback = "Shift + Alt", isCombo = true },
+	{ modOrder = 7, shortPrefix = "CA-", labelKey = "MATRIX_ROW_CTRL_ALT", fallback = "Ctrl + Alt", isCombo = true },
+	{ modOrder = 8, shortPrefix = "SCA-", labelKey = "MATRIX_ROW_SHIFT_CTRL_ALT", fallback = "Shift + Ctrl + Alt", isCombo = true },
+}
+
+local function NormalizeMatrixButton(buttonName)
+	if buttonName == "Button1" then
+		return "LeftButton"
+	elseif buttonName == "Button2" then
+		return "RightButton"
+	elseif buttonName == "Button3" then
+		return "MiddleButton"
+	end
+	return buttonName
+end
+
+local function CollectCurrentActiveBindings()
+	local bindings = {}
+	if ClickBindingFrame and ClickBindingFrame:IsShown() and ClickBindingFrame.dataProvider then
+		for _, element in ClickBindingFrame.dataProvider:Enumerate() do
+			if element and not element.unbound and element.bindingInfo and element.bindingInfo.button then
+				table.insert(bindings, element.bindingInfo)
+			end
+		end
+	elseif C_ClickBindings and C_ClickBindings.GetProfileInfo then
+		local profile = C_ClickBindings.GetProfileInfo()
+		if type(profile) == "table" then
+			for _, info in ipairs(profile) do
+				if info and info.button then
+					table.insert(bindings, info)
+				end
+			end
+		end
+	end
+	return bindings
+end
+
+function ClickBindingUI.GetFreeKeysSummaryList(bindings)
+	bindings = bindings or CollectCurrentActiveBindings()
+	local includeCombos = Database.Get("matrixShowCombos") and true or false
+	local maxRowCount = includeCombos and 8 or 4
+	local lookup = {}
+	for _, info in ipairs(bindings) do
+		if info and info.button then
+			local modOrder = Constants.GetModifierSortInfo(info.modifiers)
+			local normBtn = NormalizeMatrixButton(info.button)
+			lookup[tostring(modOrder) .. ":" .. tostring(normBtn)] = info
+		end
+	end
+
+	local freeList = {}
+	for rIdx = 1, maxRowCount do
+		local row = MATRIX_MOD_ROWS[rIdx]
+		if row then
+			for _, col in ipairs(MATRIX_COLUMNS) do
+				local key = tostring(row.modOrder) .. ":" .. col.button
+				if not lookup[key] then
+					table.insert(freeList, row.shortPrefix .. col.short)
+				end
+			end
+		end
+	end
+	return freeList
+end
+
+local function FormatMatrixCellData(info)
+	if not info then
+		return nil
+	end
+	local bType = info.type
+	local actionID = info.actionID
+	local icon = 134400
+	local shortLabel = "?"
+	local subLabel = ""
+	local isUnlearned = false
+	local isInteraction = false
+
+	if Constants.IsSpellOrPetBinding(info) and actionID then
+		local rankEntry = SpellRanks.GetRankEntryForAction(actionID)
+		local isLearned = SpellRanks.IsBindingSpellLearned(info)
+		isUnlearned = not isLearned
+		icon = SpellRanks.GetSpellIconForAction(actionID) or 134400
+		local baseName = (rankEntry and rankEntry.name) or SpellRanks.GetSpellBaseNameForAction(actionID) or "?"
+		local subtext = (rankEntry and rankEntry.subName) or SpellRanks.GetSpellSubtextForAction(actionID) or ""
+		local shortRank = SpellRanks.ExtractShortRankText(subtext) or subtext
+		shortLabel = baseName
+		if not isLearned then
+			subLabel = Colors.WARN_UNLEARNED .. L["TAG_NOT_LEARNED"] .. Colors.RESET
+		elseif shortRank and shortRank ~= "" then
+			if rankEntry and rankEntry.group and #rankEntry.group.entries > 1 then
+				if not rankEntry.isLowRank then
+					subLabel = Colors.TAG_MAX .. shortRank .. " " .. L["TAG_MAX"] .. Colors.RESET
+				else
+					subLabel = Colors.RANK_DOWN .. shortRank .. Colors.RESET
+				end
+			else
+				subLabel = Colors.RANK_MAX .. shortRank .. Colors.RESET
+			end
+		end
+	elseif bType == (Enum and Enum.ClickBindingType and Enum.ClickBindingType.Macro or 2) and actionID then
+		local macroName, macroIcon = nil, nil
+		if GetMacroInfo then
+			macroName, macroIcon = GetMacroInfo(actionID)
+		end
+		icon = macroIcon or 134400
+		shortLabel = macroName or (L["GROUP_HDR_MACROS"] or "Macro")
+		subLabel = Colors.MUTED .. (L["GROUP_HDR_MACROS"] or "Macro") .. Colors.RESET
+	elseif bType == (Enum and Enum.ClickBindingType and Enum.ClickBindingType.Interaction or 3) then
+		isInteraction = true
+		if actionID == (Enum and Enum.ClickBindingInteraction and Enum.ClickBindingInteraction.Target or 1) then
+			icon = 132212
+			shortLabel = CLICK_BINDING_TARGET_UNIT or BINDING_NAME_TARGETSELF or "Target"
+		elseif actionID == (Enum and Enum.ClickBindingInteraction and Enum.ClickBindingInteraction.OpenContextMenu or 2) then
+			icon = 134331
+			shortLabel = CLICK_BINDING_OPEN_MENU or HUD_EDIT_MODE_MENU or "Menu"
+		else
+			icon = 132212
+			shortLabel = "Interact"
+		end
+		subLabel = Colors.MUTED .. "Default" .. Colors.RESET
+	end
+
+	return {
+		info = info,
+		icon = icon,
+		shortLabel = shortLabel,
+		subLabel = subLabel,
+		isUnlearned = isUnlearned,
+		isInteraction = isInteraction,
+	}
+end
+
+local function ShowMatrixCellTooltip(cellFrame)
+	if not cellFrame or not GameTooltip then
+		return
+	end
+	GameTooltip:SetOwner(cellFrame, "ANCHOR_RIGHT")
+	local cellData = cellFrame.cellData
+	local comboText = cellFrame.comboLabel or "?"
+
+	if not cellData or not cellData.info then
+		GameTooltip_SetTitle(GameTooltip, comboText)
+		GameTooltip:AddLine(L["MATRIX_CELL_FREE_TOOLTIP"], 0.25, 1.0, 0.35, true)
+		GameTooltip:Show()
+		return
+	end
+
+	local info = cellData.info
+	local bType = info.type
+	local actionID = info.actionID
+	if Constants.IsSpellOrPetBinding(info) and actionID then
+		local rankEntry = SpellRanks.GetRankEntryForAction(actionID)
+		if rankEntry and rankEntry.slotIndex and rankEntry.spellBank and GameTooltip.SetSpellBookItem then
+			GameTooltip:SetSpellBookItem(rankEntry.slotIndex, rankEntry.spellBank)
+		elseif GameTooltip.SetSpellByID then
+			GameTooltip:SetSpellByID(actionID)
+		else
+			GameTooltip_SetTitle(GameTooltip, cellData.shortLabel)
+		end
+		GameTooltip:AddLine(" ")
+		GameTooltip:AddDoubleLine(L["TOOLTIP_CLICK_BINDING_LABEL"], Constants.GetFullBindingString(info), 0.8, 0.8, 0.8, 1, 1, 1)
+		if cellData.isUnlearned then
+			GameTooltip:AddDoubleLine(L["TOOLTIP_RANK_STATUS_LABEL"], L["TOOLTIP_STATUS_NOT_LEARNED"], 0.8, 0.8, 0.8, 1.0, 0.33, 0.33)
+		end
+	else
+		GameTooltip_SetTitle(GameTooltip, cellData.shortLabel)
+		GameTooltip:AddDoubleLine(L["TOOLTIP_CLICK_BINDING_LABEL"], Constants.GetFullBindingString(info), 0.8, 0.8, 0.8, 1, 1, 1)
+	end
+	GameTooltip:Show()
+end
+
+local function ApplySavedMatrixPosition(f)
+	if not f then
+		return
+	end
+	f:ClearAllPoints()
+	local pos = Database.Get("matrixWindowPos")
+	if type(pos) == "table" and pos.point and pos.relativePoint and type(pos.x) == "number" and type(pos.y) == "number" then
+		f:SetPoint(pos.point, UIParent, pos.relativePoint, pos.x, pos.y)
+	elseif ClickBindingFrame and ClickBindingFrame:IsShown() then
+		f:SetPoint("TOPLEFT", ClickBindingFrame, "TOPRIGHT", 14, -40)
+	else
+		f:SetPoint("CENTER", UIParent, "CENTER", 0, 60)
+	end
+end
+
+function ClickBindingUI.ResetMatrixPosition()
+	Database.Set("matrixWindowPos", nil)
+	if freeKeysMatrixFrame then
+		ApplySavedMatrixPosition(freeKeysMatrixFrame)
+	end
+end
+
+local function EnsureFreeKeysMatrixFrame()
+	if freeKeysMatrixFrame then
+		return freeKeysMatrixFrame
+	end
+
+	local f = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
+	f:SetSize(560, 320)
+	f:SetFrameStrata("MEDIUM")
+	f:SetToplevel(true)
+	f:SetFrameLevel(20)
+	f:SetClampedToScreen(true)
+	f:SetMovable(true)
+	f:EnableMouse(true)
+	f:RegisterForDrag("LeftButton")
+	f:SetScript("OnMouseDown", function(self)
+		if self.Raise then
+			self:Raise()
+		end
+	end)
+	f:SetScript("OnMouseUp", function(_, mouseButton)
+		if mouseButton == "RightButton" and matrixPreviewUnlocked then
+			PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
+			ClickBindingUI.ResetMatrixPosition()
+		end
+	end)
+	f:SetScript("OnDragStart", function(self)
+		if self.Raise then
+			self:Raise()
+		end
+		self:StartMoving()
+	end)
+	f:SetScript("OnDragStop", function(self)
+		self:StopMovingOrSizing()
+		local point, _, relativePoint, xOfs, yOfs = self:GetPoint(1)
+		if point and relativePoint and xOfs and yOfs then
+			Database.Set("matrixWindowPos", {
+				point = point,
+				relativePoint = relativePoint,
+				x = math.floor(xOfs + 0.5),
+				y = math.floor(yOfs + 0.5),
+			})
+		end
+	end)
+
+	if f.SetBackdrop then
+		f:SetBackdrop({
+			bgFile = "Interface\\Buttons\\WHITE8x8",
+			edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
+			tile = true,
+			tileSize = 16,
+			edgeSize = 24,
+			insets = { left = 6, right = 6, top = 6, bottom = 6 },
+		})
+		f:SetBackdropColor(0.06, 0.07, 0.10, 0.96)
+		f:SetBackdropBorderColor(0.85, 0.72, 0.40, 1.0)
+	end
+
+	local icon = f:CreateTexture(nil, "ARTWORK")
+	icon:SetSize(20, 20)
+	icon:SetPoint("TOPLEFT", f, "TOPLEFT", 16, -14)
+	icon:SetAtlas(Constants.ICON_ATLAS)
+
+	local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+	title:SetPoint("LEFT", icon, "RIGHT", 8, 0)
+	title:SetText(L["MATRIX_POPUP_TITLE"])
+	f.Title = title
+
+	local statsText = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+	statsText:SetPoint("TOPRIGHT", f, "TOPRIGHT", -38, -17)
+	statsText:SetJustifyH("RIGHT")
+	f.StatsText = statsText
+
+	local closeBtn = CreateFrame("Button", nil, f, "UIPanelCloseButton")
+	closeBtn:SetPoint("TOPRIGHT", f, "TOPRIGHT", -4, -4)
+
+	local colStartX = 82
+	local colW = 90
+	local colGap = 4
+	local rowStartY = -64
+	local rowH = 44
+	local rowGap = 4
+
+	f.ColHeaders = {}
+	for cIdx, col in ipairs(MATRIX_COLUMNS) do
+		local hdr = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+		local x = colStartX + ((cIdx - 1) * (colW + colGap))
+		hdr:SetPoint("TOPLEFT", f, "TOPLEFT", x, -44)
+		hdr:SetWidth(colW)
+		hdr:SetJustifyH("CENTER")
+		hdr:SetText("|cffffd100" .. col.short .. "|r")
+		f.ColHeaders[cIdx] = hdr
+	end
+
+	f.RowHeaders = {}
+	f.Cells = {}
+	for rIdx, row in ipairs(MATRIX_MOD_ROWS) do
+		local y = rowStartY - ((rIdx - 1) * (rowH + rowGap))
+		local rHdr = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+		rHdr:SetPoint("TOPLEFT", f, "TOPLEFT", 16, y - 14)
+		rHdr:SetWidth(62)
+		rHdr:SetJustifyH("LEFT")
+		rHdr.labelKey = row.labelKey
+		rHdr.fallback = row.fallback
+		f.RowHeaders[rIdx] = rHdr
+
+		f.Cells[rIdx] = {}
+		for cIdx, col in ipairs(MATRIX_COLUMNS) do
+			local x = colStartX + ((cIdx - 1) * (colW + colGap))
+			local cell = CreateFrame("Button", nil, f, "BackdropTemplate")
+			cell:SetSize(colW, rowH)
+			cell:SetPoint("TOPLEFT", f, "TOPLEFT", x, y)
+			cell.comboLabel = row.shortPrefix .. col.short
+
+			if cell.SetBackdrop then
+				cell:SetBackdrop({
+					bgFile = "Interface\\Buttons\\WHITE8x8",
+					edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+					tile = true,
+					tileSize = 8,
+					edgeSize = 10,
+					insets = { left = 2, right = 2, top = 2, bottom = 2 },
+				})
+			end
+
+			local cellIcon = cell:CreateTexture(nil, "ARTWORK")
+			cellIcon:SetSize(22, 22)
+			cellIcon:SetPoint("LEFT", cell, "LEFT", 6, 0)
+			cellIcon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+			cell.Icon = cellIcon
+
+			local topText = cell:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+			topText:SetPoint("TOPLEFT", cellIcon, "TOPRIGHT", 5, -1)
+			topText:SetPoint("RIGHT", cell, "RIGHT", -4, 0)
+			topText:SetJustifyH("LEFT")
+			topText:SetWordWrap(false)
+			cell.TopText = topText
+
+			local botText = cell:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+			botText:SetPoint("BOTTOMLEFT", cellIcon, "BOTTOMRIGHT", 5, 1)
+			botText:SetPoint("RIGHT", cell, "RIGHT", -4, 0)
+			botText:SetJustifyH("LEFT")
+			botText:SetWordWrap(false)
+			cell.BotText = botText
+
+			local freeText = cell:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+			freeText:SetPoint("CENTER", cell, "CENTER", 0, 0)
+			freeText:SetJustifyH("CENTER")
+			cell.FreeText = freeText
+
+			cell:SetScript("OnEnter", function(self)
+				ShowMatrixCellTooltip(self)
+			end)
+			cell:SetScript("OnLeave", function()
+				if GameTooltip then
+					GameTooltip:Hide()
+				end
+			end)
+
+			f.Cells[rIdx][cIdx] = cell
+		end
+	end
+
+	local comboCb = CreateFrame("CheckButton", nil, f, "UICheckButtonTemplate")
+	comboCb:SetSize(24, 24)
+	comboCb:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 12, 30)
+	local comboLabel = comboCb:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+	comboLabel:SetPoint("LEFT", comboCb, "RIGHT", 4, 0)
+	comboLabel:SetJustifyH("LEFT")
+	comboCb.Label = comboLabel
+	comboCb:SetScript("OnClick", function(self)
+		PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
+		Database.Set("matrixShowCombos", self:GetChecked() and true or false)
+		ClickBindingUI.RefreshFreeKeysMatrix()
+	end)
+	comboCb:SetScript("OnEnter", function(self)
+		GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+		GameTooltip_SetTitle(GameTooltip, L["MATRIX_SHOW_COMBOS_CHECKBOX"])
+		GameTooltip_AddNormalLine(GameTooltip, L["MATRIX_SHOW_COMBOS_DESC"], true)
+		GameTooltip:Show()
+	end)
+	comboCb:SetScript("OnLeave", function()
+		GameTooltip:Hide()
+	end)
+	f.ComboCheckbox = comboCb
+
+	local autoOpenCb = CreateFrame("CheckButton", nil, f, "UICheckButtonTemplate")
+	autoOpenCb:SetSize(24, 24)
+	autoOpenCb:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 324, 30)
+	local autoOpenLabel = autoOpenCb:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+	autoOpenLabel:SetPoint("LEFT", autoOpenCb, "RIGHT", 4, 0)
+	autoOpenLabel:SetJustifyH("LEFT")
+	autoOpenCb.Label = autoOpenLabel
+	autoOpenCb:SetScript("OnClick", function(self)
+		PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
+		Database.Set("matrixAutoOpen", self:GetChecked() and true or false)
+		ClickBindingUI.RefreshFreeKeysMatrix()
+	end)
+	autoOpenCb:SetScript("OnEnter", function(self)
+		GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+		GameTooltip_SetTitle(GameTooltip, L["MATRIX_AUTO_OPEN_CHECKBOX"])
+		GameTooltip_AddNormalLine(GameTooltip, L["MATRIX_AUTO_OPEN_DESC"], true)
+		GameTooltip:Show()
+	end)
+	autoOpenCb:SetScript("OnLeave", function()
+		GameTooltip:Hide()
+	end)
+	f.AutoOpenCheckbox = autoOpenCb
+
+	local extraText = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+	extraText:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 16, 12)
+	extraText:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -16, 12)
+	extraText:SetJustifyH("LEFT")
+	extraText:SetWordWrap(false)
+	f.ExtraText = extraText
+
+	f:Hide()
+	freeKeysMatrixFrame = f
+	return f
+end
+
+function ClickBindingUI.RefreshFreeKeysMatrix()
+	if not freeKeysMatrixFrame or not freeKeysMatrixFrame:IsShown() then
+		return
+	end
+	local f = freeKeysMatrixFrame
+	local showCombos = Database.Get("matrixShowCombos") and true or false
+	local activeRowCount = showCombos and 8 or 4
+
+	f.Title:SetText(showCombos and L["MATRIX_POPUP_TITLE_EXPANDED"] or L["MATRIX_POPUP_TITLE"])
+	f:SetSize(560, showCombos and 512 or 320)
+
+	if f.ComboCheckbox then
+		f.ComboCheckbox:SetChecked(showCombos)
+		if f.ComboCheckbox.Label then
+			f.ComboCheckbox.Label:SetText(L["MATRIX_SHOW_COMBOS_CHECKBOX"])
+		end
+	end
+	if f.AutoOpenCheckbox then
+		f.AutoOpenCheckbox:SetChecked(Database.Get("matrixAutoOpen") and true or false)
+		if f.AutoOpenCheckbox.Label then
+			f.AutoOpenCheckbox.Label:SetText(L["MATRIX_AUTO_OPEN_CHECKBOX"])
+		end
+	end
+
+	local bindings = CollectCurrentActiveBindings()
+	local lookup = {}
+	local extraList = {}
+
+	local knownCols = {
+		LeftButton = true,
+		RightButton = true,
+		MiddleButton = true,
+		Button4 = true,
+		Button5 = true,
+	}
+
+	for _, info in ipairs(bindings) do
+		if info and info.button then
+			local modOrder = Constants.GetModifierSortInfo(info.modifiers)
+			local normBtn = NormalizeMatrixButton(info.button)
+			if modOrder >= 1 and modOrder <= activeRowCount and knownCols[normBtn] then
+				lookup[tostring(modOrder) .. ":" .. tostring(normBtn)] = info
+			else
+				local shortBind = Constants.GetShortBindingString(info) or "?"
+				local cellData = FormatMatrixCellData(info)
+				if cellData then
+					table.insert(extraList, string.format("|cffffd100%s:|r %s", shortBind, cellData.shortLabel))
+				end
+			end
+		end
+	end
+
+	local boundCount = 0
+	local totalSlots = activeRowCount * #MATRIX_COLUMNS
+
+	for rIdx, row in ipairs(MATRIX_MOD_ROWS) do
+		local isRowVisible = rIdx <= activeRowCount
+		local rHdr = f.RowHeaders[rIdx]
+		if rHdr then
+			if isRowVisible then
+				rHdr:SetText("|cffb8d8ff" .. (L[row.labelKey] or row.fallback) .. "|r")
+				rHdr:Show()
+			else
+				rHdr:Hide()
+			end
+		end
+		for cIdx, col in ipairs(MATRIX_COLUMNS) do
+			local cell = f.Cells[rIdx][cIdx]
+			if not isRowVisible then
+				cell:Hide()
+			else
+				cell:Show()
+				local key = tostring(row.modOrder) .. ":" .. col.button
+				local info = lookup[key]
+				local cellData = FormatMatrixCellData(info)
+				cell.cellData = cellData
+
+				if cellData then
+					boundCount = boundCount + 1
+					cell.FreeText:Hide()
+					cell.Icon:SetTexture(cellData.icon)
+					cell.Icon:SetDesaturated(cellData.isUnlearned and true or false)
+					cell.Icon:Show()
+					if cellData.isUnlearned then
+						cell.TopText:SetText("|cff999999" .. cellData.shortLabel .. "|r")
+						cell:SetBackdropColor(0.24, 0.08, 0.08, 0.92)
+						cell:SetBackdropBorderColor(0.85, 0.28, 0.28, 0.95)
+					elseif cellData.isInteraction then
+						cell.TopText:SetText("|cffcccccc" .. cellData.shortLabel .. "|r")
+						cell:SetBackdropColor(0.11, 0.13, 0.17, 0.90)
+						cell:SetBackdropBorderColor(0.38, 0.42, 0.50, 0.85)
+					else
+						cell.TopText:SetText("|cffffffff" .. cellData.shortLabel .. "|r")
+						cell:SetBackdropColor(0.12, 0.15, 0.22, 0.94)
+						cell:SetBackdropBorderColor(0.45, 0.58, 0.78, 0.90)
+					end
+					cell.BotText:SetText(cellData.subLabel or "")
+					cell.TopText:Show()
+					cell.BotText:Show()
+				else
+					cell.Icon:Hide()
+					cell.TopText:Hide()
+					cell.BotText:Hide()
+					cell.FreeText:SetText(string.format("|cff40ff59%s|r\n|cff77aa88%s|r", L["MATRIX_CELL_FREE"], cell.comboLabel))
+					cell.FreeText:Show()
+					cell:SetBackdropColor(0.06, 0.18, 0.09, 0.88)
+					cell:SetBackdropBorderColor(0.25, 0.75, 0.38, 0.85)
+				end
+			end
+		end
+	end
+
+	local freeCount = totalSlots - boundCount
+	f.StatsText:SetText(string.format(L["MATRIX_STATS_FORMAT"], boundCount, totalSlots, freeCount))
+
+	if #extraList > 0 then
+		f.ExtraText:SetText(string.format(L["MATRIX_EXTRA_BINDINGS_FORMAT"], table.concat(extraList, "  |  ")))
+	else
+		f.ExtraText:SetText("|cff888888" .. L["MATRIX_FOOTER_HINT"] .. "|r")
+	end
+end
+
+function ClickBindingUI.IsMatrixPreviewUnlocked()
+	return matrixPreviewUnlocked
+end
+
+function ClickBindingUI.SetMatrixPreviewUnlocked(unlocked)
+	local target = unlocked and true or false
+	local f = EnsureFreeKeysMatrixFrame()
+	if target then
+		if not matrixPreviewUnlocked then
+			matrixWasShownBeforePreview = f:IsShown()
+		end
+		matrixPreviewUnlocked = true
+		ApplySavedMatrixPosition(f)
+		if f.SetBackdropBorderColor then
+			f:SetBackdropBorderColor(0.35, 1.0, 0.45, 1.0)
+		end
+		f:Show()
+		if f.Raise then
+			f:Raise()
+		end
+		ClickBindingUI.RefreshFreeKeysMatrix()
+	else
+		matrixPreviewUnlocked = false
+		if f.SetBackdropBorderColor then
+			f:SetBackdropBorderColor(0.85, 0.72, 0.40, 1.0)
+		end
+		if not matrixWasShownBeforePreview and f:IsShown() then
+			f:Hide()
+		end
+		matrixWasShownBeforePreview = false
+	end
+end
+
+function ClickBindingUI.HideFreeKeysMatrix()
+	matrixPreviewUnlocked = false
+	matrixWasShownBeforePreview = false
+	if freeKeysMatrixFrame then
+		if freeKeysMatrixFrame.SetBackdropBorderColor then
+			freeKeysMatrixFrame:SetBackdropBorderColor(0.85, 0.72, 0.40, 1.0)
+		end
+		if freeKeysMatrixFrame:IsShown() then
+			freeKeysMatrixFrame:Hide()
+		end
+	end
+end
+
+function ClickBindingUI.HideChildPopups()
+	ClickBindingUI.HideFreeKeysMatrix()
+	if newPresetPopupFrame and newPresetPopupFrame:IsShown() then
+		newPresetPopupFrame:Hide()
+	end
+	if importPopupFrame and importPopupFrame:IsShown() then
+		importPopupFrame:Hide()
+	end
+	if debugCopyFrame and debugCopyFrame:IsShown() then
+		debugCopyFrame:Hide()
+	end
+end
+
+function ClickBindingUI.ShowFreeKeysMatrix()
+	local f = EnsureFreeKeysMatrixFrame()
+	ApplySavedMatrixPosition(f)
+	f:Show()
+	if f.Raise then
+		f:Raise()
+	end
+	ClickBindingUI.RefreshFreeKeysMatrix()
+end
+
+function ClickBindingUI.ToggleFreeKeysMatrix()
+	local f = EnsureFreeKeysMatrixFrame()
+	if f:IsShown() then
+		f:Hide()
+		return
+	end
+	ClickBindingUI.ShowFreeKeysMatrix()
 end
 
 -- Öffnet das Kopier-Popup mit einem teilbaren !BCC1:...!-Export-String für "all", "bindings" oder "settings"
@@ -2359,8 +3249,6 @@ function ClickBindingUI.ExecuteImportString(rawStr, scopeOverride, mergeOverride
 	return true
 end
 
-local importPopupFrame = nil
-
 function ClickBindingUI.ShowImportStringPopup(defaultScope)
 	if not importPopupFrame then
 		local f = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
@@ -2443,6 +3331,278 @@ function ClickBindingUI.ShowImportStringPopup(defaultScope)
 	importPopupFrame.EditBox:SetFocus()
 end
 
+--------------------------------------------------------------------------------
+-- Charakter-spezifische Binding-Presets (Loadouts) & Schnellwahl im ClickBindingFrame
+--------------------------------------------------------------------------------
+
+function ClickBindingUI.SavePresetByName(rawName)
+	local preset, count = Database.SavePreset(rawName)
+	if not preset then
+		if DEFAULT_CHAT_FRAME then
+			DEFAULT_CHAT_FRAME:AddMessage(L["CHAT_PRESET_ERR_EMPTY_NAME"])
+		end
+		return false, nil
+	end
+	if DEFAULT_CHAT_FRAME then
+		DEFAULT_CHAT_FRAME:AddMessage(string.format(L["CHAT_PRESET_SAVED_FORMAT"], preset.name, count or 0))
+	end
+	return true, preset
+end
+
+function ClickBindingUI.LoadPreset(presetOrName)
+	local preset = (type(presetOrName) == "table") and presetOrName or Database.FindPreset(presetOrName)
+	if not preset or type(preset.bindings) ~= "table" then
+		if DEFAULT_CHAT_FRAME then
+			DEFAULT_CHAT_FRAME:AddMessage(string.format(L["CHAT_PRESET_NOT_FOUND_FORMAT"], tostring(presetOrName or "")))
+		end
+		return false
+	end
+
+	-- Ein Loadout-Preset ersetzt die aktuelle Liste vollständig (mergeMode = false)
+	local appliedCount, skippedCount, ok = ClickBindingUI.ApplyImportedBindings(preset.bindings, false)
+	if not ok then
+		return false
+	end
+
+	Database.SetActivePresetName(preset.name)
+	ClickBindingUI.UpdatePresetDropdownButton()
+	if ns.SettingsUI and ns.SettingsUI.RefreshWindow then
+		ns.SettingsUI.RefreshWindow()
+	end
+
+	if DEFAULT_CHAT_FRAME then
+		DEFAULT_CHAT_FRAME:AddMessage(string.format(L["CHAT_PRESET_LOADED_FORMAT"], preset.name, appliedCount or 0, skippedCount or 0))
+	end
+	return true
+end
+
+function ClickBindingUI.DeletePresetByName(name)
+	local ok, deletedKey = Database.DeletePreset(name)
+	if not ok then
+		if DEFAULT_CHAT_FRAME then
+			DEFAULT_CHAT_FRAME:AddMessage(string.format(L["CHAT_PRESET_NOT_FOUND_FORMAT"], tostring(name or "")))
+		end
+		return false
+	end
+	if DEFAULT_CHAT_FRAME then
+		DEFAULT_CHAT_FRAME:AddMessage(string.format(L["CHAT_PRESET_DELETED_FORMAT"], deletedKey or tostring(name)))
+	end
+	return true
+end
+
+function ClickBindingUI.ShowNewPresetPopup(initialName, onSavedCallback)
+	if not newPresetPopupFrame then
+		local f = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
+		f:SetSize(390, 150)
+		f:SetPoint("CENTER", UIParent, "CENTER", 0, 140)
+		f:SetFrameStrata("FULLSCREEN_DIALOG")
+		f:SetFrameLevel(250)
+		f:EnableMouse(true)
+		f:SetMovable(true)
+		f:RegisterForDrag("LeftButton")
+		f:SetScript("OnDragStart", f.StartMoving)
+		f:SetScript("OnDragStop", f.StopMovingOrSizing)
+		if f.SetBackdrop then
+			f:SetBackdrop({
+				bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark",
+				edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
+				tile = true,
+				tileSize = 32,
+				edgeSize = 24,
+				insets = { left = 6, right = 6, top = 6, bottom = 6 },
+			})
+		end
+
+		local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+		title:SetPoint("TOPLEFT", f, "TOPLEFT", 16, -14)
+		f.Title = title
+
+		local hint = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+		hint:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -6)
+		hint:SetPoint("RIGHT", f, "RIGHT", -16, 0)
+		hint:SetJustifyH("LEFT")
+		hint:SetTextColor(0.80, 0.80, 0.80)
+		f.Hint = hint
+
+		local closeBtn = CreateFrame("Button", nil, f, "UIPanelCloseButton")
+		closeBtn:SetPoint("TOPRIGHT", f, "TOPRIGHT", -4, -4)
+
+		local inputBg = CreateFrame("Frame", nil, f, "BackdropTemplate")
+		inputBg:SetSize(354, 28)
+		inputBg:SetPoint("TOPLEFT", f, "TOPLEFT", 18, -62)
+		if inputBg.SetBackdrop then
+			inputBg:SetBackdrop({
+				bgFile = "Interface\\Buttons\\WHITE8x8",
+				edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+				tile = true,
+				tileSize = 16,
+				edgeSize = 12,
+				insets = { left = 3, right = 3, top = 3, bottom = 3 },
+			})
+			inputBg:SetBackdropColor(0.05, 0.06, 0.08, 0.95)
+			inputBg:SetBackdropBorderColor(0.55, 0.55, 0.60, 1.0)
+		end
+
+		local editBox = CreateFrame("EditBox", nil, inputBg)
+		editBox:SetPoint("TOPLEFT", inputBg, "TOPLEFT", 8, -4)
+		editBox:SetPoint("BOTTOMRIGHT", inputBg, "BOTTOMRIGHT", -8, 4)
+		editBox:SetAutoFocus(false)
+		editBox:SetMaxLetters(40)
+		editBox:SetFontObject(ChatFontNormal or GameFontHighlight)
+		editBox:SetScript("OnEscapePressed", function()
+			f:Hide()
+		end)
+		editBox:SetScript("OnEnterPressed", function(self)
+			local ok, savedPreset = ClickBindingUI.SavePresetByName(self:GetText() or "")
+			if ok then
+				if f.onSavedCallback then
+					f.onSavedCallback(savedPreset)
+				end
+				f:Hide()
+			end
+		end)
+		f.EditBox = editBox
+
+		local saveBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+		saveBtn:SetSize(150, 26)
+		saveBtn:SetPoint("BOTTOMRIGHT", f, "BOTTOM", -6, 14)
+		saveBtn:SetScript("OnClick", function()
+			local ok, savedPreset = ClickBindingUI.SavePresetByName(f.EditBox:GetText() or "")
+			if ok then
+				if f.onSavedCallback then
+					f.onSavedCallback(savedPreset)
+				end
+				f:Hide()
+			end
+		end)
+		f.SaveBtn = saveBtn
+
+		local cancelBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+		cancelBtn:SetSize(130, 26)
+		cancelBtn:SetPoint("BOTTOMLEFT", f, "BOTTOM", 6, 14)
+		cancelBtn:SetText(CANCEL or "Cancel")
+		cancelBtn:SetScript("OnClick", function()
+			f:Hide()
+		end)
+		f.CancelBtn = cancelBtn
+
+		newPresetPopupFrame = f
+	end
+
+	newPresetPopupFrame.onSavedCallback = onSavedCallback
+	newPresetPopupFrame.Title:SetText(L["PRESET_POPUP_NEW_TITLE"])
+	newPresetPopupFrame.Hint:SetText(L["PRESET_POPUP_NEW_HINT"])
+	newPresetPopupFrame.SaveBtn:SetText(L["PRESET_POPUP_BTN_SAVE"])
+	newPresetPopupFrame:Show()
+	newPresetPopupFrame.EditBox:SetText(type(initialName) == "string" and initialName or "")
+	newPresetPopupFrame.EditBox:SetFocus()
+	newPresetPopupFrame.EditBox:HighlightText()
+end
+
+local function UpdatePresetDropdownAnchor(btn)
+	if not btn or not ClickBindingFrame then
+		return
+	end
+	btn:ClearAllPoints()
+	local mouseoverDropShown = ClickBindingFrame.MouseoverCastKeyDropdown and ClickBindingFrame.MouseoverCastKeyDropdown:IsShown()
+	if mouseoverDropShown and ClickBindingFrame.PlayerSpellsPortrait then
+		btn:SetSize(150, 20)
+		btn:SetPoint("TOPRIGHT", ClickBindingFrame.PlayerSpellsPortrait, "BOTTOMRIGHT", 0, -6)
+	elseif ClickBindingFrame.EnableMouseoverCastCheckbox then
+		btn:SetSize(172, 20)
+		btn:SetPoint("TOPLEFT", ClickBindingFrame.EnableMouseoverCastCheckbox, "BOTTOMLEFT", 4, -2)
+	else
+		btn:SetSize(165, 20)
+		btn:SetPoint("TOPLEFT", ClickBindingFrame, "TOPLEFT", 64, -58)
+	end
+end
+
+local function EnsurePresetDropdownButton()
+	if not ClickBindingFrame then
+		return nil
+	end
+	if ClickBindingFrame.BCCPresetButton then
+		return ClickBindingFrame.BCCPresetButton
+	end
+
+	local btn = CreateFrame("Button", nil, ClickBindingFrame)
+	btn:SetSize(172, 20)
+	btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+
+	local bg = btn:CreateTexture(nil, "BACKGROUND")
+	bg:SetAtlas("common-dropdown-c-button")
+	bg:SetPoint("TOPLEFT", -3, 3)
+	bg:SetPoint("BOTTOMRIGHT", 3, -3)
+	btn.Bg = bg
+
+	local hl = btn:CreateTexture(nil, "HIGHLIGHT")
+	hl:SetAtlas("common-dropdown-c-button-hover-1")
+	hl:SetBlendMode("ADD")
+	hl:SetAlpha(0.45)
+	hl:SetPoint("TOPLEFT", -3, 3)
+	hl:SetPoint("BOTTOMRIGHT", 3, -3)
+
+	local arrow = btn:CreateTexture(nil, "OVERLAY")
+	arrow:SetAtlas("common-dropdown-a-button")
+	arrow:SetSize(11, 11)
+	arrow:SetPoint("RIGHT", btn, "RIGHT", -5, -1)
+	btn.Arrow = arrow
+
+	local label = btn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+	label:SetPoint("LEFT", btn, "LEFT", 8, 0)
+	label:SetPoint("RIGHT", arrow, "LEFT", -3, 0)
+	label:SetJustifyH("LEFT")
+	label:SetWordWrap(false)
+	btn.Text = label
+
+	btn:SetScript("OnMouseDown", function(self)
+		self.Text:SetPoint("LEFT", self, "LEFT", 9, -1)
+		self.Arrow:SetPoint("RIGHT", self, "RIGHT", -4, -2)
+	end)
+
+	btn:SetScript("OnMouseUp", function(self)
+		self.Text:SetPoint("LEFT", self, "LEFT", 8, 0)
+		self.Arrow:SetPoint("RIGHT", self, "RIGHT", -5, -1)
+	end)
+
+	btn:SetScript("OnClick", function(self)
+		PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
+		if ns.SettingsUI and ns.SettingsUI.OpenPresetMenu then
+			ns.SettingsUI.OpenPresetMenu(self)
+		end
+	end)
+
+	btn:SetScript("OnEnter", function(self)
+		GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+		GameTooltip_SetTitle(GameTooltip, L["PRESET_TOOLTIP_TITLE"])
+		GameTooltip_AddNormalLine(GameTooltip, L["PRESET_TOOLTIP_DESC"], true)
+		GameTooltip:Show()
+	end)
+
+	btn:SetScript("OnLeave", function()
+		GameTooltip:Hide()
+	end)
+
+	ClickBindingFrame.BCCPresetButton = btn
+	UpdatePresetDropdownAnchor(btn)
+	return btn
+end
+
+function ClickBindingUI.UpdatePresetDropdownButton()
+	if not ClickBindingFrame then
+		return
+	end
+	local btn = EnsurePresetDropdownButton()
+	if not btn then
+		return
+	end
+	UpdatePresetDropdownAnchor(btn)
+	local activeName = Database.GetActivePresetName()
+	local labelStr = (activeName and activeName ~= "") and activeName or L["PRESET_NONE_SELECTED"]
+	btn.Text:SetText(string.format(L["PRESET_BUTTON_FORMAT"], labelStr))
+	btn:Show()
+end
+
 -- Diagnose-Werkzeug (/bcc debug, /bcc debug taintlog):
 -- Prüft mit Blizzards issecurevariable() sofort außerhalb des Kampfes, ob globale Highlight-Tabellen,
 -- Aktionsleisten (inkl. PetActionBar), EditModeManagerFrame oder PlayerSpellsFrame getaintete Felder besitzen.
@@ -2482,6 +3642,18 @@ function ClickBindingUI.RunTaintDiagnostics(subArg)
 	local okBarGlobal, srcBarGlobal = issecurevariable("ON_BAR_HIGHLIGHT_MARKS")
 	if not okBarGlobal then
 		table.insert(findings, string.format("_G.ON_BAR_HIGHLIGHT_MARKS (by %s)", tostring(srcBarGlobal or "unknown")))
+	end
+	local okActGlobal, srcActGlobal = issecurevariable("ACTION_HIGHLIGHT_MARKS")
+	if not okActGlobal then
+		table.insert(findings, string.format("_G.ACTION_HIGHLIGHT_MARKS (by %s)", tostring(srcActGlobal or "unknown")))
+	end
+	if _G.ActionBarButtonEventsFrame and type(_G.ActionBarButtonEventsFrame.frames) == "table" then
+		for _, btn in pairs(_G.ActionBarButtonEventsFrame.frames) do
+			if type(btn) == "table" and btn.action ~= nil then
+				local btnName = (btn.GetName and btn:GetName()) or tostring(btn)
+				checkVar(btn, "action", btnName)
+			end
+		end
 	end
 
 	-- 2. Kritische Felder auf Aktionsleisten und EditMode-Systemen prüfen
@@ -2607,6 +3779,24 @@ function ClickBindingUI.RunTaintDiagnostics(subArg)
 		end
 	end
 
+	-- 4. Gamepad-Fokus- und Binding-Stack prüfen (falls Controller-Modus verfügbar/aktiv)
+	if _G.GamepadMode and type(_G.GamepadMode.FrameControlsManager) == "table" then
+		local fcm = _G.GamepadMode.FrameControlsManager
+		for _, k in ipairs({ "shownFrames", "focusedFrame", "fallThroughCatcherActive", "isUIFocused" }) do
+			if fcm[k] ~= nil then
+				checkVar(fcm, k, "GamepadMode.FrameControlsManager")
+			end
+		end
+	end
+	if _G.GamepadSharedUtility and type(_G.GamepadSharedUtility.InputBindingManager) == "table" then
+		local ibm = _G.GamepadSharedUtility.InputBindingManager
+		for _, k in ipairs({ "currentCoreBindingActive", "bindingSetStack" }) do
+			if ibm[k] ~= nil then
+				checkVar(ibm, k, "GamepadSharedUtility.InputBindingManager")
+			end
+		end
+	end
+
 	local taintLogVal = (GetCVar and GetCVar("taintLog")) or "0"
 	local reportLines = {}
 	if #findings == 0 then
@@ -2648,6 +3838,11 @@ function ClickBindingUI.EnsureSpellBookTabForClickBinding()
 	if InCombatLockdown and InCombatLockdown() then
 		return
 	end
+	-- Im Controller-Modus (GamepadUI) wird das TabSystem von PlayerSpellsFrame ausgeblendet
+	-- und durch GamepadMode.FrameControlsManager verwaltet; dort niemals per AddOn eingreifen.
+	if InputUtil and InputUtil.IsGamepadUIEnabled and InputUtil.IsGamepadUIEnabled() then
+		return
+	end
 	if not PlayerSpellsFrame or not PlayerSpellsUtil or not PlayerSpellsUtil.FrameTabs then
 		return
 	end
@@ -2658,15 +3853,18 @@ function ClickBindingUI.EnsureSpellBookTabForClickBinding()
 	if PlayerSpellsFrame.ClearInspectUnit and PlayerSpellsFrame.IsInspecting and PlayerSpellsFrame:IsInspecting() then
 		PlayerSpellsFrame:ClearInspectUnit()
 	end
-	-- In WoW Forever teilen sich Zauberbuch (area = "centerOrLeft") und Talentbaum (area = "center")
-	-- denselben PlayerSpellsFrame. Wurde zuvor der Talentbaum geöffnet, muss vor ShowUIPanel(PlayerSpellsFrame)
-	-- zurück auf den SpellBook-Tab gewechselt werden, da ShowUIPanel mit area = "center" sonst CloseWindows()
-	-- ausführt und das ClickBindingFrame sofort wieder schließt.
-	if PlayerSpellsFrame.IsFrameTabActive and not PlayerSpellsFrame:IsFrameTabActive(spellBookTab) then
+	-- In WoW Forever teilen sich Zauberbuch und Talentbaum denselben PlayerSpellsFrame.
+	-- Wurde zuvor der Talentbaum geöffnet (und ist das Fenster nicht schon als Zauberbuch offen),
+	-- wechseln wir über SetTab(spellBookTabID) auf den SpellBook-Tab, ohne SetUIPanelAttribute via TrySetTab zu tainten.
+	local currentTabID = PlayerSpellsFrame.GetTab and PlayerSpellsFrame:GetTab()
+	local spellBookTabID = PlayerSpellsFrame.spellBookTabID
+	if currentTabID and spellBookTabID and currentTabID ~= spellBookTabID then
 		if PlayerSpellsFrame:IsShown() and HideUIPanel then
 			HideUIPanel(PlayerSpellsFrame)
 		end
-		if PlayerSpellsFrame.TrySetTab then
+		if PlayerSpellsFrame.SetTab then
+			PlayerSpellsFrame:SetTab(spellBookTabID)
+		elseif PlayerSpellsFrame.TrySetTab then
 			PlayerSpellsFrame:TrySetTab(spellBookTab)
 		end
 	end
@@ -2694,6 +3892,10 @@ function ClickBindingUI.AutoSelectPrimarySpellBookTab()
 		return
 	end
 	if InCombatLockdown and InCombatLockdown() then
+		return
+	end
+	-- Im Controller-Modus nicht in die Zauberbuch-Kategorieauswahl eingreifen
+	if InputUtil and InputUtil.IsGamepadUIEnabled and InputUtil.IsGamepadUIEnabled() then
 		return
 	end
 	if not PlayerSpellsFrame or not PlayerSpellsFrame.SpellBookFrame then
@@ -2778,9 +3980,15 @@ function ClickBindingUI.SetupHooks()
 	end
 	isHooked = true
 
-	-- 0. Settings-Button im ClickBindingFrame einrichten
+	-- 0. Settings-Button und Preset-Dropdown im ClickBindingFrame einrichten
 	if SettingsUI and SettingsUI.AttachToClickBindingFrame then
 		SettingsUI.AttachToClickBindingFrame()
+	end
+	ClickBindingUI.UpdatePresetDropdownButton()
+	if ClickBindingFrame.UpdateMouseoverCastUI then
+		hooksecurefunc(ClickBindingFrame, "UpdateMouseoverCastUI", function()
+			ClickBindingUI.UpdatePresetDropdownButton()
+		end)
 	end
 
 	-- Beim Klick auf das Zauberbuch-Portrait im ClickBindingFrame sicherstellen, dass der SpellBook-Tab aktiv ist,
@@ -2800,9 +4008,14 @@ function ClickBindingUI.SetupHooks()
 	-- Auto-Show-All-Spell-Ranks, Smart-Rule-Sync und Zauberbuch-Sync beim Öffnen und Schließen des ClickBindingFrames
 	ClickBindingFrame:HookScript("OnShow", function()
 		ClickBindingUI.HideHeroCard()
+		ClickBindingUI.UpdatePresetDropdownButton()
 		ClickBindingUI.SyncAutoShowAllRanks()
 		ClickBindingUI.AutoSelectPrimarySpellBookTab()
+		ClickBindingUI.ApplyScrollBoxLayout()
 		ClickBindingUI.RebuildGroups()
+		if Database.Get("matrixAutoOpen") then
+			ClickBindingUI.ShowFreeKeysMatrix()
+		end
 		if SpellBookUI and SpellBookUI.RefreshBadges then
 			SpellBookUI.RefreshBadges()
 		end
@@ -2810,6 +4023,10 @@ function ClickBindingUI.SetupHooks()
 
 	ClickBindingFrame:HookScript("OnHide", function()
 		SetSaveButtonGlowShown(false)
+		ClickBindingUI.HideChildPopups()
+		if SettingsUI and SettingsUI.HideWindow then
+			SettingsUI.HideWindow()
+		end
 		if SpellBookUI and SpellBookUI.RefreshBadges then
 			SpellBookUI.RefreshBadges()
 		end
@@ -2832,6 +4049,7 @@ function ClickBindingUI.SetupHooks()
 
 	-- 2. Bestehende und neu erworbene Frames in der ScrollBox nachrüsten
 	if ClickBindingFrame.ScrollBox then
+		ClickBindingUI.ApplyScrollBoxLayout()
 		if ClickBindingFrame.ScrollBox.GetView and ClickBindingFrame.ScrollBox:GetView() and ClickBindingFrame.ScrollBox.ForEachFrame then
 			ClickBindingFrame.ScrollBox:ForEachFrame(function(frame)
 				local elementData = frame.GetElementData and frame:GetElementData()
@@ -2922,10 +4140,13 @@ function ClickBindingUI.SetupHooks()
 		end)
 	end
 
-	if EventRegistry and EventRegistry.RegisterCallback then
+		if EventRegistry and EventRegistry.RegisterCallback then
 		EventRegistry:RegisterCallback("ClickBindingFrame.UpdateFrames", function()
 			if SpellBookUI and SpellBookUI.RefreshBadges then
 				SpellBookUI.RefreshBadges()
+			end
+			if ClickBindingUI.RefreshFreeKeysMatrix then
+				ClickBindingUI.RefreshFreeKeysMatrix()
 			end
 		end, ns)
 	end

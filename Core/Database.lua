@@ -11,6 +11,9 @@ local DEFAULTS = {
 	showLineManaCost = true,
 	moveInteractionsToBottom = true,
 	showLineTooltips = true,
+	compactListMode = true,
+	matrixShowCombos = false,
+	matrixAutoOpen = false,
 	groupingMode = "modifier", -- "modifier", "button", "type", "none"
 	quickBindSpellbook = true,
 	showSpellbookBadges = true,
@@ -24,6 +27,7 @@ local DEFAULTS = {
 	unitHoverAlpha = 94, -- 30 bis 100 (%)
 	unitHoverShowMana = true,
 	unitHoverShowRankTags = true,
+	unitHoverShowRange = true,
 	unitHoverShowInCombat = false,
 	unitHoverShowInteractions = false,
 	showMinimapButton = true,
@@ -35,6 +39,8 @@ local DEFAULTS = {
 local POSITION_KEYS = {
 	"heroCardPos",
 	"unitHoverPos",
+	"matrixWindowPos",
+	"settingsWindowPos",
 }
 
 local function CopyTableShallow(src)
@@ -132,6 +138,9 @@ function Database.GetCurrentCharProfile()
 	end
 	if type(profile.rankRules) ~= "table" then
 		profile.rankRules = {}
+	end
+	if type(profile.presets) ~= "table" then
+		profile.presets = {}
 	end
 	return profile, charKey
 end
@@ -257,12 +266,21 @@ function Database.ApplySettingsSnapshot(snap)
 end
 
 -- Erstellt einen portablen Snapshot der aktuellen Klickbelegungen inkl. Zaubernamen, Rängen, Regeln und Makronamen
-function Database.CaptureBindingsSnapshot()
+function Database.CaptureBindingsSnapshot(preferDataProvider)
 	local result = {}
-	if not C_ClickBindings or not C_ClickBindings.GetProfileInfo then
-		return result
+	local profileInfo = nil
+
+	if preferDataProvider and ClickBindingFrame and ClickBindingFrame:IsShown() and ClickBindingFrame.dataProvider then
+		profileInfo = {}
+		for _, element in ClickBindingFrame.dataProvider:Enumerate() do
+			if element and not element.unbound and element.bindingInfo and element.bindingInfo.button then
+				table.insert(profileInfo, element.bindingInfo)
+			end
+		end
+	elseif C_ClickBindings and C_ClickBindings.GetProfileInfo then
+		profileInfo = C_ClickBindings.GetProfileInfo()
 	end
-	local profileInfo = C_ClickBindings.GetProfileInfo()
+
 	if type(profileInfo) ~= "table" then
 		return result
 	end
@@ -392,6 +410,145 @@ function Database.FindCharProfile(query)
 		end
 	end
 	return nil
+end
+
+--------------------------------------------------------------------------------
+-- Charakter-spezifische Binding-Presets (Loadouts)
+--------------------------------------------------------------------------------
+
+function Database.GetPresets()
+	local profile = Database.GetCurrentCharProfile()
+	local list = {}
+	if not profile or type(profile.presets) ~= "table" then
+		return list, nil
+	end
+	for key, preset in pairs(profile.presets) do
+		if type(preset) == "table" then
+			preset.name = (type(preset.name) == "string" and preset.name ~= "") and preset.name or tostring(key)
+			if type(preset.bindings) ~= "table" then
+				preset.bindings = {}
+			end
+			table.insert(list, preset)
+		end
+	end
+	table.sort(list, function(a, b)
+		return string.lower(tostring(a.name or "")) < string.lower(tostring(b.name or ""))
+	end)
+	local activeName = profile.activePreset
+	if activeName and not profile.presets[activeName] then
+		activeName = nil
+		profile.activePreset = nil
+	end
+	return list, activeName
+end
+
+function Database.GetActivePresetName()
+	local _, activeName = Database.GetPresets()
+	return activeName
+end
+
+function Database.SetActivePresetName(name)
+	local profile = Database.GetCurrentCharProfile()
+	if not profile then
+		return
+	end
+	if type(name) == "string" and name ~= "" and profile.presets and profile.presets[name] then
+		profile.activePreset = name
+	else
+		profile.activePreset = nil
+	end
+end
+
+function Database.FindPreset(query)
+	if type(query) ~= "string" then
+		return nil
+	end
+	local trimmed = string.match(query, "^%s*(.-)%s*$") or ""
+	if trimmed == "" then
+		return nil
+	end
+	local lowerQuery = string.lower(trimmed)
+	local presets = Database.GetPresets()
+	for _, preset in ipairs(presets) do
+		if string.lower(preset.name or "") == lowerQuery then
+			return preset
+		end
+	end
+	for _, preset in ipairs(presets) do
+		if string.find(string.lower(preset.name or ""), lowerQuery, 1, true) then
+			return preset
+		end
+	end
+	return nil
+end
+
+function Database.SavePreset(rawName)
+	if type(rawName) ~= "string" then
+		return nil, 0
+	end
+	local cleanName = string.match(rawName, "^%s*(.-)%s*$") or ""
+	if cleanName == "" then
+		return nil, 0
+	end
+
+	local profile = Database.GetCurrentCharProfile()
+	if not profile then
+		return nil, 0
+	end
+
+	-- Falls bereits ein Preset mit identischem Namen (unabhängig von Groß-/Kleinschreibung) existiert, dessen Schlüssel aktualisieren
+	local lowerTarget = string.lower(cleanName)
+	for existingKey, existingPreset in pairs(profile.presets) do
+		if string.lower(tostring(existingKey)) == lowerTarget or (type(existingPreset) == "table" and string.lower(tostring(existingPreset.name or "")) == lowerTarget) then
+			if existingKey ~= cleanName then
+				profile.presets[existingKey] = nil
+			end
+			break
+		end
+	end
+
+	local bindings = Database.CaptureBindingsSnapshot(true)
+	local preset = {
+		name = cleanName,
+		updatedAt = (time and time()) or 0,
+		bindings = bindings,
+	}
+	profile.presets[cleanName] = preset
+	profile.activePreset = cleanName
+	Database.SaveCharacterSnapshot()
+	if ns.ClickBindingUI and ns.ClickBindingUI.UpdatePresetDropdownButton then
+		ns.ClickBindingUI.UpdatePresetDropdownButton()
+	end
+	if ns.SettingsUI and ns.SettingsUI.RefreshWindow then
+		ns.SettingsUI.RefreshWindow()
+	end
+	return preset, #bindings
+end
+
+function Database.DeletePreset(name)
+	if type(name) ~= "string" or name == "" then
+		return false
+	end
+	local profile = Database.GetCurrentCharProfile()
+	if not profile or type(profile.presets) ~= "table" then
+		return false
+	end
+	local targetPreset = Database.FindPreset(name)
+	local keyToDelete = (targetPreset and targetPreset.name) or name
+	if not profile.presets[keyToDelete] then
+		return false
+	end
+	profile.presets[keyToDelete] = nil
+	if profile.activePreset == keyToDelete then
+		profile.activePreset = nil
+	end
+	if ns.ClickBindingUI and ns.ClickBindingUI.UpdatePresetDropdownButton then
+		ns.ClickBindingUI.UpdatePresetDropdownButton()
+	end
+	if ns.SettingsUI and ns.SettingsUI.RefreshWindow then
+		ns.SettingsUI.RefreshWindow()
+	end
+	return true, keyToDelete
 end
 
 -- Sichere URL-Hex-Kodierung für Sonderzeichen in Export-Strings (ohne loadstring)
@@ -603,6 +760,9 @@ function Database.NotifyAllChanged()
 		if ns.ClickBindingUI.SyncAutoShowAllRanks then
 			ns.ClickBindingUI.SyncAutoShowAllRanks()
 		end
+		if ns.ClickBindingUI.ApplyScrollBoxLayout then
+			ns.ClickBindingUI.ApplyScrollBoxLayout()
+		end
 		if ns.ClickBindingUI.RebuildGroups then
 			ns.ClickBindingUI.RebuildGroups()
 		end
@@ -611,6 +771,9 @@ function Database.NotifyAllChanged()
 		end
 		if ns.ClickBindingUI.RefreshVisibleLines then
 			ns.ClickBindingUI.RefreshVisibleLines()
+		end
+		if ns.ClickBindingUI.RefreshFreeKeysMatrix then
+			ns.ClickBindingUI.RefreshFreeKeysMatrix()
 		end
 	end
 	if ns.SpellBookUI then
@@ -621,8 +784,13 @@ function Database.NotifyAllChanged()
 			ns.SpellBookUI.RefreshBadges()
 		end
 	end
-	if ns.MinimapButton and ns.MinimapButton.UpdateVisibility then
-		ns.MinimapButton.UpdateVisibility()
+	if ns.MinimapButton then
+		if ns.MinimapButton.UpdateVisibility then
+			ns.MinimapButton.UpdateVisibility()
+		end
+		if ns.MinimapButton.UpdatePosition then
+			ns.MinimapButton.UpdatePosition()
+		end
 	end
 	if ns.UnitHoverTooltip and ns.UnitHoverTooltip.OnSettingChanged then
 		ns.UnitHoverTooltip.OnSettingChanged("unitHoverMode", Database.Get("unitHoverMode"))
@@ -640,6 +808,9 @@ function Database.NotifyChanged(key, value)
 		if key == "autoShowAllRanks" and ns.ClickBindingUI.SyncAutoShowAllRanks then
 			ns.ClickBindingUI.SyncAutoShowAllRanks()
 		end
+		if key == "compactListMode" and ns.ClickBindingUI.ApplyScrollBoxLayout then
+			ns.ClickBindingUI.ApplyScrollBoxLayout()
+		end
 		if (key == "groupingMode" or key == "moveInteractionsToBottom" or key == "addonLocale") and ns.ClickBindingUI.RebuildGroups then
 			ns.ClickBindingUI.RebuildGroups()
 		end
@@ -648,6 +819,9 @@ function Database.NotifyChanged(key, value)
 		end
 		if ns.ClickBindingUI.RefreshVisibleLines then
 			ns.ClickBindingUI.RefreshVisibleLines()
+		end
+		if ns.ClickBindingUI.RefreshFreeKeysMatrix then
+			ns.ClickBindingUI.RefreshFreeKeysMatrix()
 		end
 	end
 	if ns.SpellBookUI then
@@ -658,8 +832,13 @@ function Database.NotifyChanged(key, value)
 			ns.SpellBookUI.RefreshBadges()
 		end
 	end
-	if ns.MinimapButton and ns.MinimapButton.UpdateVisibility then
-		ns.MinimapButton.UpdateVisibility()
+	if ns.MinimapButton then
+		if ns.MinimapButton.UpdateVisibility then
+			ns.MinimapButton.UpdateVisibility()
+		end
+		if ns.MinimapButton.UpdatePosition then
+			ns.MinimapButton.UpdatePosition()
+		end
 	end
 	if ns.UnitHoverTooltip and ns.UnitHoverTooltip.OnSettingChanged then
 		ns.UnitHoverTooltip.OnSettingChanged(key, value)

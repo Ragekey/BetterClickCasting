@@ -274,6 +274,70 @@ function SpellRanks.GetRankEntryForAction(actionID)
 	return nil
 end
 
+-- Liefert die Zaubergruppe auch dann, wenn der konkret gebundene Rang (z. B. nach Teil-Respec)
+-- nicht mehr gelernt ist, aber niedrigere Ränge desselben Zaubers im Zauberbuch existieren.
+function SpellRanks.GetSpellGroupForAction(actionID, bindingType)
+	if not actionID then
+		return nil
+	end
+	local directEntry = SpellRanks.GetRankEntryForAction(actionID)
+	if directEntry and directEntry.group then
+		return directEntry.group
+	end
+
+	local baseName = SpellRanks.GetSpellBaseNameForAction(actionID)
+	if not baseName or baseName == "" then
+		return nil
+	end
+
+	local currentCache = SpellRanks.EnsureCache()
+	local spellBank = (Enum and Enum.ClickBindingType and bindingType == Enum.ClickBindingType.PetAction)
+		and (Enum.SpellBookSpellBank and Enum.SpellBookSpellBank.Pet or 1)
+		or (Enum and Enum.SpellBookSpellBank and Enum.SpellBookSpellBank.Player or 0)
+	local group = currentCache.bySpellKey[MakeSpellGroupKey(spellBank, baseName)]
+	if group and group.entries and #group.entries > 0 then
+		return group
+	end
+	return nil
+end
+
+-- Prüft für eine Klickbelegung, ob der gebundene Zauber aktuell im Zauberbuch gelernt ist.
+-- Berücksichtigt Leermenge (Talent verlernt), Einzelmenge (rangloser Talent-Zauber) und
+-- Begleiter-Zauber (keine Fehlwarnung, solange kein Begleiter gerufen ist).
+function SpellRanks.IsBindingSpellLearned(bindingInfo)
+	if not bindingInfo or not bindingInfo.actionID or not Constants.IsSpellOrPetBinding(bindingInfo) then
+		return true
+	end
+
+	local actionID = bindingInfo.actionID
+	if SpellRanks.GetRankEntryForAction(actionID) then
+		return true
+	end
+
+	if Enum and Enum.ClickBindingType and bindingInfo.type == Enum.ClickBindingType.PetAction then
+		if not C_SpellBook or not C_SpellBook.HasPetSpells or not C_SpellBook.HasPetSpells() then
+			return true
+		end
+		local petBank = (Enum.SpellBookSpellBank and Enum.SpellBookSpellBank.Pet) or 1
+		if C_SpellBook.IsSpellInSpellBook and C_SpellBook.IsSpellInSpellBook(actionID, petBank, true) then
+			return true
+		end
+		return false
+	end
+
+	if C_SpellBook then
+		local playerBank = (Enum and Enum.SpellBookSpellBank and Enum.SpellBookSpellBank.Player) or 0
+		if C_SpellBook.IsSpellKnownOrInSpellBook and C_SpellBook.IsSpellKnownOrInSpellBook(actionID, playerBank, true) then
+			return true
+		end
+		if C_SpellBook.IsSpellInSpellBook and C_SpellBook.IsSpellInSpellBook(actionID, playerBank, true) then
+			return true
+		end
+	end
+
+	return false
+end
+
 --------------------------------------------------------------------------------
 -- Smarte Rang-Regeln (Immer MAX, Immer MAX - N, Fester Rang)
 --------------------------------------------------------------------------------

@@ -4,17 +4,18 @@ local Constants = {}
 ns.Constants = Constants
 
 Constants.ADDON_NAME = addonName or "BetterClickCasting"
-Constants.VERSION = "0.7.3"
+Constants.VERSION = "0.8.0"
 -- Nativer gemipmappter Blizzard-Atlas aus Blizzard_ClickBindingUI.lua
 Constants.ICON_ATLAS = "clickcast-icon-mouse"
 
 Constants.Colors = {
-	RANK_MAX = "|cff99ccff",   -- Hellblau für aktuellen oder einzigen Rang
-	TAG_MAX = "|cff40ff40",    -- Grün für [MAX] bei Zaubern mit mehreren Rängen
-	RANK_DOWN = "|cffffb833",  -- Gold/Orange für Downranks (niedrigerer Rang als gelernt)
-	BIND_BADGE = "|cff55ff66", -- Leuchtendes Grün für gebundene Tasten im Zauberbuch
-	HEADER_SUB = "|cffffd100", -- Warmes Gold für Untergruppen-Header
-	MUTED = "|cff999999",      -- Grau für Manakosten und Zähler
+	RANK_MAX = "|cff99ccff",       -- Hellblau für aktuellen oder einzigen Rang
+	TAG_MAX = "|cff40ff40",        -- Grün für [MAX] bei Zaubern mit mehreren Rängen
+	RANK_DOWN = "|cffffb833",      -- Gold/Orange für Downranks (niedrigerer Rang als gelernt)
+	WARN_UNLEARNED = "|cffff5555", -- Leuchtendes Rot für nicht gelernte Zauber (z. B. nach Talent-Respec)
+	BIND_BADGE = "|cff55ff66",     -- Leuchtendes Grün für gebundene Tasten im Zauberbuch
+	HEADER_SUB = "|cffffd100",     -- Warmes Gold für Untergruppen-Header
+	MUTED = "|cff999999",          -- Grau für Manakosten und Zähler
 	RESET = "|r",
 }
 

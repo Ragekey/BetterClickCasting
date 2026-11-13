@@ -162,9 +162,10 @@ SLASH_BETTERCLICKCASTING2 = "/betterclickcasting"
 SLASH_BETTERCLICKCASTING3 = "/betterclickcastings"
 SlashCmdList["BETTERCLICKCASTING"] = function(msg)
 	local raw = strtrim(msg or "")
-	local cmd, arg = string.match(raw, "^(%S+)%s*(.-)$")
+	local cmd, rawArg = string.match(raw, "^(%S+)%s*(.-)$")
 	cmd = string.lower(cmd or "")
-	arg = string.lower(strtrim(arg or ""))
+	rawArg = strtrim(rawArg or "")
+	local arg = string.lower(rawArg)
 
 	if cmd == "" then
 		MinimapButton.ToggleClickCastingWindow()
@@ -279,6 +280,22 @@ SlashCmdList["BETTERCLICKCASTING"] = function(msg)
 		if ClickBindingUI and ClickBindingUI.ShowBindingsExportPopup then
 			ClickBindingUI.ShowBindingsExportPopup()
 		end
+	elseif cmd == "keys" or cmd == "free" or cmd == "matrix" then
+		if arg == "combos" or arg == "combo" or arg == "8x5" or arg == "all" then
+			ToggleBoolCommand("matrixShowCombos", "MATRIX_SHOW_COMBOS_CHECKBOX")
+			if ClickBindingUI and ClickBindingUI.RefreshFreeKeysMatrix then
+				ClickBindingUI.RefreshFreeKeysMatrix()
+			end
+		elseif arg == "auto" or arg == "autoopen" then
+			ToggleBoolCommand("matrixAutoOpen", "MATRIX_AUTO_OPEN_CHECKBOX")
+			if Database.Get("matrixAutoOpen") and ClickBindingFrame and ClickBindingFrame:IsShown() and ClickBindingUI and ClickBindingUI.ShowFreeKeysMatrix then
+				ClickBindingUI.ShowFreeKeysMatrix()
+			elseif ClickBindingUI and ClickBindingUI.RefreshFreeKeysMatrix then
+				ClickBindingUI.RefreshFreeKeysMatrix()
+			end
+		elseif ClickBindingUI and ClickBindingUI.ToggleFreeKeysMatrix then
+			ClickBindingUI.ToggleFreeKeysMatrix()
+		end
 	elseif cmd == "export" then
 		local scope = "all"
 		if arg == "bindings" or arg == "binds" or arg == "keys" or arg == "keybinds" then
@@ -327,6 +344,45 @@ SlashCmdList["BETTERCLICKCASTING"] = function(msg)
 		if ns.SettingsUI and ns.SettingsUI.OpenSettingsTab then
 			ns.SettingsUI.OpenSettingsTab(4)
 		end
+	elseif cmd == "preset" or cmd == "presets" or cmd == "loadout" or cmd == "loadouts" then
+		local subCmd, restRaw = string.match(rawArg, "^(%S+)%s*(.-)$")
+		local subLower = string.lower(subCmd or "")
+		restRaw = strtrim(restRaw or "")
+		if rawArg == "" or subLower == "list" then
+			local presets, activeName = Database.GetPresets()
+			if #presets == 0 then
+				if DEFAULT_CHAT_FRAME then
+					DEFAULT_CHAT_FRAME:AddMessage(L["CHAT_PRESET_LIST_EMPTY"])
+				end
+			elseif DEFAULT_CHAT_FRAME then
+				DEFAULT_CHAT_FRAME:AddMessage(string.format(L["CHAT_PRESET_LIST_HEADER_FORMAT"], ns.Constants.GetPlayerDisplayName(), #presets))
+				for _, p in ipairs(presets) do
+					local bCount = (type(p.bindings) == "table") and #p.bindings or 0
+					local activeTag = (p.name == activeName) and (" |cff40ff59" .. (L["PROFILE_CURRENT_TAG"] or "[Active]") .. "|r") or ""
+					DEFAULT_CHAT_FRAME:AddMessage(string.format("  |cffffd100%s|r |cff888888(%d)|r%s", tostring(p.name), bCount, activeTag))
+				end
+			end
+		elseif subLower == "save" or subLower == "new" then
+			if restRaw == "" then
+				if ClickBindingUI and ClickBindingUI.ShowNewPresetPopup then
+					ClickBindingUI.ShowNewPresetPopup("")
+				end
+			elseif ClickBindingUI and ClickBindingUI.SavePresetByName then
+				ClickBindingUI.SavePresetByName(restRaw)
+			end
+		elseif subLower == "delete" or subLower == "del" or subLower == "remove" or subLower == "rm" then
+			if ClickBindingUI and ClickBindingUI.DeletePresetByName then
+				ClickBindingUI.DeletePresetByName(restRaw)
+			end
+		elseif subLower == "load" then
+			if ClickBindingUI and ClickBindingUI.LoadPreset then
+				ClickBindingUI.LoadPreset(restRaw)
+			end
+		else
+			if ClickBindingUI and ClickBindingUI.LoadPreset then
+				ClickBindingUI.LoadPreset(rawArg)
+			end
+		end
 	elseif cmd == "charsettings" or cmd == "charspecific" then
 		local newVal = not Database.IsUsingCharSettings()
 		Database.SetUsingCharSettings(newVal)
@@ -349,6 +405,10 @@ SlashCmdList["BETTERCLICKCASTING"] = function(msg)
 		ToggleBoolCommand("autoShowAllRanks", "SETTING_AUTO_SHOW_ALL_RANKS")
 	elseif cmd == "minimap" or cmd == "mm" then
 		ToggleBoolCommand("showMinimapButton", "SETTING_SHOW_MINIMAP_BUTTON")
+	elseif cmd == "range" or cmd == "oor" then
+		ToggleBoolCommand("unitHoverShowRange", "SETTING_UNITHOVER_SHOW_RANGE")
+	elseif cmd == "compact" or cmd == "compactrows" then
+		ToggleBoolCommand("compactListMode", "SETTING_COMPACT_LIST_MODE")
 	elseif cmd == "lang" or cmd == "locale" or cmd == "language" then
 		local aliases = {
 			auto = "auto", client = "auto", default = "auto",
@@ -370,12 +430,14 @@ SlashCmdList["BETTERCLICKCASTING"] = function(msg)
 				PrintSettingValue("TRAINER_BEHAVIOR_MENU_TITLE", ns.SettingsUI.GetCurrentTrainerBehaviorShortLabel())
 			end
 			PrintSettingState("SETTING_SHOW_LINE_MANA_COST", Database.Get("showLineManaCost"))
+			PrintSettingState("SETTING_COMPACT_LIST_MODE", Database.Get("compactListMode"))
 			PrintSettingState("SETTING_MOVE_INTERACTIONS_BOTTOM", Database.Get("moveInteractionsToBottom"))
 			PrintSettingState("SETTING_QUICK_BIND_SPELLBOOK", Database.Get("quickBindSpellbook"))
 			PrintSettingState("SETTING_AUTO_SELECT_PRIMARY_TAB", Database.Get("autoSelectPrimarySpellTab"))
 			PrintSettingState("SETTING_ENABLE_SMART_RULES", Database.Get("enableSmartRankRules"))
 			PrintSettingValue("UNITHOVER_MODE_MENU_TITLE", ns.SettingsUI.GetCurrentUnitHoverModeShortLabel())
 			PrintSettingValue("UNITHOVER_ANCHOR_MENU_TITLE", ns.SettingsUI.GetCurrentUnitHoverAnchorShortLabel())
+			PrintSettingState("SETTING_UNITHOVER_SHOW_RANGE", Database.Get("unitHoverShowRange"))
 		end
 	elseif cmd == "test" or cmd == "testcard" then
 		if ClickBindingUI and ClickBindingUI.PrepareSmartRuleTest then
