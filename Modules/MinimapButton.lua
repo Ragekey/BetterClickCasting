@@ -28,11 +28,11 @@ function MinimapButton.ToggleClickCastingWindow()
 	end
 end
 
-local function UpdatePosition()
+local function UpdatePosition(overrideAngleDeg)
 	if not buttonFrame or not Minimap then
 		return
 	end
-	local angleDeg = Database.Get("minimapAngle") or 225
+	local angleDeg = overrideAngleDeg or Database.Get("minimapAngle") or 225
 	local angleRad = math.rad(angleDeg)
 	local radius = (math.max(Minimap:GetWidth() or 140, 140) / 2) + 5
 	local x = math.cos(angleRad) * radius
@@ -41,6 +41,8 @@ local function UpdatePosition()
 	buttonFrame:ClearAllPoints()
 	buttonFrame:SetPoint("CENTER", Minimap, "CENTER", x, y)
 end
+
+MinimapButton.UpdatePosition = UpdatePosition
 
 local function OnDragUpdate(self)
 	if not Minimap then
@@ -61,10 +63,10 @@ local function OnDragUpdate(self)
 		angleDeg = angleDeg + 360
 	end
 
-	if type(BetterClickCastingDB) == "table" then
-		BetterClickCastingDB.minimapAngle = angleDeg
-	end
-	UpdatePosition()
+	-- Während des Ziehens lokal zwischenspeichern und beim Loslassen über Database.Set
+	-- sowohl für Account- als auch für Charakter-Profile (useCharSettings) persistieren.
+	self.pendingAngle = angleDeg
+	UpdatePosition(angleDeg)
 end
 
 function MinimapButton.UpdateVisibility()
@@ -126,6 +128,10 @@ function MinimapButton.Init()
 		self:SetScript("OnUpdate", nil)
 		self:UnlockHighlight()
 		self.isDragging = false
+		if self.pendingAngle ~= nil then
+			Database.Set("minimapAngle", self.pendingAngle)
+			self.pendingAngle = nil
+		end
 	end)
 
 	btn:SetScript("OnClick", function(self, mouseButton)

@@ -2,7 +2,7 @@
 
 Welcome to the official documentation for **Better Click Casting** for *WoW Forever*.
 
-**Better Click Casting** upgrades Blizzard's built-in **Click Cast Bindings** (`ClickBindingFrame`) and **Spellbook** (`PlayerSpellsFrame`) with full **Spell Rank support**, **Smart Rank Rules**, **1-Click Spellbook Binding**, a **Unit Frame Hover Overlay**, and **Character Profile Sharing**, all while staying 100% native and taint-free.
+**Better Click Casting** upgrades Blizzard's built-in **Click Cast Bindings** (`ClickBindingFrame`) and **Spellbook** (`PlayerSpellsFrame`) with full **Spell Rank support**, **Smart Rank Rules**, **Per-Character Binding Presets**, a **Visual Free Keys Matrix**, **1-Click Spellbook Binding**, a **Unit Frame Hover Overlay**, and **Character Profile Sharing**, all while staying 100% native and taint-free.
 
 ---
 
@@ -35,14 +35,19 @@ When you open `/bcc`, **Better Click Casting** automatically opens your Spellboo
 
 In *WoW Forever*, spells have multiple ranks with different healing/damage values and mana costs.
 
-### Visual Rank Indicators & Inline Rank Switcher
+### Visual Rank Indicators, Compact Rows & Inline Rank Switcher
 * **Rank & Live Mana Display**: Every spell row in `ClickBindingFrame` shows its exact bound rank and current mana cost.
+* **Compact Binding Rows (`/bcc compact`, Default: On)**: Reduces row height in `ClickBindingFrame` from `46 px` to `32 px` so almost twice as many bound spells fit on screen without scrolling.
+* **Unlearned Spell Warning (`[NOT LEARNED]`)**: If a bound spell is currently not in your Spellbook (for example after a talent respec), its icon is desaturated and the row is highlighted in red with a **`[NOT LEARNED]`** tag so you immediately spot inactive bindings.
 * **Max-Rank vs. Downrank Highlighting**:
   * Spells at your highest learned rank display a green **`[MAX]`** tag.
   * Intentional or outdated downranks are highlighted in orange with a hint showing your highest available rank, such as **`(Rank 2 / Max 4)`**.
 * **Inline Rank Switcher Dropdown**:
   * **Left-Click** the compact rank button on any row to switch between all learned ranks of that spell (showing mana costs and full tooltips) without re-binding your mouse button.
   * **Right-Click** the rank button to jump straight to your highest learned rank (**`MAX`**).
+* **Free Keys Matrix (`4x5` / `8x5` Cheat-Sheet, `/bcc keys`)**:
+  * Click the **`Matrix`** header button inside `ClickBindingFrame` (or **Right-Click** the settings gear icon, or type **`/bcc keys`**) to open a live visual matrix of all bound and **`[FREE]`** mouse button combinations (`Direct`, `Shift`, `Ctrl`, `Alt` across `LMB`, `RMB`, `MMB`, `MB4`, `MB5`).
+  * Enable **`Show modifier combinations (8x5)`** (`/bcc keys combos`) to expand the grid from 20 slots to 40 slots (`Shift+Ctrl`, `Shift+Alt`, `Ctrl+Alt`, `S+C+A`), or enable **`Auto-open with /bcc`** (`/bcc keys auto`) to open the matrix automatically alongside `ClickBindingFrame`.
 
 ### Smart Rank Rules
 You can assign a **Smart Rank Rule** to each spell binding via the Inline Rank Switcher dropdown:
@@ -69,16 +74,18 @@ The optional **Unit Frame Hover Overlay** shows a compact, live HUD card wheneve
   * **Off**: Disabled.
   * **When Holding a Modifier (`Shift` / `Ctrl` / `Alt`)**: Only appears while you hold a modifier key over a unit frame.
   * **Always on Unit Frame Hover**: Appears whenever your cursor rests on a unit frame and dynamically updates as you press `Shift`, `Ctrl`, or `Alt`.
-* **Live Mana & Out-of-Mana Warning**: Displays live mana costs for each bound spell. If your current mana is insufficient for a spell, its name is dimmed and the mana cost turns red.
+* **Live Mana, Out-of-Mana & Out-of-Range (`[OOR]`) Warnings**: Displays live mana costs for each bound spell (dimming the row and turning mana red when out of mana) and checks live spell range against the hovered unit (`C_Spell.IsSpellInRange`), marking out-of-range spells in red with **`[OOR]`** (`/bcc range`).
 * **6 Anchor Modes**: Attach the overlay to the **Cursor**, **Top Edge**, **Bottom Edge**, **Left Edge**, **Right Edge** of the hovered unit frame, or place it at a **Free Movable Position** on your screen.
-* **Global Unlock & Placeholder Mode (`/bcc move`)**: Unlocks both the **Upgrade Hero-Card** and the **Unit Frame Hover Overlay** with a green border and sample bindings so you can drag them anywhere on screen. **Right-Click** either card while unlocked to reset its position.
+* **Global Unlock & Placeholder Mode (`/bcc move`)**: Unlocks all movable Better Click Casting windows (**Upgrade Hero-Card**, **Unit Frame Hover Overlay**, and **Free Keys Matrix**) with a green border so you can drag them anywhere on screen. **Right-Click** any unlocked card to reset its position.
 
 ---
 
-## 5. Character Profiles, Direct Copy & `!BCC1:...!` Share Strings (Tab 4)
+## 5. Per-Character Presets, Direct Copy & `!BCC1:...!` Share Strings (Tab 4)
 
 **Better Click Casting** automatically snapshots your Settings, Click Cast Keybinds, and Smart Rules per character (including full *WoW Forever* first and last names).
 
+* **Per-Character Binding Presets / Loadouts (`/bcc preset`)**:
+  * Save multiple named Click Cast setups on the same character (for example **Raid**, **Dungeon**, or **Solo / Off-Spec**) and switch between them anytime via the **`Preset: ...`** button in the top-left header of `ClickBindingFrame`, in Tab 4 (`Profiles & Share`), or via **`/bcc preset [load|save|del|list] <Name>`**.
 * **Direct Character Copy (`/bcc copy`)**:
   * Select any of your characters in Tab 4 (`Profiles & Share`) and choose **Settings + Keybinds**, **Keybinds Only**, or **Settings Only**.
   * **Cross-Character Spell Rank Resolution**: When copying bindings to a lower-level alt or twink, **Better Click Casting** automatically matches spells by name and applies your Smart Rule (`MAX`, `MAX-1`, `MAX-2`, `MAX-3`, `FIXED`) using the highest compatible rank learned by the target character! Macros are matched automatically by name.
@@ -99,15 +106,17 @@ Every setting and action can be controlled both in the graphical Settings window
 | `/bcc` | Toggle Blizzard's Click Cast Bindings window + Spellbook |
 | `/bcc cfg [1\|2\|3\|4]` | Open the Better Click Casting Settings window (optionally directly on Tab 1 to 4) |
 | `/bcc profile` | Open Tab 4 (`Profiles & Share`) |
+| `/bcc preset [load\|save\|del\|list] <Name>` | Load, save, delete, or list named Click Cast presets for the current character |
 | `/bcc export [all\|bindings\|settings]` | Open the `!BCC1:...!` export popup |
 | `/bcc import [all\|bindings\|settings]` | Open the `!BCC1:...!` import popup |
 | `/bcc copy [all\|bindings\|settings] <Name>` | Copy Settings and/or Keybinds from a saved character (supports first + last name) |
 | `/bcc charsettings` | Toggle character-specific settings for the current character |
 | `/bcc merge` | Toggle Merge vs. Replace mode when importing/copying keybinds |
 | `/bcc max` | Prepare all bound spells in `ClickBindingFrame` at their highest learned rank |
-| `/bcc list` | Open a copyable text summary of all current Click Cast bindings |
+| `/bcc keys [combos\|auto]` | Toggle the visual `4x5` / `8x5` Free Keys Matrix (`combos` toggles 8x5 mode, `auto` toggles auto-open with `/bcc`) |
+| `/bcc list` | Open a copyable text summary of all current Click Cast bindings and free slots |
 | `/bcc move` (or `/bcc unlock`) | Toggle the Global Overlay Unlock & Placeholder mode |
-| `/bcc reset` | Reset all movable overlay positions to default |
+| `/bcc reset` | Reset all movable overlay and window positions to default |
 | `/bcc group [mod\|button\|type\|none]` | Set Click Cast list grouping mode |
 | `/bcc trainer [card\|auto\|off]` | Set Trainer Upgrade behavior |
 | `/bcc hover [off\|mod\|always]` | Set Unit Frame Hover Overlay activation mode |
@@ -117,6 +126,7 @@ Every setting and action can be controlled both in the graphical Settings window
 | `/bcc lang [auto\|en\|de\|es]` | Switch AddOn language live in-game without `/reload` |
 | `/bcc qb` / `/bcc badges` / `/bcc allranks` / `/bcc autotab` | Toggle Spellbook Quick-Bind, Badges, Auto-Show All Ranks, or Auto Class-Tab |
 | `/bcc ranks` / `/bcc downrank` / `/bcc switcher` / `/bcc mana` | Toggle Rank in Name, Downrank Highlight, Inline Rank Switcher, or Mana Costs |
+| `/bcc compact` / `/bcc range` | Toggle Compact Binding Rows (`32 px`) or Hover Overlay Out-of-Range (`[OOR]`) indicator |
 | `/bcc rules` / `/bcc bottom` / `/bcc tooltips` / `/bcc minimap` | Toggle Smart Rank Rules, Move Interactions to Bottom, Tooltips, or Minimap Button |
 | `/bcc status` | Print current active settings in chat |
 | `/bcc debug [copy]` | Run live `issecurevariable` taint diagnostics |

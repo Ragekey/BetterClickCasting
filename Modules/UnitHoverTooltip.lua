@@ -24,7 +24,9 @@ local isTrackingActive = false
 local isMoveUnlocked = false
 local isDraggingCard = false
 local lastHoveredUnitFrame = nil
+local lastHoveredUnit = nil
 local lastModifierMask = -1
+local lastRangeMask = -1
 local pollElapsed = 0
 local POLL_INTERVAL = 0.05
 
@@ -67,16 +69,7 @@ local function IsPlayerInCombat()
 end
 
 local function IsFreeMoveActive()
-	if isMoveUnlocked then
-		return true
-	end
-	if (Database.Get("unitHoverMode") or "off") == "off" then
-		return false
-	end
-	if (Database.Get("unitHoverAnchor") or "cursor") ~= "free" then
-		return false
-	end
-	return (ClickBindingFrame and ClickBindingFrame:IsShown()) and true or false
+	return isMoveUnlocked
 end
 
 local function GetModifierHeaderText(modMask)
@@ -213,7 +206,11 @@ local function FindHoveredUnitFrame()
 		current = okParent and parent or nil
 	end
 
-	return matchedFrame
+	if not matchedUnit and matchedFrame and UnitExists and UnitExists("mouseover") then
+		matchedUnit = "mouseover"
+	end
+	local validUnit = (matchedUnit and UnitExists and UnitExists(matchedUnit)) and matchedUnit or nil
+	return matchedFrame, validUnit
 end
 
 local function CollectBindingsForModifier(modMask)
@@ -261,13 +258,120 @@ local function CollectBindingsForModifier(modMask)
 	return list
 end
 
-local function FormatBindingRowData(bindingInfo)
+-- Prüft per C_Spell.IsSpellInRange / C_SpellBook.IsSpellBookItemInRange (SecretArguments = AllowedWhenTainted,
+-- keine SecretReturns), ob die gehoverte Einheit für diesen gebundenen Zauber außer Reichweite ist.
+-- Nutzt eine dreistufige Fallback-Kette (SpellID -> SpellBookSlot -> SpellName), da C_Spell.IsSpellInRange
+-- bei bestimmten Rang-SpellIDs nil liefert. Für Gruppen-exklusive Zauber wie Power Word: Shield auf
+-- freundlich gesinnten Nicht-Gruppen-Einheiten wird als Fallback ein anderer gebundener Zauber mit
+-- echter Reichweitenprüfung (z. B. Flash Heal / Renew) abgefragt, statt einer kürzeren 28y-Interaktionsdistanz.
+local function CheckRangeResult(ok, inRange)
+	if not ok or (canaccessvalue and not canaccessvalue(inRange)) or inRange == nil then
+		return nil
+	end
+	if inRange == false or inRange == 0 then
+		return true
+	end
+	if inRange == true or inRange == 1 then
+		return false
+	end
+	return nil
+end
+
+local function EvaluateSingleSpellRange(actionID, targetUnit)
+	if not actionID or not targetUnit then
+		return nil
+	end
+	if C_Spell and C_Spell.IsSpellInRange then
+		local res = CheckRangeResult(pcall(C_Spell.IsSpellInRange, actionID, targetUnit))
+		if res ~= nil then
+			return res
+		end
+	end
+
+	local rankEntry = SpellRanks.GetRankEntryForAction(actionID)
+	if rankEntry and rankEntry.slotIndex and rankEntry.spellBank ~= nil and C_SpellBook and C_SpellBook.IsSpellBookItemInRange then
+		local res = CheckRangeResult(pcall(C_SpellBook.IsSpellBookItemInRange, rankEntry.slotIndex, rankEntry.spellBank, targetUnit))
+		if res ~= nil then
+			return res
+		end
+	end
+
+	local spellName = (rankEntry and rankEntry.name) or SpellRanks.GetSpellBaseNameForAction(actionID)
+	if spellName and C_Spell and C_Spell.IsSpellInRange then
+		local res = CheckRangeResult(pcall(C_Spell.IsSpellInRange, spellName, targetUnit))
+		if res ~= nil then
+			return res
+		end
+	end
+	return nil
+end
+
+local function IsBindingSpellOutOfRange(bindingInfo, targetUnit, fallbackBindings)
+	if not targetUnit or not Database.Get("unitHoverShowRange") then
+		return false
+	end
+	if not bindingInfo or not bindingInfo.actionID or not Constants.IsSpellOrPetBinding(bindingInfo) then
+		return false
+	end
+	if UnitIsUnit and UnitIsUnit(targetUnit, "player") then
+		return false
+	end
+
+	local actionID = bindingInfo.actionID
+	local directRes = EvaluateSingleSpellRange(actionID, targetUnit)
+	if directRes ~= nil then
+		return directRes
+	end
+
+	-- Fallback für Gruppen-exklusive Zauber mit Reichweite (wie Power Word: Shield), bei denen
+	-- IsSpellInRange auf freundlichen Nicht-Gruppen-Einheiten nil liefert: Wir prüfen zuerst andere
+	-- gebundene Zauber mit echter Zauberreichweite (z. B. Flash Heal / Renew mit 40 yd), damit
+	-- Power Word: Shield exakt bei derselben Zauberdistanz rot wird und nicht schon bei 28 yd.
+	if UnitIsFriend and UnitIsFriend("player", targetUnit) and C_Spell and C_Spell.SpellHasRange then
+		local okHas, hasRange = pcall(C_Spell.SpellHasRange, actionID)
+		if okHas and (not canaccessvalue or canaccessvalue(hasRange)) and hasRange then
+			if type(fallbackBindings) == "table" then
+				for _, other in ipairs(fallbackBindings) do
+					if other and other ~= bindingInfo and other.actionID and Constants.IsSpellOrPetBinding(other) then
+						local otherRes = EvaluateSingleSpellRange(other.actionID, targetUnit)
+						if otherRes ~= nil then
+							return otherRes
+						end
+					end
+				end
+			end
+			if UnitInRange and (UnitInParty(targetUnit) or UnitInRaid(targetUnit)) then
+				local okUIR, inRange = pcall(UnitInRange, targetUnit)
+				if okUIR and (not canaccessvalue or canaccessvalue(inRange)) and inRange == false then
+					return true
+				end
+			end
+		end
+	end
+
+	return false
+end
+
+local function ComputeRangeStateMask(bindings, targetUnit)
+	if not targetUnit or not Database.Get("unitHoverShowRange") or not bindings or #bindings == 0 then
+		return 0
+	end
+	local mask = 0
+	for i = 1, #bindings do
+		mask = (mask * 2) + (IsBindingSpellOutOfRange(bindings[i], targetUnit, bindings) and 1 or 0)
+	end
+	return mask
+end
+
+local function FormatBindingRowData(bindingInfo, targetUnit, allBindings)
 	local btnShort = GetShortButtonName(bindingInfo.button)
 	local bType = bindingInfo.type
 	local actionID = bindingInfo.actionID
 
 	if Constants.IsSpellOrPetBinding(bindingInfo) and actionID then
 		local rankEntry = SpellRanks.GetRankEntryForAction(actionID)
+		local isLearned = SpellRanks.IsBindingSpellLearned(bindingInfo)
+		local isOutOfRange = isLearned and IsBindingSpellOutOfRange(bindingInfo, targetUnit, allBindings)
 		local spellName = (rankEntry and rankEntry.name) or SpellRanks.GetSpellBaseNameForAction(actionID) or "?"
 		local iconID = SpellRanks.GetSpellIconForAction(actionID)
 		local subtext = (rankEntry and rankEntry.subName) or SpellRanks.GetSpellSubtextForAction(actionID)
@@ -276,7 +380,9 @@ local function FormatBindingRowData(bindingInfo)
 		end
 
 		local rankStatusTag = ""
-		if Database.Get("unitHoverShowRankTags") and rankEntry and rankEntry.group and #rankEntry.group.entries > 1 then
+		if not isLearned then
+			rankStatusTag = " " .. Colors.WARN_UNLEARNED .. L["TAG_NOT_LEARNED"] .. Colors.RESET
+		elseif Database.Get("unitHoverShowRankTags") and rankEntry and rankEntry.group and #rankEntry.group.entries > 1 then
 			local maxEntry = rankEntry.group.maxEntry
 			if maxEntry and maxEntry.actionID == actionID then
 				rankStatusTag = " " .. Colors.TAG_MAX .. L["TAG_MAX"] .. Colors.RESET
@@ -285,9 +391,12 @@ local function FormatBindingRowData(bindingInfo)
 				rankStatusTag = " " .. Colors.RANK_DOWN .. string.format(L["UNITHOVER_TAG_DOWNRANK_FORMAT"], diff) .. Colors.RESET
 			end
 		end
+		if isOutOfRange then
+			rankStatusTag = rankStatusTag .. " " .. Colors.WARN_UNLEARNED .. L["UNITHOVER_TAG_OOR"] .. Colors.RESET
+		end
 
 		local insufficientPower = false
-		if C_Spell and C_Spell.IsSpellUsable then
+		if isLearned and C_Spell and C_Spell.IsSpellUsable then
 			local _, noMana = C_Spell.IsSpellUsable(actionID)
 			insufficientPower = noMana and true or false
 		end
@@ -296,31 +405,48 @@ local function FormatBindingRowData(bindingInfo)
 		if Database.Get("unitHoverShowMana") then
 			costStr = SpellRanks.GetSpellPowerCostString(actionID) or ""
 		end
-		local iconPrefix = iconID and string.format("|T%s:14:14:0:0:64:64:4:60:4:60|t ", tostring(iconID)) or ""
+		local iconPrefix = ""
+		if iconID then
+			if not isLearned then
+				iconPrefix = string.format("|T%s:14:14:0:0:64:64:4:60:4:60:140:140:140|t ", tostring(iconID))
+			elseif isOutOfRange then
+				iconPrefix = string.format("|T%s:14:14:0:0:64:64:4:60:4:60:255:130:130|t ", tostring(iconID))
+			else
+				iconPrefix = string.format("|T%s:14:14:0:0:64:64:4:60:4:60|t ", tostring(iconID))
+			end
+		end
 
+		local isDimmed = insufficientPower or (not isLearned) or isOutOfRange
 		local namePart = spellName
 		if subtext and subtext ~= "" then
-			if insufficientPower then
+			if isDimmed then
 				namePart = string.format("|cff777777%s (%s)|r", spellName, subtext)
 			else
 				local rankColor = (rankEntry and rankEntry.isLowRank) and Colors.RANK_DOWN or Colors.RANK_MAX
 				namePart = string.format("|cffffffff%s|r %s(%s)%s", spellName, rankColor, subtext, Colors.RESET)
 			end
 		else
-			if insufficientPower then
+			if isDimmed then
 				namePart = "|cff777777" .. spellName .. "|r"
 			else
 				namePart = "|cffffffff" .. spellName .. "|r"
 			end
 		end
 
-		local btnColor = insufficientPower and "|cff777777" or Colors.BIND_BADGE
+		local btnColor = Colors.BIND_BADGE
+		if isOutOfRange then
+			btnColor = Colors.WARN_UNLEARNED
+		elseif isDimmed then
+			btnColor = "|cff777777"
+		end
 		local keyText = string.format("%s%s|r", btnColor, btnShort)
 		local spellText = string.format("%s%s%s", iconPrefix, namePart, rankStatusTag)
 
 		local rightText = ""
 		if costStr ~= "" then
-			if insufficientPower then
+			if not isLearned or isOutOfRange then
+				rightText = "|cff777777" .. costStr .. "|r"
+			elseif insufficientPower then
 				rightText = "|cffff5555" .. costStr .. "|r"
 			else
 				rightText = "|cff80c8ff" .. costStr .. "|r"
@@ -399,9 +525,6 @@ local function EnsureHoverCard()
 		self:StopMovingOrSizing()
 		isDraggingCard = false
 		SaveFreeCardPosition(self)
-		if (Database.Get("unitHoverAnchor") or "cursor") ~= "free" then
-			Database.Set("unitHoverAnchor", "free")
-		end
 	end)
 
 	card:SetScript("OnMouseUp", function(_, mouseButton)
@@ -505,10 +628,10 @@ local function UpdateCardPosition(card, unitFrame)
 	end
 end
 
-local function RenderHoverCard(unitFrame, modMask)
+local function RenderHoverCard(unitFrame, targetUnit, modMask, precollectedBindings)
 	local card = EnsureHoverCard()
 	local modLabel = GetModifierHeaderText(modMask)
-	local bindings = CollectBindingsForModifier(modMask)
+	local bindings = precollectedBindings or CollectBindingsForModifier(modMask)
 	local freeMove = IsFreeMoveActive()
 
 	local scalePct = tonumber(Database.Get("unitHoverScale")) or 100
@@ -604,7 +727,7 @@ local function RenderHoverCard(unitFrame, modMask)
 		local maxKeyColWidth = 30
 		for i, bindingInfo in ipairs(bindings) do
 			local row = EnsureCardRow(card, i)
-			local keyText, spellText, rightText = FormatBindingRowData(bindingInfo)
+			local keyText, spellText, rightText = FormatBindingRowData(bindingInfo, targetUnit, bindings)
 
 			row.Key:SetText(keyText)
 			row.Spell:SetText(spellText)
@@ -669,7 +792,9 @@ local function HideHoverCard()
 		isDraggingCard = false
 	end
 	lastHoveredUnitFrame = nil
+	lastHoveredUnit = nil
 	lastModifierMask = -1
+	lastRangeMask = -1
 	if hoverCard and hoverCard:IsShown() then
 		hoverCard:EnableMouse(false)
 		hoverCard:Hide()
@@ -709,10 +834,21 @@ local function EvaluateHoverState(forceRedraw)
 	end
 
 	if freeMove then
+		local unitFrame, hoveredUnit = FindHoveredUnitFrame()
 		local modMask = GetCurrentModifierMask()
-		if forceRedraw or modMask ~= lastModifierMask or not (hoverCard and hoverCard:IsShown()) then
+		local bindings = CollectBindingsForModifier(modMask)
+		local rangeMask = ComputeRangeStateMask(bindings, hoveredUnit)
+		if forceRedraw
+			or hoveredUnit ~= lastHoveredUnit
+			or modMask ~= lastModifierMask
+			or rangeMask ~= lastRangeMask
+			or not (hoverCard and hoverCard:IsShown())
+		then
+			lastHoveredUnitFrame = unitFrame
+			lastHoveredUnit = hoveredUnit
 			lastModifierMask = modMask
-			RenderHoverCard(nil, modMask)
+			lastRangeMask = rangeMask
+			RenderHoverCard(unitFrame, hoveredUnit, modMask, bindings)
 		end
 		return
 	end
@@ -728,17 +864,27 @@ local function EvaluateHoverState(forceRedraw)
 		return
 	end
 
-	local unitFrame = FindHoveredUnitFrame()
+	local unitFrame, hoveredUnit = FindHoveredUnitFrame()
 	if not unitFrame then
 		HideHoverCard()
 		return
 	end
 
 	local modMask = GetCurrentModifierMask()
-	if forceRedraw or unitFrame ~= lastHoveredUnitFrame or modMask ~= lastModifierMask or not (hoverCard and hoverCard:IsShown()) then
+	local bindings = CollectBindingsForModifier(modMask)
+	local rangeMask = ComputeRangeStateMask(bindings, hoveredUnit)
+	if forceRedraw
+		or unitFrame ~= lastHoveredUnitFrame
+		or hoveredUnit ~= lastHoveredUnit
+		or modMask ~= lastModifierMask
+		or rangeMask ~= lastRangeMask
+		or not (hoverCard and hoverCard:IsShown())
+	then
 		lastHoveredUnitFrame = unitFrame
+		lastHoveredUnit = hoveredUnit
 		lastModifierMask = modMask
-		RenderHoverCard(unitFrame, modMask)
+		lastRangeMask = rangeMask
+		RenderHoverCard(unitFrame, hoveredUnit, modMask, bindings)
 	elseif (Database.Get("unitHoverAnchor") or "cursor") == "cursor" and hoverCard and hoverCard:IsShown() then
 		UpdateCardPosition(hoverCard, unitFrame)
 	end
@@ -754,7 +900,8 @@ local function EnsureEventFrame()
 		if event == "MODIFIER_STATE_CHANGED"
 			or event == "UPDATE_MOUSEOVER_UNIT"
 			or event == "PLAYER_REGEN_DISABLED"
-			or event == "PLAYER_REGEN_ENABLED" then
+			or event == "PLAYER_REGEN_ENABLED"
+			or event == "SPELLS_CHANGED" then
 			EvaluateHoverState(true)
 		elseif event == "UNIT_POWER_FREQUENT" and arg1 == "player" then
 			if hoverCard and hoverCard:IsShown() then
@@ -800,6 +947,7 @@ function UnitHoverTooltip.UpdateTrackingState()
 		f:RegisterEvent("UPDATE_MOUSEOVER_UNIT")
 		f:RegisterEvent("PLAYER_REGEN_DISABLED")
 		f:RegisterEvent("PLAYER_REGEN_ENABLED")
+		f:RegisterEvent("SPELLS_CHANGED")
 		f:RegisterUnitEvent("UNIT_POWER_FREQUENT", "player")
 		f:Show()
 	end
@@ -839,6 +987,7 @@ function UnitHoverTooltip.OnSettingChanged(key)
 		or key == "unitHoverAlpha"
 		or key == "unitHoverShowMana"
 		or key == "unitHoverShowRankTags"
+		or key == "unitHoverShowRange"
 		or key == "unitHoverShowInCombat"
 		or key == "unitHoverShowInteractions"
 		or key == "addonLocale" then

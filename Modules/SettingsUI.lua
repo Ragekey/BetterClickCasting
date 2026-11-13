@@ -59,6 +59,40 @@ local settingsWindow = nil
 local activeTabIndex = 1
 local selectedSourceCharKey = nil
 local selectedShareScope = "all"
+local selectedPresetName = nil
+
+local function GetSelectedPreset()
+	local presets, activeName = Database.GetPresets()
+	if selectedPresetName then
+		for _, preset in ipairs(presets) do
+			if preset.name == selectedPresetName then
+				return preset, presets
+			end
+		end
+	end
+	if activeName then
+		for _, preset in ipairs(presets) do
+			if preset.name == activeName then
+				selectedPresetName = preset.name
+				return preset, presets
+			end
+		end
+	end
+	if presets[1] then
+		selectedPresetName = presets[1].name
+		return presets[1], presets
+	end
+	selectedPresetName = nil
+	return nil, presets
+end
+
+local function FormatPresetLabel(preset)
+	if not preset then
+		return L["PRESET_NO_PRESETS_SAVED"] or "None"
+	end
+	local count = (type(preset.bindings) == "table") and #preset.bindings or 0
+	return string.format(L["PRESET_ENTRY_FORMAT"] or "%s (%d)", preset.name or "?", count)
+end
 
 local function FormatCharProfileLabel(prof, currentKey)
 	if not prof then
@@ -134,6 +168,98 @@ end
 function SettingsUI.GetCurrentLocaleShortLabel()
 	local current = Database.Get("addonLocale") or "auto"
 	return GetShortLabelFromList(LOCALE_OPTIONS, current, "LOCALE_OPT_AUTO_SHORT")
+end
+
+local function PopulatePresetContextMenu(rootDescription, isQuickLoad)
+	rootDescription:CreateTitle(L["PRESET_MENU_TITLE"])
+	local selectedPreset, presets = GetSelectedPreset()
+	local activeName = Database.GetActivePresetName()
+
+	if #presets == 0 then
+		rootDescription:CreateTitle(L["PRESET_NO_PRESETS_SAVED"])
+	else
+		local function IsSelected(presetName)
+			if isQuickLoad then
+				return activeName == presetName
+			end
+			return selectedPreset and selectedPreset.name == presetName
+		end
+
+		local function SetSelected(presetName)
+			selectedPresetName = presetName
+			if isQuickLoad and ns.ClickBindingUI and ns.ClickBindingUI.LoadPreset then
+				ns.ClickBindingUI.LoadPreset(presetName)
+			end
+			SettingsUI.RefreshWindow()
+		end
+
+		for _, preset in ipairs(presets) do
+			local label = FormatPresetLabel(preset)
+			local radio = rootDescription:CreateRadio(label, IsSelected, SetSelected, preset.name)
+			radio:SetTooltip(function(tooltip)
+				GameTooltip_SetTitle(tooltip, preset.name)
+				GameTooltip_AddNormalLine(tooltip, L["PRESET_BTN_LOAD_DESC"], true)
+			end)
+		end
+	end
+
+	rootDescription:CreateDivider()
+
+	rootDescription:CreateButton(L["PRESET_ACT_SAVE_NEW"], function()
+		if ns.ClickBindingUI and ns.ClickBindingUI.ShowNewPresetPopup then
+			ns.ClickBindingUI.ShowNewPresetPopup("", function(saved)
+				if saved and saved.name then
+					selectedPresetName = saved.name
+				end
+				SettingsUI.RefreshWindow()
+			end)
+		end
+	end)
+
+	local targetForAction = isQuickLoad and (activeName and Database.FindPreset(activeName)) or selectedPreset
+	if targetForAction and targetForAction.name then
+		rootDescription:CreateButton(string.format(L["PRESET_ACT_UPDATE_FORMAT"], targetForAction.name), function()
+			if ns.ClickBindingUI and ns.ClickBindingUI.SavePresetByName then
+				ns.ClickBindingUI.SavePresetByName(targetForAction.name)
+				selectedPresetName = targetForAction.name
+				SettingsUI.RefreshWindow()
+			end
+		end)
+		rootDescription:CreateButton(string.format(L["PRESET_ACT_DELETE_FORMAT"], targetForAction.name), function()
+			if ns.ClickBindingUI and ns.ClickBindingUI.DeletePresetByName then
+				ns.ClickBindingUI.DeletePresetByName(targetForAction.name)
+				if selectedPresetName == targetForAction.name then
+					selectedPresetName = nil
+				end
+				SettingsUI.RefreshWindow()
+			end
+		end)
+	end
+
+	if isQuickLoad then
+		rootDescription:CreateDivider()
+		rootDescription:CreateButton(L["PRESET_ACT_OPEN_MANAGER"], function()
+			SettingsUI.OpenSettingsTab(4)
+		end)
+	end
+end
+
+function SettingsUI.OpenPresetMenu(ownerRegion)
+	if not MenuUtil or not MenuUtil.CreateContextMenu then
+		return
+	end
+	MenuUtil.CreateContextMenu(ownerRegion, function(_, rootDescription)
+		PopulatePresetContextMenu(rootDescription, true)
+	end)
+end
+
+function SettingsUI.OpenTab4PresetMenu(ownerRegion)
+	if not MenuUtil or not MenuUtil.CreateContextMenu then
+		return
+	end
+	MenuUtil.CreateContextMenu(ownerRegion, function(_, rootDescription)
+		PopulatePresetContextMenu(rootDescription, false)
+	end)
 end
 
 function SettingsUI.OpenSourceCharMenu(ownerRegion)
@@ -221,6 +347,31 @@ end
 
 function SettingsUI.PopulateGroupingMenu(rootDescription)
 	PopulateRadioMenu(rootDescription, "GROUP_MENU_TITLE", "groupingMode", "modifier", GROUP_MODES, "GROUP_TOOLTIP_DESC")
+	if rootDescription and rootDescription.CreateDivider and rootDescription.CreateCheckbox then
+		rootDescription:CreateDivider()
+		local cb = rootDescription:CreateCheckbox(
+			L["SETTING_COMPACT_LIST_MODE"],
+			function()
+				return Database.Get("compactListMode") and true or false
+			end,
+			function()
+				Database.Toggle("compactListMode")
+			end
+		)
+		if cb and cb.SetTooltip then
+			cb:SetTooltip(function(tooltip)
+				GameTooltip_SetTitle(tooltip, L["SETTING_COMPACT_LIST_MODE"])
+				GameTooltip_AddNormalLine(tooltip, L["SETTING_COMPACT_LIST_MODE_DESC"], true)
+			end)
+		end
+		if rootDescription.CreateButton then
+			rootDescription:CreateButton(L["SETTINGS_FREE_KEYS_MATRIX_BTN"], function()
+				if ns.ClickBindingUI and ns.ClickBindingUI.ToggleFreeKeysMatrix then
+					ns.ClickBindingUI.ToggleFreeKeysMatrix()
+				end
+			end)
+		end
+	end
 end
 
 function SettingsUI.OpenGroupingMenu(ownerRegion)
@@ -440,7 +591,12 @@ local function CreateActionButton(parent, yOffset, width, getTextFunc, onClickFu
 	end
 
 	btn.RefreshValue = function(self)
+		self.Text:SetFontObject("GameFontNormal")
 		self.Text:SetText(getTextFunc())
+		local maxTextWidth = (self:GetWidth() or 200) - 18
+		if self.Text.GetUnboundedStringWidth and self.Text:GetUnboundedStringWidth() > maxTextWidth then
+			self.Text:SetFontObject("GameFontNormalSmall")
+		end
 	end
 
 	return btn
@@ -448,7 +604,7 @@ end
 
 local function CreateSliderControl(parent, yOffset, dbKey, minVal, maxVal, stepVal, formatKey)
 	local container = CreateFrame("Frame", nil, parent)
-	container:SetSize(460, 42)
+	container:SetSize(492, 42)
 	container:SetPoint("TOPLEFT", parent, "TOPLEFT", 18, yOffset)
 
 	local title = container:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
@@ -466,7 +622,7 @@ local function CreateSliderControl(parent, yOffset, dbKey, minVal, maxVal, stepV
 
 	local slider = CreateFrame("Slider", nil, container, "BackdropTemplate")
 	slider:SetOrientation("HORIZONTAL")
-	slider:SetSize(456, 12)
+	slider:SetSize(488, 12)
 	slider:SetPoint("TOPLEFT", container, "TOPLEFT", 2, -16)
 	slider:SetMinMaxValues(minVal, maxVal)
 	slider:SetValueStep(stepVal)
@@ -536,19 +692,19 @@ end
 
 local function SaveWindowPosition(frame)
 	local point, _, relativePoint, xOfs, yOfs = frame:GetPoint(1)
-	if point and type(BetterClickCastingDB) == "table" then
-		BetterClickCastingDB.settingsWindowPos = {
+	if point then
+		Database.Set("settingsWindowPos", {
 			point = point,
 			relativePoint = relativePoint or point,
-			x = xOfs or 0,
-			y = yOfs or 0,
-		}
+			x = math.floor((xOfs or 0) + 0.5),
+			y = math.floor((yOfs or 0) + 0.5),
+		})
 	end
 end
 
 local function PositionSettingsWindow(frame)
 	frame:ClearAllPoints()
-	local saved = (type(BetterClickCastingDB) == "table") and BetterClickCastingDB.settingsWindowPos or nil
+	local saved = Database.Get("settingsWindowPos")
 	if type(saved) == "table" and saved.point then
 		frame:SetPoint(saved.point, UIParent, saved.relativePoint or saved.point, saved.x or 0, saved.y or 0)
 	elseif ClickBindingFrame and ClickBindingFrame:IsShown() then
@@ -564,14 +720,25 @@ local function EnsureSettingsWindow()
 	end
 
 	local win = CreateFrame("Frame", "BetterClickCastingSettingsFrame", UIParent, "BackdropTemplate")
-	win:SetSize(496, 445)
-	win:SetFrameStrata("DIALOG")
-	win:SetFrameLevel(130)
+	win:SetSize(528, 494)
+	win:SetFrameStrata("MEDIUM")
+	win:SetToplevel(true)
+	win:SetFrameLevel(20)
 	win:SetClampedToScreen(true)
 	win:SetMovable(true)
 	win:EnableMouse(true)
 	win:RegisterForDrag("LeftButton")
-	win:SetScript("OnDragStart", win.StartMoving)
+	win:SetScript("OnMouseDown", function(self)
+		if self.Raise then
+			self:Raise()
+		end
+	end)
+	win:SetScript("OnDragStart", function(self)
+		if self.Raise then
+			self:Raise()
+		end
+		self:StartMoving()
+	end)
 	win:SetScript("OnDragStop", function(self)
 		self:StopMovingOrSizing()
 		SaveWindowPosition(self)
@@ -619,11 +786,11 @@ local function EnsureSettingsWindow()
 	win.Pages = {}
 	win.Controls = {}
 
-	local tabWidth = 110
+	local tabWidth = 120
 	for i, tabKey in ipairs(tabLabelKeys) do
 		local tabBtn = CreateFrame("Button", nil, win)
 		tabBtn:SetSize(tabWidth, 26)
-		tabBtn:SetPoint("TOPLEFT", win, "TOPLEFT", 16 + ((i - 1) * (tabWidth + 8)), -44)
+		tabBtn:SetPoint("TOPLEFT", win, "TOPLEFT", 15 + ((i - 1) * (tabWidth + 6)), -44)
 		tabBtn:RegisterForClicks("LeftButtonUp")
 		tabBtn.labelKey = tabKey
 
@@ -676,7 +843,7 @@ local function EnsureSettingsWindow()
 	RegisterControl(CreatePillSelectorButton(
 		page1,
 		-30,
-		224,
+		240,
 		function()
 			return string.format(L["GROUP_BUTTON_FORMAT"], SettingsUI.GetCurrentGroupShortLabel())
 		end,
@@ -690,7 +857,7 @@ local function EnsureSettingsWindow()
 	local trainerBtn = RegisterControl(CreatePillSelectorButton(
 		page1,
 		-30,
-		224,
+		240,
 		function()
 			return string.format(L["TRAINER_BEHAVIOR_BUTTON_FORMAT"], SettingsUI.GetCurrentTrainerBehaviorShortLabel())
 		end,
@@ -701,7 +868,7 @@ local function EnsureSettingsWindow()
 		"TRAINER_BEHAVIOR_TOOLTIP_DESC"
 	))
 	trainerBtn:ClearAllPoints()
-	trainerBtn:SetPoint("TOPLEFT", page1, "TOPLEFT", 254, -30)
+	trainerBtn:SetPoint("TOPLEFT", page1, "TOPLEFT", 270, -30)
 
 	RegisterControl(CreateDBCheckbox(page1, -64, "showRankInName", "SETTING_SHOW_RANK_IN_NAME", "SETTING_SHOW_RANK_IN_NAME_DESC"))
 	RegisterControl(CreateDBCheckbox(page1, -92, "highlightDownranks", "SETTING_HIGHLIGHT_DOWNRANKS", "SETTING_HIGHLIGHT_DOWNRANKS_DESC"))
@@ -710,11 +877,12 @@ local function EnsureSettingsWindow()
 	RegisterControl(CreateDBCheckbox(page1, -176, "moveInteractionsToBottom", "SETTING_MOVE_INTERACTIONS_BOTTOM", "SETTING_MOVE_INTERACTIONS_BOTTOM_DESC"))
 	RegisterControl(CreateDBCheckbox(page1, -204, "enableSmartRankRules", "SETTING_ENABLE_SMART_RULES", "SETTING_ENABLE_SMART_RULES_DESC"))
 	RegisterControl(CreateDBCheckbox(page1, -232, "showLineTooltips", "SETTING_SHOW_LINE_TOOLTIPS", "SETTING_SHOW_LINE_TOOLTIPS_DESC"))
+	RegisterControl(CreateDBCheckbox(page1, -260, "compactListMode", "SETTING_COMPACT_LIST_MODE", "SETTING_COMPACT_LIST_MODE_DESC"))
 
 	local upgradeBtn = RegisterControl(CreateActionButton(
 		page1,
-		-272,
-		460,
+		-296,
+		492,
 		function()
 			if ClickBindingFrame and ClickBindingFrame:IsShown() and ns.ClickBindingUI and ns.ClickBindingUI.CountUpgradeableBindings then
 				local count = ns.ClickBindingUI.CountUpgradeableBindings()
@@ -739,8 +907,8 @@ local function EnsureSettingsWindow()
 
 	RegisterControl(CreateActionButton(
 		page1,
-		-308,
-		224,
+		-330,
+		240,
 		function()
 			return L["SETTINGS_OPEN_CLICKCAST_BTN"]
 		end,
@@ -752,10 +920,27 @@ local function EnsureSettingsWindow()
 		nil
 	))
 
+	local matrixBtn = RegisterControl(CreateActionButton(
+		page1,
+		-330,
+		240,
+		function()
+			return L["SETTINGS_FREE_KEYS_MATRIX_BTN"]
+		end,
+		function()
+			if ns.ClickBindingUI and ns.ClickBindingUI.ToggleFreeKeysMatrix then
+				ns.ClickBindingUI.ToggleFreeKeysMatrix()
+			end
+		end,
+		"SETTINGS_FREE_KEYS_MATRIX_DESC"
+	))
+	matrixBtn:ClearAllPoints()
+	matrixBtn:SetPoint("TOPLEFT", page1, "TOPLEFT", 270, -330)
+
 	local exportBtn = RegisterControl(CreateActionButton(
 		page1,
-		-308,
-		224,
+		-364,
+		492,
 		function()
 			return L["SETTINGS_EXPORT_BINDINGS_BTN"]
 		end,
@@ -766,8 +951,6 @@ local function EnsureSettingsWindow()
 		end,
 		"SETTINGS_EXPORT_BINDINGS_DESC"
 	))
-	exportBtn:ClearAllPoints()
-	exportBtn:SetPoint("TOPLEFT", page1, "TOPLEFT", 254, -308)
 
 	----------------------------------------------------------------------------
 	-- TAB 2: Zauberbuch & Allgemein
@@ -786,7 +969,7 @@ local function EnsureSettingsWindow()
 	RegisterControl(CreatePillSelectorButton(
 		page2,
 		-210,
-		460,
+		492,
 		function()
 			return string.format(L["LOCALE_BUTTON_FORMAT"], SettingsUI.GetCurrentLocaleShortLabel())
 		end,
@@ -816,7 +999,7 @@ local function EnsureSettingsWindow()
 	local resetPosBtn = RegisterControl(CreateActionButton(
 		page2,
 		-248,
-		158,
+		190,
 		function()
 			return L["OVERLAY_UNLOCK_BTN_RESET_POS"]
 		end,
@@ -831,7 +1014,7 @@ local function EnsureSettingsWindow()
 	RegisterControl(CreateActionButton(
 		page2,
 		-284,
-		460,
+		492,
 		function()
 			return L["SETTINGS_RUN_DEBUG_BTN"]
 		end,
@@ -852,7 +1035,7 @@ local function EnsureSettingsWindow()
 	RegisterControl(CreatePillSelectorButton(
 		page3,
 		-30,
-		224,
+		240,
 		function()
 			return string.format(L["UNITHOVER_MODE_BUTTON_FORMAT"], SettingsUI.GetCurrentUnitHoverModeShortLabel())
 		end,
@@ -870,7 +1053,7 @@ local function EnsureSettingsWindow()
 	local anchorBtn = RegisterControl(CreatePillSelectorButton(
 		page3,
 		-30,
-		224,
+		240,
 		function()
 			return string.format(L["UNITHOVER_ANCHOR_BUTTON_FORMAT"], SettingsUI.GetCurrentUnitHoverAnchorShortLabel())
 		end,
@@ -885,19 +1068,20 @@ local function EnsureSettingsWindow()
 		"UNITHOVER_ANCHOR_TOOLTIP_DESC"
 	))
 	anchorBtn:ClearAllPoints()
-	anchorBtn:SetPoint("TOPLEFT", page3, "TOPLEFT", 254, -30)
+	anchorBtn:SetPoint("TOPLEFT", page3, "TOPLEFT", 270, -30)
 
 	RegisterControl(CreateSliderControl(page3, -68, "unitHoverScale", 70, 150, 5, "SETTING_UNITHOVER_SCALE_FORMAT"))
 	RegisterControl(CreateSliderControl(page3, -118, "unitHoverAlpha", 30, 100, 5, "SETTING_UNITHOVER_ALPHA_FORMAT"))
 
 	RegisterControl(CreateDBCheckbox(page3, -168, "unitHoverShowMana", "SETTING_UNITHOVER_SHOW_MANA", "SETTING_UNITHOVER_SHOW_MANA_DESC"))
 	RegisterControl(CreateDBCheckbox(page3, -196, "unitHoverShowRankTags", "SETTING_UNITHOVER_SHOW_RANK_TAGS", "SETTING_UNITHOVER_SHOW_RANK_TAGS_DESC"))
-	RegisterControl(CreateDBCheckbox(page3, -224, "unitHoverShowInCombat", "SETTING_UNITHOVER_SHOW_IN_COMBAT", "SETTING_UNITHOVER_SHOW_IN_COMBAT_DESC"))
-	RegisterControl(CreateDBCheckbox(page3, -252, "unitHoverShowInteractions", "SETTING_UNITHOVER_SHOW_INTERACTIONS", "SETTING_UNITHOVER_SHOW_INTERACTIONS_DESC"))
+	RegisterControl(CreateDBCheckbox(page3, -224, "unitHoverShowRange", "SETTING_UNITHOVER_SHOW_RANGE", "SETTING_UNITHOVER_SHOW_RANGE_DESC"))
+	RegisterControl(CreateDBCheckbox(page3, -252, "unitHoverShowInCombat", "SETTING_UNITHOVER_SHOW_IN_COMBAT", "SETTING_UNITHOVER_SHOW_IN_COMBAT_DESC"))
+	RegisterControl(CreateDBCheckbox(page3, -280, "unitHoverShowInteractions", "SETTING_UNITHOVER_SHOW_INTERACTIONS", "SETTING_UNITHOVER_SHOW_INTERACTIONS_DESC"))
 
 	local unlockMoveCb = RegisterControl(CreateCheckboxControl(
 		page3,
-		-280,
+		-308,
 		"SETTING_UNITHOVER_UNLOCK_MOVE",
 		"SETTING_UNITHOVER_UNLOCK_MOVE_DESC",
 		function()
@@ -910,14 +1094,123 @@ local function EnsureSettingsWindow()
 	win.UnlockMoveCheckbox = unlockMoveCb
 
 	----------------------------------------------------------------------------
-	-- TAB 4: Profile, Charakter-Übernahme & Import/Export
+	-- TAB 4: Binding-Presets, Charakter-Übernahme & Import/Export
 	----------------------------------------------------------------------------
 	local page4 = win.Pages[4]
-	RegisterControl(CreateSectionHeader(page4, "SETTINGS_HEADER_PROFILES", -6))
+	RegisterControl(CreateSectionHeader(page4, "SETTINGS_HEADER_PRESETS", -6))
+
+	RegisterControl(CreatePillSelectorButton(
+		page4,
+		-28,
+		492,
+		function()
+			local preset = GetSelectedPreset()
+			return string.format(L["PRESET_SELECTED_FORMAT"], FormatPresetLabel(preset))
+		end,
+		function(owner)
+			SettingsUI.OpenTab4PresetMenu(owner)
+		end,
+		"PRESET_TOOLTIP_TITLE",
+		"PRESET_TOOLTIP_DESC"
+	))
+
+	RegisterControl(CreateActionButton(
+		page4,
+		-62,
+		117,
+		function()
+			return L["PRESET_BTN_LOAD"]
+		end,
+		function()
+			local preset = GetSelectedPreset()
+			if preset and ns.ClickBindingUI and ns.ClickBindingUI.LoadPreset then
+				ns.ClickBindingUI.LoadPreset(preset)
+				SettingsUI.RefreshWindow()
+			elseif ns.ClickBindingUI and ns.ClickBindingUI.ShowNewPresetPopup then
+				ns.ClickBindingUI.ShowNewPresetPopup("", function(saved)
+					if saved and saved.name then
+						selectedPresetName = saved.name
+					end
+					SettingsUI.RefreshWindow()
+				end)
+			end
+		end,
+		"PRESET_BTN_LOAD_DESC"
+	))
+
+	local newPresetBtn = RegisterControl(CreateActionButton(
+		page4,
+		-62,
+		117,
+		function()
+			return L["PRESET_BTN_NEW"]
+		end,
+		function()
+			if ns.ClickBindingUI and ns.ClickBindingUI.ShowNewPresetPopup then
+				ns.ClickBindingUI.ShowNewPresetPopup("", function(saved)
+					if saved and saved.name then
+						selectedPresetName = saved.name
+					end
+					SettingsUI.RefreshWindow()
+				end)
+			end
+		end,
+		"PRESET_BTN_NEW_DESC"
+	))
+	newPresetBtn:ClearAllPoints()
+	newPresetBtn:SetPoint("TOPLEFT", page4, "TOPLEFT", 143, -62)
+
+	local overwritePresetBtn = RegisterControl(CreateActionButton(
+		page4,
+		-62,
+		117,
+		function()
+			return L["PRESET_BTN_OVERWRITE"]
+		end,
+		function()
+			local preset = GetSelectedPreset()
+			if preset and preset.name and ns.ClickBindingUI and ns.ClickBindingUI.SavePresetByName then
+				ns.ClickBindingUI.SavePresetByName(preset.name)
+				SettingsUI.RefreshWindow()
+			elseif ns.ClickBindingUI and ns.ClickBindingUI.ShowNewPresetPopup then
+				ns.ClickBindingUI.ShowNewPresetPopup("", function(saved)
+					if saved and saved.name then
+						selectedPresetName = saved.name
+					end
+					SettingsUI.RefreshWindow()
+				end)
+			end
+		end,
+		"PRESET_BTN_OVERWRITE_DESC"
+	))
+	overwritePresetBtn:ClearAllPoints()
+	overwritePresetBtn:SetPoint("TOPLEFT", page4, "TOPLEFT", 268, -62)
+
+	local deletePresetBtn = RegisterControl(CreateActionButton(
+		page4,
+		-62,
+		117,
+		function()
+			return L["PRESET_BTN_DELETE"]
+		end,
+		function()
+			local preset = GetSelectedPreset()
+			if preset and preset.name and ns.ClickBindingUI and ns.ClickBindingUI.DeletePresetByName then
+				ns.ClickBindingUI.DeletePresetByName(preset.name)
+				selectedPresetName = nil
+				SettingsUI.RefreshWindow()
+			end
+		end,
+		"PRESET_BTN_DELETE_DESC"
+	))
+	deletePresetBtn:ClearAllPoints()
+	deletePresetBtn:SetPoint("TOPLEFT", page4, "TOPLEFT", 393, -62)
+
+	RegisterControl(CreateSectionHeader(page4, "SETTINGS_HEADER_PROFILES", -98))
 
 	RegisterControl(CreateCheckboxControl(
 		page4,
-		-30,
+		-120,
 		"SETTING_USE_CHAR_SETTINGS",
 		"SETTING_USE_CHAR_SETTINGS_DESC",
 		function()
@@ -928,12 +1221,12 @@ local function EnsureSettingsWindow()
 		end
 	))
 
-	RegisterControl(CreateDBCheckbox(page4, -58, "importMergeBindings", "SETTING_IMPORT_MERGE_BINDINGS", "SETTING_IMPORT_MERGE_BINDINGS_DESC"))
+	RegisterControl(CreateDBCheckbox(page4, -146, "importMergeBindings", "SETTING_IMPORT_MERGE_BINDINGS", "SETTING_IMPORT_MERGE_BINDINGS_DESC"))
 
 	RegisterControl(CreatePillSelectorButton(
 		page4,
-		-94,
-		460,
+		-178,
+		492,
 		function()
 			local prof, currentKey = GetSelectedCharProfile()
 			return string.format(L["PROFILE_SOURCE_CHAR_FORMAT"], FormatCharProfileLabel(prof, currentKey))
@@ -947,8 +1240,8 @@ local function EnsureSettingsWindow()
 
 	RegisterControl(CreateActionButton(
 		page4,
-		-130,
-		148,
+		-212,
+		158,
 		function()
 			return L["PROFILE_BTN_COPY_ALL"]
 		end,
@@ -964,8 +1257,8 @@ local function EnsureSettingsWindow()
 
 	local copyBindsBtn = RegisterControl(CreateActionButton(
 		page4,
-		-130,
-		148,
+		-212,
+		158,
 		function()
 			return L["PROFILE_BTN_COPY_BINDINGS"]
 		end,
@@ -979,12 +1272,12 @@ local function EnsureSettingsWindow()
 		"PROFILE_BTN_COPY_BINDINGS_DESC"
 	))
 	copyBindsBtn:ClearAllPoints()
-	copyBindsBtn:SetPoint("TOPLEFT", page4, "TOPLEFT", 174, -130)
+	copyBindsBtn:SetPoint("TOPLEFT", page4, "TOPLEFT", 185, -212)
 
 	local copySettingsBtn = RegisterControl(CreateActionButton(
 		page4,
-		-130,
-		148,
+		-212,
+		158,
 		function()
 			return L["PROFILE_BTN_COPY_SETTINGS"]
 		end,
@@ -998,14 +1291,14 @@ local function EnsureSettingsWindow()
 		"PROFILE_BTN_COPY_SETTINGS_DESC"
 	))
 	copySettingsBtn:ClearAllPoints()
-	copySettingsBtn:SetPoint("TOPLEFT", page4, "TOPLEFT", 330, -130)
+	copySettingsBtn:SetPoint("TOPLEFT", page4, "TOPLEFT", 352, -212)
 
-	RegisterControl(CreateSectionHeader(page4, "SETTINGS_HEADER_SHARE", -176))
+	RegisterControl(CreateSectionHeader(page4, "SETTINGS_HEADER_SHARE", -250))
 
 	RegisterControl(CreatePillSelectorButton(
 		page4,
-		-200,
-		460,
+		-272,
+		492,
 		function()
 			return string.format(L["SHARE_SCOPE_BUTTON_FORMAT"], SettingsUI.GetCurrentShareScopeShortLabel())
 		end,
@@ -1018,8 +1311,8 @@ local function EnsureSettingsWindow()
 
 	RegisterControl(CreateActionButton(
 		page4,
-		-236,
-		224,
+		-306,
+		240,
 		function()
 			return L["SHARE_BTN_EXPORT_STRING"]
 		end,
@@ -1033,8 +1326,8 @@ local function EnsureSettingsWindow()
 
 	local importStrBtn = RegisterControl(CreateActionButton(
 		page4,
-		-236,
-		224,
+		-306,
+		240,
 		function()
 			return L["SHARE_BTN_IMPORT_STRING"]
 		end,
@@ -1046,12 +1339,12 @@ local function EnsureSettingsWindow()
 		"SHARE_BTN_IMPORT_STRING_DESC"
 	))
 	importStrBtn:ClearAllPoints()
-	importStrBtn:SetPoint("TOPLEFT", page4, "TOPLEFT", 254, -236)
+	importStrBtn:SetPoint("TOPLEFT", page4, "TOPLEFT", 270, -306)
 
 	RegisterControl(CreateActionButton(
 		page4,
-		-272,
-		460,
+		-340,
+		492,
 		function()
 			return L["SETTINGS_EXPORT_BINDINGS_BTN"]
 		end,
@@ -1072,7 +1365,8 @@ end
 function SettingsUI.IsOverlaysUnlocked()
 	local hoverUnlocked = ns.UnitHoverTooltip and ns.UnitHoverTooltip.IsMoveUnlocked and ns.UnitHoverTooltip.IsMoveUnlocked() or false
 	local heroUnlocked = ns.ClickBindingUI and ns.ClickBindingUI.IsHeroCardPreviewUnlocked and ns.ClickBindingUI.IsHeroCardPreviewUnlocked() or false
-	return hoverUnlocked or heroUnlocked
+	local matrixUnlocked = ns.ClickBindingUI and ns.ClickBindingUI.IsMatrixPreviewUnlocked and ns.ClickBindingUI.IsMatrixPreviewUnlocked() or false
+	return hoverUnlocked or heroUnlocked or matrixUnlocked
 end
 
 function SettingsUI.SetOverlaysUnlocked(unlocked, silent)
@@ -1088,6 +1382,9 @@ function SettingsUI.SetOverlaysUnlocked(unlocked, silent)
 	end
 	if ns.ClickBindingUI and ns.ClickBindingUI.SetHeroCardPreviewUnlocked then
 		ns.ClickBindingUI.SetHeroCardPreviewUnlocked(target)
+	end
+	if ns.ClickBindingUI and ns.ClickBindingUI.SetMatrixPreviewUnlocked then
+		ns.ClickBindingUI.SetMatrixPreviewUnlocked(target)
 	end
 	SettingsUI.RefreshWindow()
 	if not silent and DEFAULT_CHAT_FRAME then
@@ -1105,6 +1402,13 @@ function SettingsUI.ResetAllOverlayPositions(silent)
 	end
 	if ns.ClickBindingUI and ns.ClickBindingUI.ResetHeroCardPosition then
 		ns.ClickBindingUI.ResetHeroCardPosition()
+	end
+	if ns.ClickBindingUI and ns.ClickBindingUI.ResetMatrixPosition then
+		ns.ClickBindingUI.ResetMatrixPosition()
+	end
+	Database.Set("settingsWindowPos", nil)
+	if settingsWindow and settingsWindow:IsShown() then
+		PositionSettingsWindow(settingsWindow)
 	end
 	if not silent and DEFAULT_CHAT_FRAME then
 		DEFAULT_CHAT_FRAME:AddMessage(L["CHAT_OVERLAYS_RESET"])
@@ -1141,10 +1445,19 @@ function SettingsUI.OpenSettingsTab(tabIndex)
 		PositionSettingsWindow(win)
 		win:Show()
 	end
+	if win.Raise then
+		win:Raise()
+	end
 	if tabIndex and tabIndex >= 1 and tabIndex <= 4 then
 		SelectTab(tabIndex)
 	end
 	SettingsUI.RefreshWindow()
+end
+
+function SettingsUI.HideWindow()
+	if settingsWindow and settingsWindow:IsShown() then
+		settingsWindow:Hide()
+	end
 end
 
 function SettingsUI.OpenSettingsMenu()
@@ -1157,6 +1470,9 @@ function SettingsUI.OpenSettingsMenu()
 		end
 		PositionSettingsWindow(win)
 		win:Show()
+		if win.Raise then
+			win:Raise()
+		end
 		SettingsUI.RefreshWindow()
 	end
 end
@@ -1213,15 +1529,23 @@ function SettingsUI.AttachToClickBindingFrame()
 		self.GearIcon:SetPoint("CENTER", self.GearBg, "CENTER", 0, 0)
 	end)
 
-	btn:SetScript("OnClick", function()
+	btn:SetScript("OnClick", function(_, mouseButton)
 		PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
-		SettingsUI.OpenSettingsMenu()
+		if mouseButton == "RightButton" and ns.ClickBindingUI and ns.ClickBindingUI.ToggleFreeKeysMatrix then
+			ns.ClickBindingUI.ToggleFreeKeysMatrix()
+		else
+			SettingsUI.OpenSettingsMenu()
+		end
 	end)
 
 	btn:SetScript("OnEnter", function(self)
 		GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
 		GameTooltip_SetTitle(GameTooltip, L["SETTINGS_BUTTON_TOOLTIP_TITLE"])
 		GameTooltip_AddNormalLine(GameTooltip, L["SETTINGS_BUTTON_TOOLTIP_DESC"], true)
+		if L["SETTINGS_BUTTON_TOOLTIP_HINT_RIGHT"] then
+			GameTooltip:AddLine(" ")
+			GameTooltip:AddLine(L["SETTINGS_BUTTON_TOOLTIP_HINT_RIGHT"], 0.25, 1.0, 0.35)
+		end
 		GameTooltip:Show()
 	end)
 
@@ -1323,7 +1647,7 @@ function SettingsUI.RegisterBlizzardOptions()
 			CloseBlizzardSettingsIfSafe()
 			SettingsUI.OpenSettingsTab(4)
 		end,
-		{ "Profile", "Profil", "Import", "Export", "Copy", "Kopieren", "Share", "Teilen" }
+		{ "Profile", "Profil", "Import", "Export", "Copy", "Kopieren", "Share", "Teilen", "Preset", "Presets", "Loadout", "Loadouts" }
 	)
 
 	-- 4. Direkt Blizzards Klickbelegungs-Fenster (/bcc) öffnen

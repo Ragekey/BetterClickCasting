@@ -1,11 +1,11 @@
 ## Interface: 16001
 ## Title: Better Click Casting
-## Notes: Enhances Blizzard's native Click Cast Bindings with spell ranks, inline rank switching, grouping, tooltips, spellbook direct-binding, and a minimap button.
-## Notes-deDE: Verbessert Blizzards native Klickbelegung (Zauberränge, direkter Rang-Wechsler, Gruppierung, Tooltips, Direkt-Binden im Zauberbuch und Minimap-Icon).
-## Notes-esES: Mejora el lanzamiento con clic nativo de Blizzard con rangos de hechizos, selector de rango, agrupación, panel flotante, perfiles y botón en el minimapa.
-## Notes-esMX: Mejora el lanzamiento con clic nativo de Blizzard con rangos de hechizos, selector de rango, agrupación, panel flotante, perfiles y botón en el minimapa.
+## Notes: Enhances Blizzard's native Click Cast Bindings with spell ranks, inline rank switching, presets, free keys matrix, hover overlay, and profile sharing.
+## Notes-deDE: Verbessert Blizzards native Klickbelegung (Zauberränge, Rang-Wechsler, Presets, Freie-Tasten-Matrix, Hover-Overlay und Profil-Teilen).
+## Notes-esES: Mejora el lanzamiento con clic nativo de Blizzard con rangos de hechizos, selector de rango, preajustes, matriz de botones, panel flotante y perfiles.
+## Notes-esMX: Mejora el lanzamiento con clic nativo de Blizzard con rangos de hechizos, selector de rango, preajustes, matriz de botones, panel flotante y perfiles.
 ## Author: Ragekey
-## Version: 0.7.3
+## Version: 0.8.0
 ## SavedVariables: BetterClickCastingDB, BetterClickCastingsDB
 ## IconAtlas: clickcast-icon-mouse
 ## AddonCompartmentFunc: BetterClickCasting_OnAddonCompartmentClick
