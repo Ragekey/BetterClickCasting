@@ -68,6 +68,23 @@ local function IsPlayerInCombat()
 		or false
 end
 
+-- Schützt Unit- und Spell-Abfragen vor <secret boolean>-Rückgabewerten (z. B. UnitIsUnit oder UnitInRaid
+-- auf verketteten Unit-Tokens wie "targettarget" mit SecretWhenUnitComparisonRestricted / SecretWhenUnitIdentityRestricted),
+-- bevor Lua einen direkten Boolean-Test im if-Ausdruck ausführt.
+local function SafeUnitBool(fn, ...)
+	if not fn then
+		return false
+	end
+	local ok, res = pcall(fn, ...)
+	if not ok or res == nil then
+		return false
+	end
+	if (issecretvalue and issecretvalue(res)) or (canaccessvalue and not canaccessvalue(res)) then
+		return false
+	end
+	return res and true or false
+end
+
 local function IsFreeMoveActive()
 	return isMoveUnlocked
 end
@@ -190,7 +207,7 @@ local function FindHoveredUnitFrame()
 		end
 
 		if unit and IsGenuineUnitFrame(current, hasSecureUnit) then
-			if (UnitExists and UnitExists(unit))
+			if SafeUnitBool(UnitExists, unit)
 				or (EditModeManagerFrame and EditModeManagerFrame:IsShown())
 				or IsLikelyUnitFrameByName(current) then
 				if not matchedUnit or unit == matchedUnit then
@@ -206,10 +223,10 @@ local function FindHoveredUnitFrame()
 		current = okParent and parent or nil
 	end
 
-	if not matchedUnit and matchedFrame and UnitExists and UnitExists("mouseover") then
+	if not matchedUnit and matchedFrame and SafeUnitBool(UnitExists, "mouseover") then
 		matchedUnit = "mouseover"
 	end
-	local validUnit = (matchedUnit and UnitExists and UnitExists(matchedUnit)) and matchedUnit or nil
+	local validUnit = (matchedUnit and SafeUnitBool(UnitExists, matchedUnit)) and matchedUnit or nil
 	return matchedFrame, validUnit
 end
 
@@ -265,7 +282,10 @@ end
 -- freundlich gesinnten Nicht-Gruppen-Einheiten wird als Fallback ein anderer gebundener Zauber mit
 -- echter Reichweitenprüfung (z. B. Flash Heal / Renew) abgefragt, statt einer kürzeren 28y-Interaktionsdistanz.
 local function CheckRangeResult(ok, inRange)
-	if not ok or (canaccessvalue and not canaccessvalue(inRange)) or inRange == nil then
+	if not ok or inRange == nil then
+		return nil
+	end
+	if (issecretvalue and issecretvalue(inRange)) or (canaccessvalue and not canaccessvalue(inRange)) then
 		return nil
 	end
 	if inRange == false or inRange == 0 then
@@ -313,7 +333,7 @@ local function IsBindingSpellOutOfRange(bindingInfo, targetUnit, fallbackBinding
 	if not bindingInfo or not bindingInfo.actionID or not Constants.IsSpellOrPetBinding(bindingInfo) then
 		return false
 	end
-	if UnitIsUnit and UnitIsUnit(targetUnit, "player") then
+	if targetUnit == "player" or SafeUnitBool(UnitIsUnit, targetUnit, "player") then
 		return false
 	end
 
@@ -327,9 +347,8 @@ local function IsBindingSpellOutOfRange(bindingInfo, targetUnit, fallbackBinding
 	-- IsSpellInRange auf freundlichen Nicht-Gruppen-Einheiten nil liefert: Wir prüfen zuerst andere
 	-- gebundene Zauber mit echter Zauberreichweite (z. B. Flash Heal / Renew mit 40 yd), damit
 	-- Power Word: Shield exakt bei derselben Zauberdistanz rot wird und nicht schon bei 28 yd.
-	if UnitIsFriend and UnitIsFriend("player", targetUnit) and C_Spell and C_Spell.SpellHasRange then
-		local okHas, hasRange = pcall(C_Spell.SpellHasRange, actionID)
-		if okHas and (not canaccessvalue or canaccessvalue(hasRange)) and hasRange then
+	if SafeUnitBool(UnitIsFriend, "player", targetUnit) and C_Spell and C_Spell.SpellHasRange then
+		if SafeUnitBool(C_Spell.SpellHasRange, actionID) then
 			if type(fallbackBindings) == "table" then
 				for _, other in ipairs(fallbackBindings) do
 					if other and other ~= bindingInfo and other.actionID and Constants.IsSpellOrPetBinding(other) then
@@ -340,9 +359,9 @@ local function IsBindingSpellOutOfRange(bindingInfo, targetUnit, fallbackBinding
 					end
 				end
 			end
-			if UnitInRange and (UnitInParty(targetUnit) or UnitInRaid(targetUnit)) then
+			if UnitInRange and (SafeUnitBool(UnitInParty, targetUnit) or SafeUnitBool(UnitInRaid, targetUnit)) then
 				local okUIR, inRange = pcall(UnitInRange, targetUnit)
-				if okUIR and (not canaccessvalue or canaccessvalue(inRange)) and inRange == false then
+				if okUIR and inRange ~= nil and not (issecretvalue and issecretvalue(inRange)) and (not canaccessvalue or canaccessvalue(inRange)) and inRange == false then
 					return true
 				end
 			end
