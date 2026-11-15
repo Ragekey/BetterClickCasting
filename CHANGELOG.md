@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.8.2] (2026-11-15)
+### Added
+- **Full Gamepad (Beta) Standby Mode & Failsafe Info Badge (`SetPreferredGamepadInteractTarget` Protection):**
+  - Automatically enters a 100% passive Standby mode whenever Blizzard's Gamepad / Controller UI mode (`InputUtil.IsGamepadUIEnabled()`) is active, while all saved Click Cast bindings in `C_ClickBindings` remain natively active in combat.
+  - Physically detaches all custom Mouse & Keyboard child buttons (`:SetParent(nil)`) from `ClickBindingFrame` and `PlayerSpellsFrame` and pauses all UI hooks, overlays, and context menus so Blizzard's `SmartNavigation` (`Utility.FindButtons`) and `FrameControlsManager` (`SetPreferredGamepadInteractTarget`) stay 100% untainted.
+  - Displays a failsafe red **`BCC: Gamepad Standby`** info badge below the Mouseover Cast checkbox in `ClickBindingFrame` with a high-strata tooltip (`TOOLTIP` strata above Blizzard's Gamepad selection arrow) explaining why Mouse & Keyboard UI features pause during Gamepad (Beta) mode.
+  - Switches live between Gamepad Standby and full Mouse & Keyboard mode via `INPUT_DEVICE_INTERFACE_TRANSITION` without requiring `/reload`.
+- **Automated Deep Stress & Taint Self-Test (`/bcc debug deep`):**
+  - Added a 5-stage diagnostic stress test to `/bcc debug deep` that verifies `enUS` / `deDE` / `esES` locale key & format-string parity (`321` keys), `!BCC1:...!` export/import roundtrip fidelity across all `27` settings and bindings, `SpellRanks` cache integrity, full UI lifecycle chaining (`ClickBindingFrame` grouping & compact modes, all 4 `SettingsUI` tabs, `4x5`/`8x5` Free Keys Matrix, and overlay unlock/lock), and extended `issecurevariable` taint checks.
+
 ## [0.8.1] (2026-11-15)
 ### Fixed
 - **Target-of-Target (`targettarget`) Secret Boolean Guard in Hover Overlay:** Fixed a Lua error (`attempt to perform boolean test on a secret boolean value`) when hovering over `TargetFrameToT` (`targettarget`) or other compound unit frames where `UnitIsUnit` (`SecretWhenUnitComparisonRestricted`) or `UnitInRaid` (`SecretWhenUnitIdentityRestricted`) returns a restricted `<secret boolean>` value.

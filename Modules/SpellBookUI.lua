@@ -10,8 +10,12 @@ local SpellBookUI = {}
 ns.SpellBookUI = SpellBookUI
 
 local isHooked = false
+local quickBindCheckbox = nil
 
 local function AppendSpellBookBindingTooltip(spellBookItemFrame)
+	if Constants.IsGamepadUIActive and Constants.IsGamepadUIActive() then
+		return
+	end
 	if not Database.Get("showSpellbookBadges") then
 		return
 	end
@@ -119,7 +123,13 @@ local function EnsureSpellBookQuickBindOverlay(spellBookItemFrame)
 		return nil
 	end
 	if spellBookItemFrame.BCCQuickBindButton then
-		return spellBookItemFrame.BCCQuickBindButton
+		local existing = spellBookItemFrame.BCCQuickBindButton
+		if existing:GetParent() ~= spellBookItemFrame.Button then
+			existing:SetParent(spellBookItemFrame.Button)
+			existing:SetAllPoints(spellBookItemFrame.Button)
+			existing:SetFrameLevel(spellBookItemFrame.Button:GetFrameLevel() + 4)
+		end
+		return existing
 	end
 
 	-- Eigenes Overlay-Button-Frame: Ist nur sichtbar, solange ClickBindingFrame offen
@@ -250,8 +260,14 @@ local function EnsureSpellBookQuickBindCheckbox()
 		return nil
 	end
 	local sbFrame = PlayerSpellsFrame.SpellBookFrame
-	if sbFrame.BCCQuickBindCheckbox then
-		return sbFrame.BCCQuickBindCheckbox
+	if quickBindCheckbox then
+		if quickBindCheckbox:GetParent() ~= sbFrame then
+			quickBindCheckbox:SetParent(sbFrame)
+			quickBindCheckbox:ClearAllPoints()
+			quickBindCheckbox:SetPoint("BOTTOMLEFT", sbFrame, "BOTTOMLEFT", 36, 35)
+			quickBindCheckbox:SetFrameLevel(sbFrame.PagedSpellsFrame and (sbFrame.PagedSpellsFrame:GetFrameLevel() + 10) or 20)
+		end
+		return quickBindCheckbox
 	end
 
 	-- Moderne abgerundete Pill-Leiste mit Checkbox und Maus-Icon unten links im Zauberbuch
@@ -299,11 +315,18 @@ local function EnsureSpellBookQuickBindCheckbox()
 	end)
 
 	cb:Hide()
-	sbFrame.BCCQuickBindCheckbox = cb
+	quickBindCheckbox = cb
 	return cb
 end
 
 function SpellBookUI.UpdateQuickBindCheckbox()
+	if Constants.IsGamepadUIActive and Constants.IsGamepadUIActive() then
+		if quickBindCheckbox then
+			quickBindCheckbox:Hide()
+			quickBindCheckbox:SetParent(nil)
+		end
+		return
+	end
 	local cb = EnsureSpellBookQuickBindCheckbox()
 	if not cb then
 		return
@@ -324,6 +347,16 @@ end
 
 function SpellBookUI.UpdateItemClickBindVisuals(spellBookItemFrame, bindingsMap)
 	if not spellBookItemFrame then
+		return
+	end
+	if Constants.IsGamepadUIActive and Constants.IsGamepadUIActive() then
+		if spellBookItemFrame.BCCBindBadge then
+			spellBookItemFrame.BCCBindBadge:Hide()
+		end
+		if spellBookItemFrame.BCCQuickBindButton then
+			spellBookItemFrame.BCCQuickBindButton:Hide()
+			spellBookItemFrame.BCCQuickBindButton:SetParent(nil)
+		end
 		return
 	end
 

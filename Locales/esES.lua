@@ -365,6 +365,12 @@ L["TAG_NOT_LEARNED"] = "[NO APRENDIDO]"
 L["TOOLTIP_STATUS_NOT_LEARNED"] = "No aprendido (Inactivo)"
 L["TOOLTIP_NOT_LEARNED_HINT"] = "Este hechizo no está actualmente en tu libro de hechizos (por ejemplo, tras cambiar talentos) y no se activará hasta que lo vuelvas a aprender o lo reemplaces."
 
+-- Gamepad / Controller Standby-Modus
+L["GAMEPAD_STANDBY_BADGE"] = "|cffff5555[i] Modo Mando: BCC en espera|r"
+L["GAMEPAD_STANDBY_TOOLTIP_TITLE"] = "Better Click Casting: Modo de espera con mando"
+L["GAMEPAD_STANDBY_TOOLTIP_DESC"] = "Todas las extensiones visuales de Better Click Casting se apagan por completo en el modo Mando (Beta) para que la navegación con mando de Blizzard permanezca 100 % intacta. ¡Tus asignaciones de lanzamiento con clic guardadas siguen totalmente activas!\n\n|cffffaa44Nota: La interfaz de Mando (Beta) de Blizzard tiene actualmente sus propios errores de Lua (por ejemplo, desbordamiento de pila en el libro de hechizos). Como Better Click Casting está completamente desactivado aquí: ¡no me culpes por los errores de Lua, es cosa de Blizzard! ;)|r"
+L["CHAT_GAMEPAD_STANDBY"] = "|cffff5555Better Click Casting:|r Las extensiones visuales están en pausa en el modo de mando (todas las asignaciones guardadas siguen activas). Cambia al modo de ratón y teclado para abrir la configuración."
+
 if ns.ApplyLocale then
 	ns.ApplyLocale("auto")
 end

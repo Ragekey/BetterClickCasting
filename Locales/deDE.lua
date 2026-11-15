@@ -364,6 +364,12 @@ L["TAG_NOT_LEARNED"] = "[NICHT GELERNT]"
 L["TOOLTIP_STATUS_NOT_LEARNED"] = "Nicht gelernt (Inaktiv)"
 L["TOOLTIP_NOT_LEARNED_HINT"] = "Dieser Zauber befindet sich aktuell nicht in deinem Zauberbuch (z. B. nach einem Talent-Wechsel) und löst nicht aus, bis er wieder gelernt oder ersetzt wird."
 
+-- Gamepad / Controller Standby-Modus
+L["GAMEPAD_STANDBY_BADGE"] = "|cffff5555[i] Gamepad-Modus: BCC Standby|r"
+L["GAMEPAD_STANDBY_TOOLTIP_TITLE"] = "Better Click Casting: Gamepad-Standby"
+L["GAMEPAD_STANDBY_TOOLTIP_DESC"] = "Im Gamepad-(Beta)-Modus sind alle UI-Erweiterungen von Better Click Casting komplett abgeschaltet, damit Blizzards Controller-Navigation zu 100 % unberührt bleibt. Deine gespeicherten Klickbelegungen bleiben voll aktiv!\n\n|cffffaa44Hinweis: Blizzards Gamepad-(Beta)-UI hat aktuell eigene Lua-Bugs (z. B. Zauberbuch Stack-Overflow). Da Better Click Casting hier komplett aus ist: Schieb die Lua-Fehler nicht auf mich, das ist Blizzard! ;)|r"
+L["CHAT_GAMEPAD_STANDBY"] = "|cffff5555Better Click Casting:|r UI-Erweiterungen sind im aktiven Gamepad-Modus pausiert (alle gespeicherten Klickbelegungen bleiben aktiv). Wechsle in den Maus- und Tastatur-Modus, um die Konfiguration zu öffnen."
+
 if ns.ApplyLocale then
 	ns.ApplyLocale("auto")
 end

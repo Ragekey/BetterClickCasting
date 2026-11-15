@@ -1442,6 +1442,12 @@ function SettingsUI.RefreshWindow()
 end
 
 function SettingsUI.OpenSettingsTab(tabIndex)
+	if Constants.IsGamepadUIActive and Constants.IsGamepadUIActive() then
+		if DEFAULT_CHAT_FRAME then
+			DEFAULT_CHAT_FRAME:AddMessage(L["CHAT_GAMEPAD_STANDBY"])
+		end
+		return
+	end
 	local win = EnsureSettingsWindow()
 	if Database and Database.SaveCharacterSnapshot then
 		Database.SaveCharacterSnapshot()
@@ -1466,6 +1472,12 @@ function SettingsUI.HideWindow()
 end
 
 function SettingsUI.OpenSettingsMenu()
+	if Constants.IsGamepadUIActive and Constants.IsGamepadUIActive() then
+		if DEFAULT_CHAT_FRAME then
+			DEFAULT_CHAT_FRAME:AddMessage(L["CHAT_GAMEPAD_STANDBY"])
+		end
+		return
+	end
 	local win = EnsureSettingsWindow()
 	if win:IsShown() then
 		win:Hide()
@@ -1482,8 +1494,30 @@ function SettingsUI.OpenSettingsMenu()
 	end
 end
 
+local clickBindingSettingsBtn = nil
+
 function SettingsUI.AttachToClickBindingFrame()
-	if not ClickBindingFrame or ClickBindingFrame.BCCSettingsButton then
+	if not ClickBindingFrame then
+		return
+	end
+	if Constants.IsGamepadUIActive and Constants.IsGamepadUIActive() then
+		if clickBindingSettingsBtn then
+			clickBindingSettingsBtn:Hide()
+			clickBindingSettingsBtn:SetParent(nil)
+		end
+		return
+	end
+	if clickBindingSettingsBtn then
+		if clickBindingSettingsBtn:GetParent() ~= ClickBindingFrame then
+			clickBindingSettingsBtn:SetParent(ClickBindingFrame)
+			clickBindingSettingsBtn:ClearAllPoints()
+			if ClickBindingFrame.MacrosPortrait then
+				clickBindingSettingsBtn:SetPoint("RIGHT", ClickBindingFrame.MacrosPortrait, "LEFT", -5, 0)
+			else
+				clickBindingSettingsBtn:SetPoint("TOPRIGHT", ClickBindingFrame, "TOPRIGHT", -115, -40)
+			end
+		end
+		clickBindingSettingsBtn:Show()
 		return
 	end
 
@@ -1558,7 +1592,7 @@ function SettingsUI.AttachToClickBindingFrame()
 		GameTooltip:Hide()
 	end)
 
-	ClickBindingFrame.BCCSettingsButton = btn
+	clickBindingSettingsBtn = btn
 end
 
 local blizzardCategoryRegistered = false

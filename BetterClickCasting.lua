@@ -21,6 +21,7 @@ loaderFrame:RegisterEvent("LEARNED_SPELL_IN_SKILL_LINE")
 loaderFrame:RegisterEvent("TRAINER_CLOSED")
 loaderFrame:RegisterEvent("PLAYER_REGEN_DISABLED")
 loaderFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
+loaderFrame:RegisterEvent("INPUT_DEVICE_INTERFACE_TRANSITION")
 
 loaderFrame:SetScript("OnEvent", function(self, event, arg1)
 	if event == "ADDON_LOADED" then
@@ -68,38 +69,65 @@ loaderFrame:SetScript("OnEvent", function(self, event, arg1)
 		if C_Timer and C_Timer.After and Database and Database.SaveCharacterSnapshot then
 			C_Timer.After(1.0, Database.SaveCharacterSnapshot)
 		end
+		if ns.Constants and ns.Constants.IsGamepadUIActive and ns.Constants.IsGamepadUIActive() then
+			if ClickBindingUI and ClickBindingUI.UpdateGamepadStandbyState then
+				ClickBindingUI.UpdateGamepadStandbyState()
+			end
+			return
+		end
 		if ClickBindingUI and ClickBindingUI.ScheduleSmartRuleCheck then
 			ClickBindingUI.ScheduleSmartRuleCheck(1.2, false)
 		end
-	elseif event == "SPELLS_CHANGED" then
-		SpellRanks.InvalidateCache()
-		ClickBindingUI.RefreshVisibleLines()
-		SpellBookUI.RefreshBadges()
-		if ClickBindingUI and ClickBindingUI.ScheduleSmartRuleCheck then
-			ClickBindingUI.ScheduleSmartRuleCheck(0.8, false)
+	elseif event == "INPUT_DEVICE_INTERFACE_TRANSITION" then
+		if ClickBindingUI and ClickBindingUI.UpdateGamepadStandbyState then
+			ClickBindingUI.UpdateGamepadStandbyState()
 		end
-	elseif event == "LEARNED_SPELL_IN_SKILL_LINE" then
-		SpellRanks.InvalidateCache()
-		ClickBindingUI.RefreshVisibleLines()
-		SpellBookUI.RefreshBadges()
-		if ClickBindingUI and ClickBindingUI.ScheduleSmartRuleCheck then
-			-- Neuer Zauberrang gelernt: auch dann wieder erinnern, wenn zuvor X geklickt wurde
-			ClickBindingUI.ScheduleSmartRuleCheck(0.8, true)
+		if SpellBookUI and SpellBookUI.RefreshBadges then
+			SpellBookUI.RefreshBadges()
 		end
-	elseif event == "TRAINER_CLOSED" then
-		if ClickBindingUI and ClickBindingUI.ScheduleSmartRuleCheck then
-			ClickBindingUI.ScheduleSmartRuleCheck(0.3, false)
+		if UnitHoverTooltip and UnitHoverTooltip.UpdateTrackingState then
+			UnitHoverTooltip.UpdateTrackingState()
 		end
-	elseif event == "PLAYER_REGEN_DISABLED" then
-		if ns.SettingsUI and ns.SettingsUI.IsOverlaysUnlocked and ns.SettingsUI.IsOverlaysUnlocked() then
-			ns.SettingsUI.SetOverlaysUnlocked(false, true)
+	else
+		-- Zentrales Gamepad-Standby-Gate: Alle Laufzeit- und UI-Events (SPELLS_CHANGED,
+		-- LEARNED_SPELL_IN_SKILL_LINE, TRAINER_CLOSED, PLAYER_REGEN_DISABLED, PLAYER_REGEN_ENABLED
+		-- sowie zukünftige Events) werden im Controller-Modus vor jedem Modul-Aufruf abgefangen.
+		if ns.Constants and ns.Constants.IsGamepadUIActive and ns.Constants.IsGamepadUIActive() then
+			if event == "SPELLS_CHANGED" or event == "LEARNED_SPELL_IN_SKILL_LINE" then
+				SpellRanks.InvalidateCache()
+			end
+			return
 		end
-		if ClickBindingUI and ClickBindingUI.HideHeroCard then
-			ClickBindingUI.HideHeroCard()
-		end
-	elseif event == "PLAYER_REGEN_ENABLED" then
-		if ClickBindingUI and ClickBindingUI.ScheduleSmartRuleCheck then
-			ClickBindingUI.ScheduleSmartRuleCheck(0.6, false)
+		if event == "SPELLS_CHANGED" then
+			SpellRanks.InvalidateCache()
+			ClickBindingUI.RefreshVisibleLines()
+			SpellBookUI.RefreshBadges()
+			if ClickBindingUI and ClickBindingUI.ScheduleSmartRuleCheck then
+				ClickBindingUI.ScheduleSmartRuleCheck(0.8, false)
+			end
+		elseif event == "LEARNED_SPELL_IN_SKILL_LINE" then
+			SpellRanks.InvalidateCache()
+			ClickBindingUI.RefreshVisibleLines()
+			SpellBookUI.RefreshBadges()
+			if ClickBindingUI and ClickBindingUI.ScheduleSmartRuleCheck then
+				-- Neuer Zauberrang gelernt: auch dann wieder erinnern, wenn zuvor X geklickt wurde
+				ClickBindingUI.ScheduleSmartRuleCheck(0.8, true)
+			end
+		elseif event == "TRAINER_CLOSED" then
+			if ClickBindingUI and ClickBindingUI.ScheduleSmartRuleCheck then
+				ClickBindingUI.ScheduleSmartRuleCheck(0.3, false)
+			end
+		elseif event == "PLAYER_REGEN_DISABLED" then
+			if ns.SettingsUI and ns.SettingsUI.IsOverlaysUnlocked and ns.SettingsUI.IsOverlaysUnlocked() then
+				ns.SettingsUI.SetOverlaysUnlocked(false, true)
+			end
+			if ClickBindingUI and ClickBindingUI.HideHeroCard then
+				ClickBindingUI.HideHeroCard()
+			end
+		elseif event == "PLAYER_REGEN_ENABLED" then
+			if ClickBindingUI and ClickBindingUI.ScheduleSmartRuleCheck then
+				ClickBindingUI.ScheduleSmartRuleCheck(0.6, false)
+			end
 		end
 	end
 end)
@@ -166,6 +194,15 @@ SlashCmdList["BETTERCLICKCASTING"] = function(msg)
 	cmd = string.lower(cmd or "")
 	rawArg = strtrim(rawArg or "")
 	local arg = string.lower(rawArg)
+
+	if ns.Constants and ns.Constants.IsGamepadUIActive and ns.Constants.IsGamepadUIActive() then
+		if cmd ~= "debug" and cmd ~= "status" and cmd ~= "help" and cmd ~= "?" then
+			if DEFAULT_CHAT_FRAME then
+				DEFAULT_CHAT_FRAME:AddMessage(L["CHAT_GAMEPAD_STANDBY"])
+			end
+			return
+		end
+	end
 
 	if cmd == "" then
 		MinimapButton.ToggleClickCastingWindow()

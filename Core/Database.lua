@@ -756,6 +756,12 @@ function Database.NotifyAllChanged()
 	if ns.ApplyLocale then
 		ns.ApplyLocale(Database.Get("addonLocale"))
 	end
+	if Constants.IsGamepadUIActive() then
+		if ns.ClickBindingUI and ns.ClickBindingUI.UpdateGamepadStandbyState then
+			ns.ClickBindingUI.UpdateGamepadStandbyState()
+		end
+		return
+	end
 	if ns.ClickBindingUI then
 		if ns.ClickBindingUI.SyncAutoShowAllRanks then
 			ns.ClickBindingUI.SyncAutoShowAllRanks()
@@ -803,6 +809,12 @@ end
 function Database.NotifyChanged(key, value)
 	if key == "addonLocale" and ns.ApplyLocale then
 		ns.ApplyLocale(value)
+	end
+	if Constants.IsGamepadUIActive() then
+		if ns.ClickBindingUI and ns.ClickBindingUI.UpdateGamepadStandbyState then
+			ns.ClickBindingUI.UpdateGamepadStandbyState()
+		end
+		return
 	end
 	if ns.ClickBindingUI then
 		if key == "autoShowAllRanks" and ns.ClickBindingUI.SyncAutoShowAllRanks then

@@ -412,4 +412,10 @@ L["TAG_NOT_LEARNED"] = "[NOT LEARNED]"
 L["TOOLTIP_STATUS_NOT_LEARNED"] = "Not Learned (Inactive)"
 L["TOOLTIP_NOT_LEARNED_HINT"] = "This spell is currently not in your spellbook (for example after a talent respec) and will not trigger until learned again or replaced."
 
+-- Gamepad / Controller Standby-Modus
+L["GAMEPAD_STANDBY_BADGE"] = "|cffff5555[i] Gamepad Mode: BCC Standby|r"
+L["GAMEPAD_STANDBY_TOOLTIP_TITLE"] = "Better Click Casting: Gamepad Standby"
+L["GAMEPAD_STANDBY_TOOLTIP_DESC"] = "All Better Click Casting UI extensions are completely shut down in Gamepad (Beta) mode so Blizzard's controller navigation stays 100% untouched. Your saved Click-Cast bindings remain fully active!\n\n|cffffaa44Note: Blizzard's Gamepad (Beta) UI currently has its own Lua bugs (e.g. Spellbook stack overflow). Since Better Click Casting is completely off right now: don't blame me for the Lua errors, it's Blizzard! ;)|r"
+L["CHAT_GAMEPAD_STANDBY"] = "|cffff5555Better Click Casting:|r UI extensions are paused while Gamepad UI mode is active (all saved Click Cast bindings remain active). Switch to Mouse & Keyboard mode to open the configuration UI."
+
 ns.ApplyLocale("auto")
