@@ -15,6 +15,8 @@ ns.ClickBindingUI = ClickBindingUI
 local isHooked = false
 local isRebuildingGroups = false
 local heroCardFrame = nil
+local presetDropdownButton = nil
+local gamepadStandbyBadge = nil
 local dismissedSignature = nil
 local smartCheckPending = false
 
@@ -218,6 +220,9 @@ local function BCCElementSortComparator(e1, e2)
 end
 
 function ClickBindingUI.RebuildGroups()
+	if Constants.IsGamepadUIActive() then
+		return
+	end
 	if isRebuildingGroups or not ClickBindingFrame or not ClickBindingFrame.dataProvider then
 		return
 	end
@@ -726,6 +731,9 @@ end
 --------------------------------------------------------------------------------
 
 function ClickBindingUI.ShowLineTooltip(lineFrame)
+	if Constants.IsGamepadUIActive() then
+		return
+	end
 	if not lineFrame or not Database.Get("showLineTooltips") then
 		return
 	end
@@ -820,6 +828,18 @@ end
 
 local function EnsureHeaderGroupWidgets(headerFrame)
 	if headerFrame.BCCGroupButton then
+		if not Constants.IsGamepadUIActive() then
+			if headerFrame.BCCGroupButton:GetParent() ~= headerFrame then
+				headerFrame.BCCGroupButton:SetParent(headerFrame)
+				headerFrame.BCCGroupButton:ClearAllPoints()
+				headerFrame.BCCGroupButton:SetPoint("RIGHT", headerFrame, "RIGHT", -4, 0)
+			end
+			if headerFrame.BCCMatrixButton and headerFrame.BCCMatrixButton:GetParent() ~= headerFrame then
+				headerFrame.BCCMatrixButton:SetParent(headerFrame)
+				headerFrame.BCCMatrixButton:ClearAllPoints()
+				headerFrame.BCCMatrixButton:SetPoint("RIGHT", headerFrame.BCCGroupButton, "LEFT", -6, 0)
+			end
+		end
 		return headerFrame.BCCGroupButton, headerFrame.BCCMatrixButton, headerFrame.BCCSubDivider
 	end
 
@@ -956,6 +976,20 @@ local function UpdateHeaderFrame(headerFrame, elementData)
 	if not headerFrame then
 		return
 	end
+	if Constants.IsGamepadUIActive() then
+		if headerFrame.BCCGroupButton then
+			headerFrame.BCCGroupButton:Hide()
+			headerFrame.BCCGroupButton:SetParent(nil)
+		end
+		if headerFrame.BCCMatrixButton then
+			headerFrame.BCCMatrixButton:Hide()
+			headerFrame.BCCMatrixButton:SetParent(nil)
+		end
+		if headerFrame.BCCSubDivider then
+			headerFrame.BCCSubDivider:Hide()
+		end
+		return
+	end
 	elementData = elementData or (headerFrame.GetElementData and headerFrame:GetElementData())
 	local groupBtn, matrixBtn, divider = EnsureHeaderGroupWidgets(headerFrame)
 	local compact = Database.Get("compactListMode") and true or false
@@ -1008,6 +1042,9 @@ local LEGACY_BUTTON_REGIONS = {
 }
 
 local function ShouldShowDeleteButton(lineFrame, elementData)
+	if Constants.IsGamepadUIActive() then
+		return false
+	end
 	elementData = elementData or (lineFrame and lineFrame.GetElementData and lineFrame:GetElementData())
 	if not elementData then
 		return false
@@ -1161,6 +1198,9 @@ local function ApplyLineCompactMetrics(lineFrame)
 end
 
 function ClickBindingUI.ApplyScrollBoxLayout()
+	if Constants.IsGamepadUIActive() then
+		return
+	end
 	if not ClickBindingFrame or not ClickBindingFrame.ScrollBox or not ClickBindingFrame.ScrollBox.GetView then
 		return
 	end
@@ -1212,6 +1252,10 @@ end
 
 local function EnsureLineRankButton(lineFrame)
 	if lineFrame.BCCRankButton then
+		if not Constants.IsGamepadUIActive() and lineFrame.BCCRankButton:GetParent() ~= lineFrame then
+			lineFrame.BCCRankButton:SetParent(lineFrame)
+			ApplyLineCompactMetrics(lineFrame)
+		end
 		return lineFrame.BCCRankButton
 	end
 
@@ -1525,6 +1569,16 @@ function ClickBindingUI.UpdateLineWithRank(lineFrame, elementData)
 	if not lineFrame then
 		return
 	end
+	if Constants.IsGamepadUIActive() then
+		if lineFrame.BCCRankButton then
+			lineFrame.BCCRankButton:Hide()
+			lineFrame.BCCRankButton:SetParent(nil)
+		end
+		if lineFrame.BCCManaText then
+			lineFrame.BCCManaText:Hide()
+		end
+		return
+	end
 
 	elementData = elementData or (lineFrame.GetElementData and lineFrame:GetElementData())
 	local delBtn = EnsureDeleteButtonStyled(lineFrame)
@@ -1598,6 +1652,9 @@ function ClickBindingUI.UpdateLineWithRank(lineFrame, elementData)
 end
 
 local function HookHeaderFrame(headerFrame)
+	if Constants.IsGamepadUIActive() then
+		return
+	end
 	if not headerFrame or headerFrame._bccHeaderHooked then
 		return
 	end
@@ -1610,6 +1667,9 @@ local function HookHeaderFrame(headerFrame)
 end
 
 local function HookLineFrame(lineFrame)
+	if Constants.IsGamepadUIActive() then
+		return
+	end
 	if not lineFrame then
 		return
 	end
@@ -1628,6 +1688,9 @@ local function HookLineFrame(lineFrame)
 			ClickBindingUI.ShowLineTooltip(self)
 		end)
 		lineFrame:HookScript("OnLeave", function(self)
+			if Constants.IsGamepadUIActive() then
+				return
+			end
 			if self.DeleteButton and ShouldShowDeleteButton(self) then
 				self.DeleteButton:Show()
 			end
@@ -1980,6 +2043,11 @@ function ClickBindingUI.CheckAndShowHeroCard(resetDismissed)
 		dismissedSignature = nil
 	end
 
+	if Constants.IsGamepadUIActive() then
+		ClickBindingUI.HideHeroCard()
+		return
+	end
+
 	if heroCardPreviewUnlocked then
 		return
 	end
@@ -2085,6 +2153,9 @@ end
 function ClickBindingUI.ScheduleSmartRuleCheck(delaySeconds, resetDismissed)
 	if resetDismissed then
 		dismissedSignature = nil
+	end
+	if Constants.IsGamepadUIActive() then
+		return
 	end
 	if smartCheckPending then
 		return
@@ -2967,6 +3038,9 @@ function ClickBindingUI.HideChildPopups()
 end
 
 function ClickBindingUI.ShowFreeKeysMatrix()
+	if Constants.IsGamepadUIActive() then
+		return
+	end
 	local f = EnsureFreeKeysMatrixFrame()
 	ApplySavedMatrixPosition(f)
 	f:Show()
@@ -3537,8 +3611,11 @@ local function EnsurePresetDropdownButton()
 	if not ClickBindingFrame then
 		return nil
 	end
-	if ClickBindingFrame.BCCPresetButton then
-		return ClickBindingFrame.BCCPresetButton
+	if presetDropdownButton then
+		if not Constants.IsGamepadUIActive() and presetDropdownButton:GetParent() ~= ClickBindingFrame then
+			presetDropdownButton:SetParent(ClickBindingFrame)
+		end
+		return presetDropdownButton
 	end
 
 	local btn = CreateFrame("Button", nil, ClickBindingFrame)
@@ -3599,13 +3676,20 @@ local function EnsurePresetDropdownButton()
 		GameTooltip:Hide()
 	end)
 
-	ClickBindingFrame.BCCPresetButton = btn
+	presetDropdownButton = btn
 	UpdatePresetDropdownAnchor(btn)
 	return btn
 end
 
 function ClickBindingUI.UpdatePresetDropdownButton()
 	if not ClickBindingFrame then
+		return
+	end
+	if Constants.IsGamepadUIActive() then
+		if presetDropdownButton then
+			presetDropdownButton:Hide()
+			presetDropdownButton:SetParent(nil)
+		end
 		return
 	end
 	local btn = EnsurePresetDropdownButton()
@@ -3617,6 +3701,346 @@ function ClickBindingUI.UpdatePresetDropdownButton()
 	local labelStr = (activeName and activeName ~= "") and activeName or L["PRESET_NONE_SELECTED"]
 	btn.Text:SetText(string.format(L["PRESET_BUTTON_FORMAT"], labelStr))
 	btn:Show()
+end
+
+local gamepadStandbyTooltip = nil
+
+local function EnsureGamepadStandbyTooltip()
+	if gamepadStandbyTooltip then
+		return gamepadStandbyTooltip
+	end
+	-- Eigenes reines Anzeige-Tooltip-Frame auf TOOLTIP-Strata mit FrameLevel 9500,
+	-- damit es garantiert oberhalb von Blizzards SmartNavigation-Bouncy-Pfeil (TOOLTIP-Strata)
+	-- liegt und GameTooltip im Controller-Modus nicht einmal berührt.
+	local tip = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
+	tip:SetSize(330, 120)
+	tip:SetFrameStrata("TOOLTIP")
+	tip:SetFrameLevel(9500)
+	tip:SetClampedToScreen(true)
+	tip:EnableMouse(false)
+
+	if tip.SetBackdrop then
+		tip:SetBackdrop({
+			bgFile = "Interface\\Buttons\\WHITE8x8",
+			edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+			tile = true,
+			tileSize = 8,
+			edgeSize = 12,
+			insets = { left = 3, right = 3, top = 3, bottom = 3 },
+		})
+		tip:SetBackdropColor(0.06, 0.06, 0.08, 0.97)
+		tip:SetBackdropBorderColor(0.95, 0.32, 0.32, 1.0)
+	end
+
+	local title = tip:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+	title:SetPoint("TOPLEFT", tip, "TOPLEFT", 12, -10)
+	title:SetPoint("TOPRIGHT", tip, "TOPRIGHT", -12, -10)
+	title:SetJustifyH("LEFT")
+	title:SetWordWrap(true)
+	tip.Title = title
+
+	local desc = tip:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+	desc:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 0, -6)
+	desc:SetWidth(306)
+	desc:SetJustifyH("LEFT")
+	desc:SetWordWrap(true)
+	tip.Desc = desc
+
+	tip:Hide()
+	gamepadStandbyTooltip = tip
+	return tip
+end
+
+local function ShowGamepadStandbyTooltip(ownerBadge)
+	local tip = EnsureGamepadStandbyTooltip()
+	tip.Title:SetText("|cffff6666" .. (L["GAMEPAD_STANDBY_TOOLTIP_TITLE"] or "") .. "|r")
+	tip.Desc:SetText(L["GAMEPAD_STANDBY_TOOLTIP_DESC"] or "")
+	local h = 28 + (tip.Title:GetStringHeight() or 14) + (tip.Desc:GetStringHeight() or 60)
+	tip:SetSize(330, math.max(84, math.floor(h + 0.5)))
+	tip:ClearAllPoints()
+	tip:SetPoint("TOPLEFT", ownerBadge, "TOPRIGHT", 8, 0)
+	tip:Show()
+end
+
+local function HideGamepadStandbyTooltip()
+	if gamepadStandbyTooltip then
+		gamepadStandbyTooltip:Hide()
+	end
+end
+
+local function EnsureGamepadStandbyBadge()
+	if gamepadStandbyBadge then
+		return gamepadStandbyBadge
+	end
+	-- Absichtlich als einfaches Frame (kein Button!) auf UIParent (nicht auf ClickBindingFrame!) erstellt,
+	-- damit ClickBindingFrame:GetChildren() und SmartNavigation_CanFocusFrame im Gamepad-Modus
+	-- keinerlei AddOn-Child-Frames sehen und der Fokus-Stack zu 100 % untainted bleibt.
+	local badge = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
+	badge:SetSize(210, 22)
+	badge:SetFrameStrata("TOOLTIP")
+	badge:SetFrameLevel(9000)
+	badge:EnableMouse(true)
+
+	if badge.SetBackdrop then
+		badge:SetBackdrop({
+			bgFile = "Interface\\Buttons\\WHITE8x8",
+			edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+			tile = true,
+			tileSize = 8,
+			edgeSize = 10,
+			insets = { left = 2, right = 2, top = 2, bottom = 2 },
+		})
+		badge:SetBackdropColor(0.26, 0.05, 0.05, 0.95)
+		badge:SetBackdropBorderColor(0.95, 0.28, 0.28, 1.0)
+	end
+
+	local label = badge:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+	label:SetPoint("CENTER", badge, "CENTER", 0, 0)
+	label:SetJustifyH("CENTER")
+	label:SetWordWrap(false)
+	badge.Text = label
+
+	badge:SetScript("OnEnter", function(self)
+		ShowGamepadStandbyTooltip(self)
+	end)
+	badge:SetScript("OnLeave", function()
+		HideGamepadStandbyTooltip()
+	end)
+	badge:SetScript("OnHide", function()
+		HideGamepadStandbyTooltip()
+	end)
+	badge:SetScript("OnUpdate", function(self)
+		if not ClickBindingFrame or not ClickBindingFrame:IsShown() or not Constants.IsGamepadUIActive() then
+			self:Hide()
+		end
+	end)
+
+	badge:Hide()
+	gamepadStandbyBadge = badge
+	return badge
+end
+
+function ClickBindingUI.UpdateGamepadStandbyState()
+	local isGamepad = Constants.IsGamepadUIActive()
+	if isGamepad then
+		SetSaveButtonGlowShown(false)
+		ClickBindingUI.HideHeroCard()
+		ClickBindingUI.HideChildPopups()
+		if SettingsUI and SettingsUI.HideWindow then
+			SettingsUI.HideWindow()
+		end
+		if SettingsUI and SettingsUI.AttachToClickBindingFrame then
+			SettingsUI.AttachToClickBindingFrame()
+		end
+		ClickBindingUI.UpdatePresetDropdownButton()
+		if ClickBindingFrame
+			and ClickBindingFrame.ScrollBox
+			and ClickBindingFrame.ScrollBox.GetView
+			and ClickBindingFrame.ScrollBox:GetView()
+			and ClickBindingFrame.ScrollBox.ForEachFrame
+		then
+			ClickBindingFrame.ScrollBox:ForEachFrame(function(frame)
+				local elementData = frame.GetElementData and frame:GetElementData()
+				if elementData and (elementData.elementType == ElementDataTypes.DefaultsHeader or elementData.elementType == ElementDataTypes.CustomsHeader) then
+					UpdateHeaderFrame(frame, elementData)
+				else
+					ClickBindingUI.UpdateLineWithRank(frame, elementData)
+				end
+			end)
+		end
+		if ClickBindingFrame and ClickBindingFrame:IsShown() then
+			local badge = EnsureGamepadStandbyBadge()
+			badge.Text:SetText(L["GAMEPAD_STANDBY_BADGE"])
+			local textW = badge.Text:GetStringWidth() or 180
+			badge:SetSize(math.max(190, math.floor(textW + 22)), 22)
+			badge:ClearAllPoints()
+			if ClickBindingFrame.EnableMouseoverCastCheckbox then
+				badge:SetPoint("TOPLEFT", ClickBindingFrame.EnableMouseoverCastCheckbox, "BOTTOMLEFT", 4, -2)
+			else
+				badge:SetPoint("TOPLEFT", ClickBindingFrame, "TOPLEFT", 64, -58)
+			end
+			badge:Show()
+		elseif gamepadStandbyBadge then
+			gamepadStandbyBadge:Hide()
+		end
+	else
+		if gamepadStandbyBadge then
+			gamepadStandbyBadge:Hide()
+		end
+		if SettingsUI and SettingsUI.AttachToClickBindingFrame then
+			SettingsUI.AttachToClickBindingFrame()
+		end
+		ClickBindingUI.UpdatePresetDropdownButton()
+		if ClickBindingFrame and ClickBindingFrame:IsShown() then
+			ClickBindingUI.ApplyScrollBoxLayout()
+			ClickBindingUI.RebuildGroups()
+			ClickBindingUI.RefreshVisibleLines()
+		end
+	end
+end
+
+local function ExtractFormatSignature(str)
+	if type(str) ~= "string" then
+		return ""
+	end
+	local cleaned = string.gsub(str, "%%%%", "")
+	local specs = {}
+	for spec in string.gmatch(cleaned, "%%[%d%.]*[sdfoxXegGcpuq]") do
+		table.insert(specs, spec)
+	end
+	return table.concat(specs, ",")
+end
+
+local function RunDeepStressSelfTest(findings, infoNotes)
+	-- 1. Lokalisierungs- und Format-String-Integrität über enUS, deDE und esES prüfen
+	if type(ns.Locales) == "table" and type(ns.Locales["enUS"]) == "table" then
+		local enTbl = ns.Locales["enUS"]
+		local enCount = 0
+		for _ in pairs(enTbl) do
+			enCount = enCount + 1
+		end
+		for _, locCode in ipairs({ "deDE", "esES" }) do
+			local locTbl = ns.Locales[locCode]
+			if type(locTbl) ~= "table" then
+				table.insert(findings, string.format("DeepTest Locale: missing table for %s", locCode))
+			else
+				local locCount = 0
+				local missingKeys = 0
+				local extraKeys = 0
+				local sigMismatches = 0
+				for k, v in pairs(locTbl) do
+					locCount = locCount + 1
+					if enTbl[k] == nil then
+						extraKeys = extraKeys + 1
+					elseif ExtractFormatSignature(v) ~= ExtractFormatSignature(enTbl[k]) then
+						sigMismatches = sigMismatches + 1
+						table.insert(findings, string.format("DeepTest Locale format mismatch in %s[%s]: '%s' vs enUS '%s'", locCode, tostring(k), ExtractFormatSignature(v), ExtractFormatSignature(enTbl[k])))
+					end
+				end
+				for k in pairs(enTbl) do
+					if locTbl[k] == nil then
+						missingKeys = missingKeys + 1
+					end
+				end
+				if missingKeys > 0 or extraKeys > 0 then
+					table.insert(findings, string.format("DeepTest Locale key mismatch in %s: count=%d (enUS=%d, missing=%d, extra=%d)", locCode, locCount, enCount, missingKeys, extraKeys))
+				elseif sigMismatches == 0 then
+					table.insert(infoNotes, string.format("DeepTest Locale %s: %d/%d keys & format strings verified OK", locCode, locCount, enCount))
+				end
+			end
+		end
+	end
+
+	-- 2. Export-/Import-Roundtrip (!BCC1:...!) für alle DEFAULTS und Bindings prüfen
+	if Database and Database.ExportToString and Database.ParseImportString and Database.GetDefaults then
+		local exportAll = Database.ExportToString("all")
+		local parsed, err = Database.ParseImportString(exportAll)
+		if not parsed or err then
+			table.insert(findings, string.format("DeepTest Export/Import roundtrip failed: %s", tostring(err or "nil")))
+		else
+			local defaults = Database.GetDefaults()
+			local verifiedKeys = 0
+			for k in pairs(defaults) do
+				if k ~= "importMergeBindings" then
+					local expected = Database.Get(k)
+					local actual = parsed.settings and parsed.settings[k]
+					local isMatch = (actual == expected)
+					if not isMatch and type(expected) == "number" and type(actual) == "number" then
+						isMatch = (tonumber(tostring(expected)) == actual) or (math.abs(actual - expected) < 0.0001)
+					end
+					if not isMatch then
+						table.insert(findings, string.format("DeepTest Export/Import setting mismatch for '%s': expected=%s, got=%s", tostring(k), tostring(expected), tostring(actual)))
+					else
+						verifiedKeys = verifiedKeys + 1
+					end
+				end
+			end
+			local bindCount = (type(parsed.bindings) == "table") and #parsed.bindings or 0
+			table.insert(infoNotes, string.format("DeepTest Export/Import roundtrip OK (%d settings, %d bindings, %d bytes)", verifiedKeys, bindCount, string.len(exportAll or "")))
+		end
+	end
+
+	-- 3. SpellRanks-Cache & Unit-Token Secret-Guard-Belastungstest
+	SpellRanks.InvalidateCache()
+	local cache = SpellRanks.EnsureCache()
+	local groupCount = 0
+	local entryCount = 0
+	if cache and type(cache.bySpellKey) == "table" then
+		for _ in pairs(cache.bySpellKey) do
+			groupCount = groupCount + 1
+		end
+	end
+	if cache and type(cache.byActionID) == "table" then
+		for _ in pairs(cache.byActionID) do
+			entryCount = entryCount + 1
+		end
+	end
+	local pendingUpdates = SpellRanks.GetPendingSmartRuleUpdates and SpellRanks.GetPendingSmartRuleUpdates() or {}
+	local freeKeys = ClickBindingUI.GetFreeKeysSummaryList and ClickBindingUI.GetFreeKeysSummaryList() or {}
+	table.insert(infoNotes, string.format("DeepTest SpellRanks: %d spell group(s), %d rank entry(s), %d pending smart update(s), %d free slot(s)", groupCount, entryCount, #pendingUpdates, #freeKeys))
+
+	-- 4. UI-Lebenszyklus-Kette (nur außerhalb des Kampfes und im MKB-Modus)
+	if InCombatLockdown and InCombatLockdown() then
+		table.insert(infoNotes, "DeepTest UI lifecycle skipped (InCombatLockdown active)")
+	elseif Constants.IsGamepadUIActive() then
+		ClickBindingUI.UpdateGamepadStandbyState()
+		table.insert(infoNotes, "DeepTest UI lifecycle skipped (Gamepad Standby active & verified)")
+	else
+		local origGrouping = Database.Get("groupingMode")
+		local origCompact = Database.Get("compactListMode")
+		local origCombos = Database.Get("matrixShowCombos")
+		local wasCBShown = ClickBindingFrame and ClickBindingFrame:IsShown() or false
+		local wasSettingsShown = _G.BetterClickCastingSettingsFrame and _G.BetterClickCastingSettingsFrame:IsShown() or false
+		local wasMatrixShown = freeKeysMatrixFrame and freeKeysMatrixFrame:IsShown() or false
+		local wasUnlocked = SettingsUI and SettingsUI.IsOverlaysUnlocked and SettingsUI.IsOverlaysUnlocked() or false
+
+		if not wasCBShown and ns.MinimapButton and ns.MinimapButton.ToggleClickCastingWindow then
+			ns.MinimapButton.ToggleClickCastingWindow()
+		end
+		ClickBindingUI.SetupHooks()
+
+		for _, gMode in ipairs({ "modifier", "button", "type", "none" }) do
+			Database.Set("groupingMode", gMode)
+			ClickBindingUI.RebuildGroups()
+			ClickBindingUI.RefreshVisibleLines()
+		end
+		Database.Set("compactListMode", not origCompact)
+		ClickBindingUI.ApplyScrollBoxLayout()
+		Database.Set("compactListMode", origCompact)
+		ClickBindingUI.ApplyScrollBoxLayout()
+		Database.Set("groupingMode", origGrouping)
+		ClickBindingUI.RebuildGroups()
+
+		if SettingsUI and SettingsUI.OpenSettingsTab then
+			for tabIdx = 1, 4 do
+				SettingsUI.OpenSettingsTab(tabIdx)
+			end
+		end
+
+		ClickBindingUI.ShowFreeKeysMatrix()
+		Database.Set("matrixShowCombos", true)
+		ClickBindingUI.RefreshFreeKeysMatrix()
+		Database.Set("matrixShowCombos", false)
+		ClickBindingUI.RefreshFreeKeysMatrix()
+		Database.Set("matrixShowCombos", origCombos)
+		ClickBindingUI.RefreshFreeKeysMatrix()
+
+		if SettingsUI and SettingsUI.SetOverlaysUnlocked then
+			SettingsUI.SetOverlaysUnlocked(true, true)
+			SettingsUI.SetOverlaysUnlocked(wasUnlocked, true)
+		end
+
+		if not wasMatrixShown then
+			ClickBindingUI.HideFreeKeysMatrix()
+		end
+		if not wasSettingsShown and SettingsUI and SettingsUI.HideWindow then
+			SettingsUI.HideWindow()
+		end
+		if not wasCBShown and ClickBindingFrame and ClickBindingFrame:IsShown() and ns.MinimapButton and ns.MinimapButton.ToggleClickCastingWindow then
+			ns.MinimapButton.ToggleClickCastingWindow()
+		end
+		table.insert(infoNotes, "DeepTest UI lifecycle: ClickBindingFrame (4 group modes + compact toggle), SettingsUI (Tabs 1-4), Matrix (4x5/8x5) & Overlays cycled OK")
+	end
 end
 
 -- Diagnose-Werkzeug (/bcc debug, /bcc debug taintlog):
@@ -3640,6 +4064,11 @@ function ClickBindingUI.RunTaintDiagnostics(subArg)
 	end
 
 	local findings = {}
+	local infoNotes = {}
+	local isDeepMode = (subArg == "deep" or subArg == "full" or subArg == "stress")
+	if isDeepMode then
+		RunDeepStressSelfTest(findings, infoNotes)
+	end
 	local function checkVar(tbl, key, label)
 		if tbl == nil then
 			return
@@ -3749,7 +4178,17 @@ function ClickBindingUI.RunTaintDiagnostics(subArg)
 			end
 		end
 	end
-	local infoNotes = {}
+	if _G.SettingsPanel and _G.SettingsPanel.Container and _G.SettingsPanel.Container.SettingsList and _G.SettingsPanel.Container.SettingsList.ScrollBox then
+		local spScrollBox = _G.SettingsPanel.Container.SettingsList.ScrollBox
+		if spScrollBox.ForEachFrame then
+			spScrollBox:ForEachFrame(function(frame)
+				local ed = frame.GetElementData and frame:GetElementData()
+				if type(ed) == "table" and ed.searchTags ~= nil then
+					checkVar(ed, "searchTags", "SettingsList.ElementData")
+				end
+			end)
+		end
+	end
 	if _G.PlayerSpellsFrame then
 		checkVar(_G.PlayerSpellsFrame, "isMinimized", "PlayerSpellsFrame")
 		checkVar(_G.PlayerSpellsFrame, "minimizedOnNextShow", "PlayerSpellsFrame")
@@ -3795,7 +4234,17 @@ function ClickBindingUI.RunTaintDiagnostics(subArg)
 		end
 	end
 
-	-- 4. Gamepad-Fokus- und Binding-Stack prüfen (falls Controller-Modus verfügbar/aktiv)
+	-- 4. Gamepad-Fokus- und Binding-Stack sowie Standby-Abkopplung prüfen
+	local isGamepadActive = Constants.IsGamepadUIActive()
+	table.insert(infoNotes, string.format("GamepadUI active: %s", tostring(isGamepadActive)))
+	if isGamepadActive then
+		if presetDropdownButton and presetDropdownButton:GetParent() ~= nil then
+			table.insert(findings, "ClickBindingUI.presetDropdownButton still parented in Gamepad mode")
+		end
+		if gamepadStandbyBadge and gamepadStandbyBadge:GetParent() ~= UIParent then
+			table.insert(findings, "ClickBindingUI.gamepadStandbyBadge not parented to UIParent")
+		end
+	end
 	if _G.GamepadMode and type(_G.GamepadMode.FrameControlsManager) == "table" then
 		local fcm = _G.GamepadMode.FrameControlsManager
 		for _, k in ipairs({ "shownFrames", "focusedFrame", "fallThroughCatcherActive", "isUIFocused" }) do
@@ -3841,7 +4290,7 @@ function ClickBindingUI.RunTaintDiagnostics(subArg)
 	if type(BetterClickCastingDB) == "table" then
 		BetterClickCastingDB.lastDebugReport = fullReport
 	end
-	if #findings > 0 or subArg == "copy" then
+	if #findings > 0 or subArg == "copy" or isDeepMode then
 		ShowDebugCopyPopup(fullReport)
 	end
 end
@@ -4024,6 +4473,11 @@ function ClickBindingUI.SetupHooks()
 	-- Auto-Show-All-Spell-Ranks, Smart-Rule-Sync und Zauberbuch-Sync beim Öffnen und Schließen des ClickBindingFrames
 	ClickBindingFrame:HookScript("OnShow", function()
 		ClickBindingUI.HideHeroCard()
+		if Constants.IsGamepadUIActive() then
+			ClickBindingUI.UpdateGamepadStandbyState()
+			return
+		end
+		ClickBindingUI.UpdateGamepadStandbyState()
 		ClickBindingUI.UpdatePresetDropdownButton()
 		ClickBindingUI.SyncAutoShowAllRanks()
 		ClickBindingUI.AutoSelectPrimarySpellBookTab()
@@ -4038,6 +4492,9 @@ function ClickBindingUI.SetupHooks()
 	end)
 
 	ClickBindingFrame:HookScript("OnHide", function()
+		if gamepadStandbyBadge then
+			gamepadStandbyBadge:Hide()
+		end
 		SetSaveButtonGlowShown(false)
 		ClickBindingUI.HideChildPopups()
 		if SettingsUI and SettingsUI.HideWindow then
@@ -4134,15 +4591,23 @@ function ClickBindingUI.SetupHooks()
 	-- Falls ClickBindingFrame beim erstmaligen Laden bereits offen ist, sofort synchronisieren
 	if ClickBindingFrame:IsShown() then
 		ClickBindingUI.HideHeroCard()
-		ClickBindingUI.SyncAutoShowAllRanks()
-		ClickBindingUI.AutoSelectPrimarySpellBookTab()
-		ClickBindingUI.RebuildGroups()
-		ClickBindingUI.RefreshVisibleLines()
+		if Constants.IsGamepadUIActive() then
+			ClickBindingUI.UpdateGamepadStandbyState()
+		else
+			ClickBindingUI.UpdateGamepadStandbyState()
+			ClickBindingUI.SyncAutoShowAllRanks()
+			ClickBindingUI.AutoSelectPrimarySpellBookTab()
+			ClickBindingUI.RebuildGroups()
+			ClickBindingUI.RefreshVisibleLines()
+		end
 	end
 
 	-- 4. Warnmeldung beim Überschreiben einer Taste ebenfalls mit Zauberrang versehen
 	if ClickBindingFrame.SetUnboundText and CLICK_BINDING_UNBOUND_OUTPUT then
 		hooksecurefunc(ClickBindingFrame, "SetUnboundText", function(self, elementData)
+			if Constants.IsGamepadUIActive() then
+				return
+			end
 			if not elementData or not elementData.bindingInfo or not Constants.IsSpellOrPetBinding(elementData.bindingInfo) then
 				return
 			end

@@ -4,7 +4,7 @@ local Constants = {}
 ns.Constants = Constants
 
 Constants.ADDON_NAME = addonName or "BetterClickCasting"
-Constants.VERSION = "0.8.1"
+Constants.VERSION = "0.8.2"
 -- Nativer gemipmappter Blizzard-Atlas aus Blizzard_ClickBindingUI.lua
 Constants.ICON_ATLAS = "clickcast-icon-mouse"
 
@@ -287,4 +287,24 @@ function Constants.GetPlayerClassInfo()
 		return className or "", classFile or ""
 	end
 	return "", ""
+end
+
+-- Prüft mehrstufig über InputUtil, C_InputInterfaceStyle und die Engine-CVar InputDeviceInterfaceStyle,
+-- ob Blizzards Controller-/Gamepad-UI-Modus aktiv ist. Im aktiven Gamepad-Modus pausiert Better Click Casting
+-- alle UI-Eingriffe, damit GamepadMode.FrameControlsManager und SmartNavigation niemals getaintet werden.
+function Constants.IsGamepadUIActive()
+	if InputUtil and InputUtil.IsGamepadUIEnabled and InputUtil.IsGamepadUIEnabled() then
+		return true
+	end
+	if C_InputInterfaceStyle and C_InputInterfaceStyle.GetCurrentStyle and Enum and Enum.InputDeviceInterfaceType then
+		if C_InputInterfaceStyle.GetCurrentStyle() == Enum.InputDeviceInterfaceType.Gamepad then
+			return true
+		end
+	end
+	if C_CVar and C_CVar.GetCVar then
+		if tonumber(C_CVar.GetCVar("InputDeviceInterfaceStyle")) == 1 then
+			return true
+		end
+	end
+	return false
 end

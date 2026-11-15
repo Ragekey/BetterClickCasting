@@ -838,6 +838,10 @@ local function IsAnyContextMenuOpen()
 end
 
 local function EvaluateHoverState(forceRedraw)
+	if Constants.IsGamepadUIActive and Constants.IsGamepadUIActive() then
+		HideHoverCard()
+		return
+	end
 	local mode = Database.Get("unitHoverMode") or "off"
 	local freeMove = IsFreeMoveActive()
 
@@ -947,7 +951,7 @@ end
 
 function UnitHoverTooltip.UpdateTrackingState()
 	local mode = Database.Get("unitHoverMode") or "off"
-	local shouldTrack = (mode ~= "off") or IsFreeMoveActive()
+	local shouldTrack = ((mode ~= "off") or IsFreeMoveActive()) and not (Constants.IsGamepadUIActive and Constants.IsGamepadUIActive())
 
 	if not shouldTrack then
 		if isTrackingActive and eventFrame then

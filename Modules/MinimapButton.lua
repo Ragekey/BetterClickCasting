@@ -11,6 +11,12 @@ ns.MinimapButton = MinimapButton
 local buttonFrame = nil
 
 function MinimapButton.ToggleClickCastingWindow()
+	if Constants.IsGamepadUIActive and Constants.IsGamepadUIActive() then
+		if DEFAULT_CHAT_FRAME then
+			DEFAULT_CHAT_FRAME:AddMessage(L["CHAT_GAMEPAD_STANDBY"])
+		end
+		return
+	end
 	-- Schutz vor UI-Taint und ADDON_ACTION_BLOCKED im Kampf
 	if InCombatLockdown and InCombatLockdown() then
 		if UIErrorsFrame and ERR_NOT_IN_COMBAT then
@@ -65,7 +71,7 @@ local function OnDragUpdate(self)
 
 	-- Während des Ziehens lokal zwischenspeichern und beim Loslassen über Database.Set
 	-- sowohl für Account- als auch für Charakter-Profile (useCharSettings) persistieren.
-	self.pendingAngle = angleDeg
+	self.pendingAngle = math.floor(angleDeg * 10 + 0.5) / 10
 	UpdatePosition(angleDeg)
 end
 
@@ -138,6 +144,12 @@ function MinimapButton.Init()
 		if self.isDragging then
 			return
 		end
+		if Constants.IsGamepadUIActive and Constants.IsGamepadUIActive() then
+			if DEFAULT_CHAT_FRAME then
+				DEFAULT_CHAT_FRAME:AddMessage(L["CHAT_GAMEPAD_STANDBY"])
+			end
+			return
+		end
 		if mouseButton == "RightButton" then
 			SettingsUI.OpenSettingsMenu(self)
 		else
@@ -173,6 +185,12 @@ end
 --------------------------------------------------------------------------------
 
 function BetterClickCasting_OnAddonCompartmentClick(_, mouseButton)
+	if Constants.IsGamepadUIActive and Constants.IsGamepadUIActive() then
+		if DEFAULT_CHAT_FRAME then
+			DEFAULT_CHAT_FRAME:AddMessage(L["CHAT_GAMEPAD_STANDBY"])
+		end
+		return
+	end
 	if mouseButton == "RightButton" then
 		SettingsUI.OpenSettingsMenu(AddonCompartmentFrame or Minimap)
 	else
