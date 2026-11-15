@@ -774,6 +774,11 @@ local function EnsureSettingsWindow()
 
 	local closeBtn = CreateFrame("Button", nil, win, "UIPanelCloseButton")
 	closeBtn:SetPoint("TOPRIGHT", win, "TOPRIGHT", -4, -4)
+	-- Eigenes OnClick-Skript statt UIPanelCloseButton_OnClick (HideUIPanel), damit das Fenster auch im Kampf schließt
+	closeBtn:SetScript("OnClick", function()
+		PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF)
+		win:Hide()
+	end)
 
 	-- 4 Reiter-Buttons oben
 	local tabLabelKeys = {
@@ -1558,24 +1563,36 @@ end
 
 local blizzardCategoryRegistered = false
 
--- Registriert Better Click Casting unter Esc -> Optionen -> AddOns über Blizzards VerticalLayout,
--- sodass alle Einträge auch direkt über die globale Suchleiste oben rechts im Optionen-Fenster gefunden werden.
+-- Registriert Better Click Casting unter Esc -> Optionen -> AddOns über ein isoliertes CanvasLayout,
+-- damit Blizzards geteilte SettingsList.ScrollBox und die globale Optionssuche zu 100 % ungetaintet bleiben.
 function SettingsUI.RegisterBlizzardOptions()
 	if blizzardCategoryRegistered then
 		return
 	end
 	if not Settings
-		or not Settings.RegisterVerticalLayoutCategory
-		or not Settings.RegisterInitializer
+		or not Settings.RegisterCanvasLayoutCategory
 		or not Settings.RegisterAddOnCategory
-		or not CreateSettingsButtonInitializer
 	then
 		return
 	end
 	blizzardCategoryRegistered = true
 
-	local category = Settings.RegisterVerticalLayoutCategory(L["ADDON_TITLE"] or "Better Click Casting")
-	SettingsUI.BlizzardCategory = category
+	local canvas = CreateFrame("Frame")
+	canvas:Hide()
+
+	local headerIcon = canvas:CreateTexture(nil, "ARTWORK")
+	headerIcon:SetSize(24, 24)
+	headerIcon:SetPoint("TOPLEFT", canvas, "TOPLEFT", 16, -16)
+	headerIcon:SetAtlas(Constants.ICON_ATLAS)
+
+	local headerTitle = canvas:CreateFontString(nil, "OVERLAY", "GameFontHighlightHuge")
+	headerTitle:SetPoint("LEFT", headerIcon, "RIGHT", 10, 0)
+	headerTitle:SetJustifyH("LEFT")
+
+	local divider = canvas:CreateTexture(nil, "ARTWORK")
+	divider:SetAtlas("Options_HorizontalDivider", true)
+	divider:SetPoint("TOPLEFT", canvas, "TOPLEFT", 16, -50)
+	divider:SetPoint("TOPRIGHT", canvas, "TOPRIGHT", -16, -50)
 
 	local function CloseBlizzardSettingsIfSafe()
 		if SettingsPanel and SettingsPanel:IsShown() and HideUIPanel and not (InCombatLockdown and InCombatLockdown()) then
@@ -1583,98 +1600,158 @@ function SettingsUI.RegisterBlizzardOptions()
 		end
 	end
 
-	local function AddActionRow(rowName, buttonLabel, tooltipDesc, onClickFunc, extraTags)
-		local initializer = CreateSettingsButtonInitializer(
-			rowName,
-			buttonLabel,
-			onClickFunc,
-			tooltipDesc,
-			true
-		)
-		if initializer and initializer.AddSearchTags then
-			initializer:AddSearchTags("Better Click Casting", "BetterClickCasting", "BCC", "Click Cast", "Klickbelegung")
-			if type(extraTags) == "table" then
-				for _, tag in ipairs(extraTags) do
-					initializer:AddSearchTags(tag)
-				end
+	local rows = {}
+	local function CreateCanvasRow(index, getLabelFunc, getBtnTextFunc, getTooltipDescFunc, onClickFunc)
+		local row = CreateFrame("Frame", nil, canvas)
+		row:SetHeight(36)
+		row:SetPoint("TOPLEFT", canvas, "TOPLEFT", 20, -64 - ((index - 1) * 42))
+		row:SetPoint("TOPRIGHT", canvas, "TOPRIGHT", -24, -64 - ((index - 1) * 42))
+
+		local rowBg = row:CreateTexture(nil, "BACKGROUND")
+		rowBg:SetAllPoints()
+		rowBg:SetColorTexture(1, 1, 1, (index % 2 == 1) and 0.03 or 0.01)
+
+		local label = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+		label:SetPoint("LEFT", row, "LEFT", 12, 0)
+		label:SetPoint("RIGHT", row, "RIGHT", -240, 0)
+		label:SetJustifyH("LEFT")
+		label:SetWordWrap(false)
+		row.Label = label
+
+		local btn = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
+		btn:SetSize(210, 26)
+		btn:SetPoint("RIGHT", row, "RIGHT", -10, 0)
+		btn:RegisterForClicks("LeftButtonUp")
+		btn:SetScript("OnClick", function()
+			PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
+			onClickFunc()
+		end)
+		btn:SetScript("OnEnter", function(self)
+			local desc = getTooltipDescFunc and getTooltipDescFunc()
+			if desc and desc ~= "" then
+				GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+				GameTooltip_SetTitle(GameTooltip, getLabelFunc())
+				GameTooltip_AddNormalLine(GameTooltip, desc, true)
+				GameTooltip:Show()
 			end
+		end)
+		btn:SetScript("OnLeave", function()
+			GameTooltip:Hide()
+		end)
+		row.Button = btn
+
+		row.RefreshRow = function()
+			label:SetText(getLabelFunc() or "")
+			btn:SetText(getBtnTextFunc() or "")
 		end
-		Settings.RegisterInitializer(category, initializer)
+
+		table.insert(rows, row)
 	end
 
 	-- 1. Tab 1: Klickbelegung & Zauberränge
-	AddActionRow(
-		L["BLIZZ_SETTINGS_ROW_CLICKCAST"],
-		L["BLIZZ_SETTINGS_OPEN_BTN"],
-		L["SETTINGS_BUTTON_TOOLTIP_DESC"],
+	CreateCanvasRow(
+		1,
+		function() return L["BLIZZ_SETTINGS_ROW_CLICKCAST"] end,
+		function() return L["BLIZZ_SETTINGS_OPEN_BTN"] end,
+		function() return L["SETTINGS_BUTTON_TOOLTIP_DESC"] end,
 		function()
 			CloseBlizzardSettingsIfSafe()
 			SettingsUI.OpenSettingsTab(1)
-		end,
-		{ "Downrank", "Zauberrang", "Smart Rules", "Mana", "Manakosten", "Rank", "Rang", "Trainer" }
+		end
 	)
 
 	-- 2. Tab 2: Zauberbuch & Allgemein
-	AddActionRow(
-		L["BLIZZ_SETTINGS_ROW_SPELLBOOK"],
-		L["BLIZZ_SETTINGS_OPEN_BTN"],
-		L["SETTING_QUICK_BIND_SPELLBOOK_DESC"],
+	CreateCanvasRow(
+		2,
+		function() return L["BLIZZ_SETTINGS_ROW_SPELLBOOK"] end,
+		function() return L["BLIZZ_SETTINGS_OPEN_BTN"] end,
+		function() return L["SETTING_QUICK_BIND_SPELLBOOK_DESC"] end,
 		function()
 			CloseBlizzardSettingsIfSafe()
 			SettingsUI.OpenSettingsTab(2)
-		end,
-		{ "Spellbook", "Zauberbuch", "Quick Bind", "Direktbinden", "Minimap", "Badges" }
+		end
 	)
 
 	-- 3. Tab 3: Unit-Frame Hover-Overlay
-	AddActionRow(
-		L["BLIZZ_SETTINGS_ROW_UNITHOVER"],
-		L["BLIZZ_SETTINGS_OPEN_BTN"],
-		L["UNITHOVER_MODE_TOOLTIP_DESC"],
+	CreateCanvasRow(
+		3,
+		function() return L["BLIZZ_SETTINGS_ROW_UNITHOVER"] end,
+		function() return L["BLIZZ_SETTINGS_OPEN_BTN"] end,
+		function() return L["UNITHOVER_MODE_TOOLTIP_DESC"] end,
 		function()
 			CloseBlizzardSettingsIfSafe()
 			SettingsUI.OpenSettingsTab(3)
-		end,
-		{ "Hover", "Unit Frame", "Einheitenfenster", "Overlay", "Tooltip", "Cursor" }
+		end
 	)
 
 	-- 4. Tab 4: Profile, Charakter-Übernahme & Import/Export
-	AddActionRow(
-		L["BLIZZ_SETTINGS_ROW_PROFILES"],
-		L["BLIZZ_SETTINGS_OPEN_BTN"],
-		L["PROFILE_SOURCE_CHAR_DESC"],
+	CreateCanvasRow(
+		4,
+		function() return L["BLIZZ_SETTINGS_ROW_PROFILES"] end,
+		function() return L["BLIZZ_SETTINGS_OPEN_BTN"] end,
+		function() return L["PROFILE_SOURCE_CHAR_DESC"] end,
 		function()
 			CloseBlizzardSettingsIfSafe()
 			SettingsUI.OpenSettingsTab(4)
-		end,
-		{ "Profile", "Profil", "Import", "Export", "Copy", "Kopieren", "Share", "Teilen", "Preset", "Presets", "Loadout", "Loadouts" }
+		end
 	)
 
-	-- 4. Direkt Blizzards Klickbelegungs-Fenster (/bcc) öffnen
-	AddActionRow(
-		L["BLIZZ_SETTINGS_ROW_WINDOW"],
-		L["SETTINGS_OPEN_CLICKCAST_BTN"],
-		L["MINIMAP_HINT_LEFT"],
+	-- 5. Direkt Blizzards Klickbelegungs-Fenster (/bcc) öffnen
+	CreateCanvasRow(
+		5,
+		function() return L["BLIZZ_SETTINGS_ROW_WINDOW"] end,
+		function() return L["SETTINGS_OPEN_CLICKCAST_BTN"] end,
+		function() return L["MINIMAP_HINT_LEFT"] end,
 		function()
 			CloseBlizzardSettingsIfSafe()
 			if ns.MinimapButton and ns.MinimapButton.ToggleClickCastingWindow then
 				ns.MinimapButton.ToggleClickCastingWindow()
 			end
-		end,
-		{ "Bindings", "Belegung", "Window", "Fenster" }
+		end
 	)
 
-	-- 5. Alle Overlays entsperren / sperren (/bcc move)
-	AddActionRow(
-		L["BLIZZ_SETTINGS_ROW_MOVE"],
-		L["OVERLAY_UNLOCK_BTN_UNLOCK_ALL"],
-		L["SETTING_UNITHOVER_UNLOCK_MOVE_DESC"],
+	-- 6. Freie-Tasten-Matrix (/bcc keys) öffnen
+	CreateCanvasRow(
+		6,
+		function() return L["SETTINGS_FREE_KEYS_MATRIX_BTN"] end,
+		function() return L["BLIZZ_SETTINGS_OPEN_BTN"] end,
+		function() return L["SETTINGS_FREE_KEYS_MATRIX_DESC"] end,
+		function()
+			CloseBlizzardSettingsIfSafe()
+			if ns.ClickBindingUI and ns.ClickBindingUI.ToggleFreeKeysMatrix then
+				ns.ClickBindingUI.ToggleFreeKeysMatrix()
+			end
+		end
+	)
+
+	-- 7. Alle Overlays entsperren / sperren (/bcc move)
+	CreateCanvasRow(
+		7,
+		function() return L["BLIZZ_SETTINGS_ROW_MOVE"] end,
+		function()
+			if SettingsUI.IsOverlaysUnlocked() then
+				return L["OVERLAY_UNLOCK_BTN_LOCK_ALL"]
+			end
+			return L["OVERLAY_UNLOCK_BTN_UNLOCK_ALL"]
+		end,
+		function() return L["SETTING_UNITHOVER_UNLOCK_MOVE_DESC"] end,
 		function()
 			CloseBlizzardSettingsIfSafe()
 			SettingsUI.ToggleOverlaysUnlocked()
-		end,
-		{ "Move", "Unlock", "Lock", "Verschieben", "Platzhalter", "Placeholder" }
+		end
 	)
 
+	local function RefreshCanvas()
+		headerTitle:SetText(string.format("%s  |cff888888v%s|r", L["ADDON_TITLE"] or "Better Click Casting", Constants.VERSION))
+		for _, row in ipairs(rows) do
+			row.RefreshRow()
+		end
+	end
+
+	canvas:SetScript("OnShow", RefreshCanvas)
+	RefreshCanvas()
+
+	local category = Settings.RegisterCanvasLayoutCategory(canvas, L["ADDON_TITLE"] or "Better Click Casting")
+	SettingsUI.BlizzardCategory = category
 	Settings.RegisterAddOnCategory(category)
 end

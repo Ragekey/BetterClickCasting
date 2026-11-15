@@ -2205,6 +2205,10 @@ local function ShowDebugCopyPopup(reportText, customTitle)
 
 		local closeBtn = CreateFrame("Button", nil, f, "UIPanelCloseButton")
 		closeBtn:SetPoint("TOPRIGHT", f, "TOPRIGHT", -4, -4)
+		closeBtn:SetScript("OnClick", function()
+			PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF)
+			f:Hide()
+		end)
 
 		local scrollFrame = CreateFrame("ScrollFrame", nil, f, "UIPanelScrollFrameTemplate")
 		scrollFrame:SetPoint("TOPLEFT", f, "TOPLEFT", 16, -42)
@@ -2631,6 +2635,10 @@ local function EnsureFreeKeysMatrixFrame()
 
 	local closeBtn = CreateFrame("Button", nil, f, "UIPanelCloseButton")
 	closeBtn:SetPoint("TOPRIGHT", f, "TOPRIGHT", -4, -4)
+	closeBtn:SetScript("OnClick", function()
+		PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF)
+		f:Hide()
+	end)
 
 	local colStartX = 82
 	local colW = 90
@@ -3283,6 +3291,10 @@ function ClickBindingUI.ShowImportStringPopup(defaultScope)
 
 		local closeBtn = CreateFrame("Button", nil, f, "UIPanelCloseButton")
 		closeBtn:SetPoint("TOPRIGHT", f, "TOPRIGHT", -4, -4)
+		closeBtn:SetScript("OnClick", function()
+			PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF)
+			f:Hide()
+		end)
 
 		local scrollFrame = CreateFrame("ScrollFrame", nil, f, "UIPanelScrollFrameTemplate")
 		scrollFrame:SetPoint("TOPLEFT", f, "TOPLEFT", 16, -54)
@@ -3426,6 +3438,10 @@ function ClickBindingUI.ShowNewPresetPopup(initialName, onSavedCallback)
 
 		local closeBtn = CreateFrame("Button", nil, f, "UIPanelCloseButton")
 		closeBtn:SetPoint("TOPRIGHT", f, "TOPRIGHT", -4, -4)
+		closeBtn:SetScript("OnClick", function()
+			PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF)
+			f:Hide()
+		end)
 
 		local inputBg = CreateFrame("Frame", nil, f, "BackdropTemplate")
 		inputBg:SetSize(354, 28)

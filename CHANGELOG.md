@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.8.1] (2026-11-15)
+### Fixed
+- **Target-of-Target (`targettarget`) Secret Boolean Guard in Hover Overlay:** Fixed a Lua error (`attempt to perform boolean test on a secret boolean value`) when hovering over `TargetFrameToT` (`targettarget`) or other compound unit frames where `UnitIsUnit` (`SecretWhenUnitComparisonRestricted`) or `UnitInRaid` (`SecretWhenUnitIdentityRestricted`) returns a restricted `<secret boolean>` value.
+- **Blizzard Options (`SettingsPanel`) ScrollBox Taint Prevention:** Switched the `Esc -> Options -> AddOns -> Better Click Casting` category from `Settings.RegisterVerticalLayoutCategory` (with `CreateSettingsButtonInitializer` + `AddSearchTags`) to an isolated `Settings.RegisterCanvasLayoutCategory` panel so Blizzard's shared `SettingsList.ScrollBox` and global Options search remain 100% untainted when scrolling over protected Blizzard settings rows.
+- **Closing Settings & Matrix Windows via `'X'` in Combat:** Replaced the default `UIPanelCloseButton` `OnClick` handler (`HideUIPanel(parent)`, which is blocked on `UIParent` during `InCombatLockdown()`) with a direct `frame:Hide()` handler across all custom AddOn windows (`BetterClickCastingSettingsFrame`, the Free Keys Matrix, and all popups) so they can be closed with `'X'` at any time during combat.
+
 ## [0.8.0] (2026-11-13)
 ### Added
 - **Per-Character Binding Presets / Loadouts (`/bcc preset`):**
