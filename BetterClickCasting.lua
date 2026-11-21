@@ -318,17 +318,41 @@ SlashCmdList["BETTERCLICKCASTING"] = function(msg)
 			ClickBindingUI.ShowBindingsExportPopup()
 		end
 	elseif cmd == "keys" or cmd == "free" or cmd == "matrix" then
-		if arg == "combos" or arg == "combo" or arg == "8x5" or arg == "all" then
+		local subKey, subRest = string.match(arg, "^(%S+)%s*(.-)$")
+		subKey = subKey or ""
+		subRest = strtrim(subRest or "")
+		if subKey == "combos" or subKey == "combo" or subKey == "8x5" or subKey == "12x5" or subKey == "all" then
 			ToggleBoolCommand("matrixShowCombos", "MATRIX_SHOW_COMBOS_CHECKBOX")
 			if ClickBindingUI and ClickBindingUI.RefreshFreeKeysMatrix then
 				ClickBindingUI.RefreshFreeKeysMatrix()
 			end
-		elseif arg == "auto" or arg == "autoopen" then
+		elseif subKey == "auto" or subKey == "autoopen" then
 			ToggleBoolCommand("matrixAutoOpen", "MATRIX_AUTO_OPEN_CHECKBOX")
 			if Database.Get("matrixAutoOpen") and ClickBindingFrame and ClickBindingFrame:IsShown() and ClickBindingUI and ClickBindingUI.ShowFreeKeysMatrix then
 				ClickBindingUI.ShowFreeKeysMatrix()
 			elseif ClickBindingUI and ClickBindingUI.RefreshFreeKeysMatrix then
 				ClickBindingUI.RefreshFreeKeysMatrix()
+			end
+		elseif subKey == "meta" or subKey == "cmd" or subKey == "mac" or subKey == "5x5" then
+			local nextMode = "auto"
+			if subRest == "on" or subRest == "1" or subRest == "true" then
+				nextMode = "on"
+			elseif subRest == "off" or subRest == "0" or subRest == "false" then
+				nextMode = "off"
+			elseif subRest == "auto" then
+				nextMode = "auto"
+			else
+				local isCurrentlyActive = ClickBindingUI and ClickBindingUI.IsMatrixMetaActive and ClickBindingUI.IsMatrixMetaActive() or false
+				nextMode = isCurrentlyActive and "off" or "on"
+			end
+			Database.Set("matrixMetaMode", nextMode)
+			local isNowActive = ClickBindingUI and ClickBindingUI.IsMatrixMetaActive and ClickBindingUI.IsMatrixMetaActive() or false
+			local gridDesc = isNowActive and (Database.Get("matrixShowCombos") and "12x5" or "5x5") or (Database.Get("matrixShowCombos") and "8x5" or "4x5")
+			if DEFAULT_CHAT_FRAME then
+				DEFAULT_CHAT_FRAME:AddMessage(string.format(L["CHAT_MATRIX_META_MODE_FORMAT"], string.upper(nextMode), gridDesc))
+			end
+			if ClickBindingUI and ClickBindingUI.ShowFreeKeysMatrix then
+				ClickBindingUI.ShowFreeKeysMatrix()
 			end
 		elseif ClickBindingUI and ClickBindingUI.ToggleFreeKeysMatrix then
 			ClickBindingUI.ToggleFreeKeysMatrix()
