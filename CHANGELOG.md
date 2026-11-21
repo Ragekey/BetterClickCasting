@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.9.0] (2026-11-22)
+### Added
+- **Drag & Drop Mouse Button & Matrix Modifier Reordering (`/bcc order`, incl. MMO Mice `MB6..MB31`):**
+  - Added a dedicated Drag & Drop editor (**`Reorder Buttons & Matrix`**, accessible via Tab 1, Tab 3, the **`Reorder`** button inside the Free Keys Matrix, or **`/bcc order`**) with two side-by-side reorderable lists:
+    - **Left List (`Mouse Buttons`)**: Reorder `LMB`, `RMB`, `MMB`, `MB4`, `MB5`, and any MMO mouse buttons (`MB6` through `MB31`) via live mouse Drag & Drop or `^` / `v` buttons. The custom mouse button order applies simultaneously to **Free Keys Matrix columns**, the **Unit Frame Hover Overlay**, and **`ClickBindingFrame` / `/bcc list` sorting**. Each mouse button also includes a column visibility checkbox for the Free Keys Matrix, plus a **`+ Add MMO Mouse Button (MB6..MB31)`** menu and a 1-click **`Preset: LMB | MMB | RMB`** button (`/bcc order middle`).
+    - **Right List (`Modifiers`)**: Reorder all modifier rows in the Free Keys Matrix via live Drag & Drop or `^` / `v` buttons.
+- **Per-Row Hover Overlay Visibility Eye Toggle (`BCCEyeButton`):**
+  - Added a free-standing **Eye icon** directly above the delete (`X`) button on every bound row in `ClickBindingFrame` (with live mana costs aligned flush to the left of the eye icon).
+  - **Left-Click** the eye icon on any spell, macro, or interaction row to show (`100%` opacity, cyan) or hide (`28%` opacity, dimmed) that specific binding in the Unit Frame Hover Overlay.
+  - Default interaction bindings (**Target Unit** and **Open Context Menu**) now start hidden by default in the Hover Overlay (replacing the old global Tab 3 checkbox) and can be individually enabled via their eye icon.
+- **Configurable `Default-Visible` Matrix Rows & `Edit Mode` (`/bcc keys combos`):**
+  - Renamed the Matrix combinations toggle to **`Edit Mode (Show all combinations)`** and expanded macOS `Meta` support to all 15 modifier combinations (`S + C + M`, `S + A + M`, `C + A + M`).
+  - While `Edit Mode` is active, a **`Default`** checkbox column appears at the end of every row so you can choose which modifier rows (`Direct`, `Shift`, `Ctrl`, `Alt`, `Meta`, or multi-modifier combos) are displayed when `Edit Mode` is unchecked.
+- **Adaptive 1-Line / 2-Line `44 px` Spellbook Keybind Badges:**
+  - Redesigned Spellbook keybind badges (`BCCBindBadge`) to span the exact `44 px` width of Spellbook icons flush along the top border: single-line (`44x15`) for direct clicks without modifiers (`LMB`, `MMB`) and two-line (`44x23`) with the modifier in gold on top (`SHIFT`, `C+S`) and the mouse button in green below (`MMB`, `RMB`) so long combinations never truncate or cover the spell artwork.
+
+### Fixed
+- **Direct Spellbook Casting Outside `/bcc` (`ADDON_ACTION_FORBIDDEN: CastSpellBookItem()`):**
+  - Separated Spellbook slot overlays into two distinct frames: `BCCQuickBindButton` is now strictly active only while `ClickBindingFrame` (`/bcc`) is open, while slots tainted by a prior `/bcc` session or automatic tab switch are covered outside `/bcc` by `BCCSecureCastButton` (`SecureActionButtonTemplate` with native `SecureActionButton_OnClick`, `useOnKeyDown = false`, `checkselfcast = true`, and `PostClick` support for `Shift`-chat links and drag pickup). Clicking spells in the Spellbook outside `/bcc` now casts them 100% taint-free while keeping `_G.PET_ACTION_HIGHLIGHT_MARKS` and `PetActionBar` completely protected.
+
 ## [0.8.3] (2026-11-21)
 ### Added
 - **macOS `Meta` (`Command`) Support in Free Keys Matrix (`5x5` / `12x5`, `/bcc keys meta`) & Hover Overlay:**

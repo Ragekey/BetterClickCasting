@@ -27,7 +27,7 @@ When you open `/bcc`, **Better Click Casting** automatically opens your Spellboo
 
 * **1-Click Direct Bind**: Simply press your desired mouse button (or modifier + mouse button, such as `Shift + Left-Click` or `Mouse Button 4`) directly on any spell icon in your Spellbook to bind that exact spell rank immediately.
   * **Important Note (`LMB` / Left-Click)**: Be careful when clicking a spell with an unmodified **Left-Click (`LMB`)** while the Click Cast window is open, as this will immediately bind that spell to `LMB` and override your default **Target Unit** left-click action! (You can re-add *Target Unit* anytime via **Add Binding**, or toggle 1-Click Direct Bind in Tab 2 / via `/bcc qb`).
-* **Spellbook Key Badges**: Bound spells display a green badge (such as `LMB`, `S-RMB`, `CS-MB4`) directly on their Spellbook icon so you can see at a glance which ranks are bound.
+* **Adaptive 1-/2-Line `44 px` Spellbook Key Badges**: Bound spells display a `44 px` badge flush along the top edge of their Spellbook icon (1-line for unmodified clicks like `LMB` or `MMB`, and 2-line with the modifier in gold on top and the mouse button in green below, such as `SHIFT` / `RMB` or `C+S` / `MMB`) so you can see every bound rank without covering the spell icon.
 
 ---
 
@@ -45,9 +45,10 @@ In *WoW Forever*, spells have multiple ranks with different healing/damage value
 * **Inline Rank Switcher Dropdown**:
   * **Left-Click** the compact rank button on any row to switch between all learned ranks of that spell (showing mana costs and full tooltips) without re-binding your mouse button.
   * **Right-Click** the rank button to jump straight to your highest learned rank (**`MAX`**).
-* **Free Keys Matrix (`4x5` / `8x5` Cheat-Sheet, `/bcc keys`)**:
-  * Click the **`Matrix`** header button inside `ClickBindingFrame` (or **Right-Click** the settings gear icon, or type **`/bcc keys`**) to open a live visual matrix of all bound and **`[FREE]`** mouse button combinations (`Direct`, `Shift`, `Ctrl`, `Alt` across `LMB`, `RMB`, `MMB`, `MB4`, `MB5`).
-  * Enable **`Show modifier combinations (8x5)`** (`/bcc keys combos`) to expand the grid from 20 slots to 40 slots (`Shift+Ctrl`, `Shift+Alt`, `Ctrl+Alt`, `S+C+A`), or enable **`Auto-open with /bcc`** (`/bcc keys auto`) to open the matrix automatically alongside `ClickBindingFrame`.
+* **Free Keys Matrix (`Edit Mode`, `Default` Rows & Drag-&-Drop Reordering, `/bcc keys` & `/bcc order`)**:
+  * Click the **`Matrix`** header button inside `ClickBindingFrame` (or **Right-Click** the settings gear icon, or type **`/bcc keys`**) to open a live visual matrix of all bound and **`[FREE]`** mouse button combinations (`Direct`, `Shift`, `Ctrl`, `Alt`, plus `Meta` on macOS across `LMB`, `RMB`, `MMB`, `MB4`, `MB5`, and optional MMO mouse buttons `MB6..MB31`).
+  * Enable **`Edit Mode (Show all combinations)`** (`/bcc keys combos`) to expand all modifier combinations (up to 15 rows) and use the **`Default`** checkboxes at the end of each row to choose which rows appear in your compact default matrix.
+  * Click **`Reorder`** inside the matrix (or type **`/bcc order`**) to open the Drag & Drop editor where you can reorder mouse buttons (affecting both the Matrix and the Unit Frame Hover Overlay, including a 1-click **`Preset: LMB | MMB | RMB`** button and **`+ Add MMO Mouse Button (MB6..MB31)`**) as well as Matrix modifier rows.
 
 ### Smart Rank Rules
 You can assign a **Smart Rank Rule** to each spell binding via the Inline Rank Switcher dropdown:
@@ -74,6 +75,7 @@ The optional **Unit Frame Hover Overlay** shows a compact, live HUD card wheneve
   * **Off**: Disabled.
   * **When Holding a Modifier (`Shift` / `Ctrl` / `Alt`)**: Only appears while you hold a modifier key over a unit frame.
   * **Always on Unit Frame Hover**: Appears whenever your cursor rests on a unit frame and dynamically updates as you press `Shift`, `Ctrl`, or `Alt`.
+* **Per-Row Eye Visibility Toggle (`BCCEyeButton`)**: Every bound row in `ClickBindingFrame` has an **Eye icon** directly above the delete (`X`) button. Click the eye icon to show (`100%` opacity, cyan) or hide (`28%` opacity, dimmed) that specific binding in the Unit Frame Hover Overlay. Default interactions (**Target Unit** and **Open Context Menu**) start dimmed/hidden by default and can be individually enabled via their eye icon.
 * **Live Mana, Out-of-Mana & Out-of-Range (`[OOR]`) Warnings**: Displays live mana costs for each bound spell (dimming the row and turning mana red when out of mana) and checks live spell range against the hovered unit (`C_Spell.IsSpellInRange`), marking out-of-range spells in red with **`[OOR]`** (`/bcc range`).
 * **6 Anchor Modes**: Attach the overlay to the **Cursor**, **Top Edge**, **Bottom Edge**, **Left Edge**, **Right Edge** of the hovered unit frame, or place it at a **Free Movable Position** on your screen.
 * **Global Unlock & Placeholder Mode (`/bcc move`)**: Unlocks all movable Better Click Casting windows (**Upgrade Hero-Card**, **Unit Frame Hover Overlay**, and **Free Keys Matrix**) with a green border so you can drag them anywhere on screen. **Right-Click** any unlocked card to reset its position.
@@ -113,7 +115,8 @@ Every setting and action can be controlled both in the graphical Settings window
 | `/bcc charsettings` | Toggle character-specific settings for the current character |
 | `/bcc merge` | Toggle Merge vs. Replace mode when importing/copying keybinds |
 | `/bcc max` | Prepare all bound spells in `ClickBindingFrame` at their highest learned rank |
-| `/bcc keys [combos\|auto]` | Toggle the visual `4x5` / `8x5` Free Keys Matrix (`combos` toggles 8x5 mode, `auto` toggles auto-open with `/bcc`) |
+| `/bcc keys [combos\|auto\|meta]` | Toggle the visual Free Keys Matrix (`combos` toggles Edit Mode with all combinations & Default checkboxes, `auto` toggles auto-open with `/bcc`, `meta` toggles macOS Meta rows) |
+| `/bcc order [middle\|reset]` | Open the Drag & Drop Reorder editor for mouse buttons (`MB1..MB31`) & Matrix modifier rows (`middle` sets `LMB \| MMB \| RMB`, `reset` restores defaults) |
 | `/bcc list` | Open a copyable text summary of all current Click Cast bindings and free slots |
 | `/bcc move` (or `/bcc unlock`) | Toggle the Global Overlay Unlock & Placeholder mode |
 | `/bcc reset` | Reset all movable overlay and window positions to default |
@@ -129,7 +132,7 @@ Every setting and action can be controlled both in the graphical Settings window
 | `/bcc compact` / `/bcc range` | Toggle Compact Binding Rows (`32 px`) or Hover Overlay Out-of-Range (`[OOR]`) indicator |
 | `/bcc rules` / `/bcc bottom` / `/bcc tooltips` / `/bcc minimap` | Toggle Smart Rank Rules, Move Interactions to Bottom, Tooltips, or Minimap Button |
 | `/bcc status` | Print current active settings in chat |
-| `/bcc debug [copy]` | Run live `issecurevariable` taint diagnostics |
+| `/bcc debug [deep\|copy]` | Run live `issecurevariable` taint diagnostics (`deep` runs the 5-stage automated stress & roundtrip self-test) |
 | `/bcc help` | List all available slash commands in chat |
 
 ---

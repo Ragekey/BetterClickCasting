@@ -4,7 +4,7 @@ local Constants = {}
 ns.Constants = Constants
 
 Constants.ADDON_NAME = addonName or "BetterClickCasting"
-Constants.VERSION = "0.8.3"
+Constants.VERSION = "0.9.0"
 -- Nativer gemipmappter Blizzard-Atlas aus Blizzard_ClickBindingUI.lua
 Constants.ICON_ATLAS = "clickcast-icon-mouse"
 
@@ -54,14 +54,46 @@ function Constants.IsSpellOrPetBinding(bindingInfo)
 		or bindingInfo.type == Enum.ClickBindingType.PetAction
 end
 
+function Constants.NormalizeMouseButtonName(buttonName)
+	if not buttonName or type(buttonName) ~= "string" then
+		return nil
+	end
+	if buttonName == "Button1" then
+		return "LeftButton"
+	elseif buttonName == "Button2" then
+		return "RightButton"
+	elseif buttonName == "Button3" then
+		return "MiddleButton"
+	end
+	return buttonName
+end
+
+function Constants.GetShortButtonName(buttonName)
+	if not buttonName then
+		return "?"
+	end
+	if ShortButtonNames[buttonName] then
+		return ShortButtonNames[buttonName]
+	end
+	local num = string.match(buttonName, "Button(%d+)")
+	return num and ("MB" .. num) or buttonName
+end
+
 function Constants.GetButtonSortOrder(buttonName)
 	if not buttonName then
 		return 999
 	end
-	if ButtonSortPriority[buttonName] then
-		return ButtonSortPriority[buttonName]
+	local norm = Constants.NormalizeMouseButtonName(buttonName) or buttonName
+	if ns.Database and ns.Database.GetButtonOrderIndex then
+		local customIdx = ns.Database.GetButtonOrderIndex(norm)
+		if customIdx then
+			return customIdx
+		end
 	end
-	local num = string.match(buttonName, "Button(%d+)")
+	if ButtonSortPriority[norm] then
+		return ButtonSortPriority[norm]
+	end
+	local num = string.match(norm, "Button(%d+)")
 	if num then
 		return tonumber(num) or 50
 	end

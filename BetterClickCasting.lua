@@ -125,6 +125,9 @@ loaderFrame:SetScript("OnEvent", function(self, event, arg1)
 				ClickBindingUI.HideHeroCard()
 			end
 		elseif event == "PLAYER_REGEN_ENABLED" then
+			if SpellBookUI and SpellBookUI.OnCombatEnded then
+				SpellBookUI.OnCombatEnded()
+			end
 			if ClickBindingUI and ClickBindingUI.ScheduleSmartRuleCheck then
 				ClickBindingUI.ScheduleSmartRuleCheck(0.6, false)
 			end
@@ -316,6 +319,30 @@ SlashCmdList["BETTERCLICKCASTING"] = function(msg)
 	elseif cmd == "list" or cmd == "summary" then
 		if ClickBindingUI and ClickBindingUI.ShowBindingsExportPopup then
 			ClickBindingUI.ShowBindingsExportPopup()
+		end
+	elseif cmd == "order" or cmd == "reorder" or cmd == "sort" then
+		if arg == "middle" or arg == "mmb" or arg == "center" then
+			if Database.ApplyMiddleMouseCenterOrder then
+				Database.ApplyMiddleMouseCenterOrder()
+			end
+			if ns.SettingsUI and ns.SettingsUI.RefreshReorderWindow then
+				ns.SettingsUI.RefreshReorderWindow()
+			end
+			if DEFAULT_CHAT_FRAME then
+				DEFAULT_CHAT_FRAME:AddMessage(L["CHAT_ORDER_MMB_CENTER"])
+			end
+		elseif arg == "reset" or arg == "default" then
+			if Database.ResetButtonAndModifierOrder then
+				Database.ResetButtonAndModifierOrder()
+			end
+			if ns.SettingsUI and ns.SettingsUI.RefreshReorderWindow then
+				ns.SettingsUI.RefreshReorderWindow()
+			end
+			if DEFAULT_CHAT_FRAME then
+				DEFAULT_CHAT_FRAME:AddMessage(L["CHAT_ORDER_RESET"])
+			end
+		elseif ns.SettingsUI and ns.SettingsUI.ToggleReorderWindow then
+			ns.SettingsUI.ToggleReorderWindow()
 		end
 	elseif cmd == "keys" or cmd == "free" or cmd == "matrix" then
 		local subKey, subRest = string.match(arg, "^(%S+)%s*(.-)$")

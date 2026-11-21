@@ -15,6 +15,10 @@ local DEFAULTS = {
 	matrixShowCombos = false,
 	matrixAutoOpen = false,
 	matrixMetaMode = "auto", -- "auto", "on", "off"
+	matrixDefaultRows = "1;2;3;4;5", -- Semikolon-separierte modOrder-IDs der in der Standard-Matrix sichtbaren Zeilen
+	customButtonOrder = "LeftButton;RightButton;MiddleButton;Button4;Button5", -- Sortierreihenfolge der Maustasten für Matrix & Hover-Overlay
+	matrixVisibleButtons = "LeftButton;RightButton;MiddleButton;Button4;Button5", -- In der Matrix als Spalte sichtbare Maustasten
+	customModifierOrder = "1;2;3;4;5;6;7;8;9;10;11;12;13;14;15", -- Zeilen-Reihenfolge der Modifier in der Matrix
 	groupingMode = "modifier", -- "modifier", "button", "type", "none"
 	quickBindSpellbook = true,
 	showSpellbookBadges = true,
@@ -31,6 +35,7 @@ local DEFAULTS = {
 	unitHoverShowRange = true,
 	unitHoverShowInCombat = false,
 	unitHoverShowInteractions = false,
+	unitHoverHiddenCombos = "", -- Pipe-separierte Liste ausgeblendeter "modifiers:button"-Kombos im Hover-Overlay
 	showMinimapButton = true,
 	minimapAngle = 225,
 	addonLocale = "auto", -- "auto", "enUS", "deDE", "esES"
@@ -446,6 +451,496 @@ end
 function Database.GetActivePresetName()
 	local _, activeName = Database.GetPresets()
 	return activeName
+end
+
+--------------------------------------------------------------------------------
+-- Matrix Default-Visible Zeilen (#9A) & Ausgeblendete Hover-Overlay-Binds (#8C)
+--------------------------------------------------------------------------------
+
+local function ParseMatrixDefaultRowSet()
+	local raw = Database.Get("matrixDefaultRows")
+	if type(raw) ~= "string" or raw == "" then
+		raw = DEFAULTS.matrixDefaultRows
+	end
+	local set = {}
+	local count = 0
+	for token in string.gmatch(raw, "(%d+)") do
+		local id = tonumber(token)
+		if id and id >= 1 and id <= 16 and not set[id] then
+			set[id] = true
+			count = count + 1
+		end
+	end
+	if count == 0 then
+		set[1] = true
+	end
+	return set
+end
+
+function Database.IsMatrixRowDefaultVisible(modOrder)
+	local id = tonumber(modOrder)
+	if not id then
+		return false
+	end
+	local set = ParseMatrixDefaultRowSet()
+	return set[id] and true or false
+end
+
+function Database.SetMatrixRowDefaultVisible(modOrder, isVisible)
+	local id = tonumber(modOrder)
+	if not id or id < 1 or id > 16 then
+		return
+	end
+	local set = ParseMatrixDefaultRowSet()
+	if isVisible then
+		set[id] = true
+	else
+		set[id] = nil
+	end
+	local ordered = {}
+	for i = 1, 16 do
+		if set[i] then
+			table.insert(ordered, tostring(i))
+		end
+	end
+	-- Mindestens eine Zeile (Direct = 1) muss für die Standard-Matrix aktiv bleiben
+	if #ordered == 0 then
+		table.insert(ordered, "1")
+	end
+	Database.Set("matrixDefaultRows", table.concat(ordered, ";"))
+end
+
+function Database.NormalizeComboKey(modifiers, button)
+	if type(button) ~= "string" or button == "" then
+		return nil
+	end
+	local normBtn = button
+	if button == "Button1" then
+		normBtn = "LeftButton"
+	elseif button == "Button2" then
+		normBtn = "RightButton"
+	elseif button == "Button3" then
+		normBtn = "MiddleButton"
+	end
+	local modNum = tonumber(modifiers) or 0
+	return tostring(modNum) .. ":" .. normBtn
+end
+
+local function ParseHiddenHoverComboSet()
+	local raw = Database.Get("unitHoverHiddenCombos")
+	local set = {}
+	if type(raw) ~= "string" or raw == "" then
+		return set
+	end
+	for token in string.gmatch(raw, "([^|;]+)") do
+		if token ~= "" then
+			set[token] = true
+		end
+	end
+	return set
+end
+
+local function SaveHiddenHoverComboSet(set)
+	local list = {}
+	for k, v in pairs(set) do
+		if v and type(k) == "string" and k ~= "" then
+			table.insert(list, k)
+		end
+	end
+	table.sort(list)
+	Database.Set("unitHoverHiddenCombos", table.concat(list, "|"))
+end
+
+local function IsInteractionBindingInfo(bindingInfo)
+	if type(bindingInfo) ~= "table" then
+		return false
+	end
+	local interactionType = (Enum and Enum.ClickBindingType and Enum.ClickBindingType.Interaction) or 3
+	return bindingInfo.type == interactionType
+end
+
+function Database.IsBindingHiddenInHover(bindingInfo)
+	if type(bindingInfo) ~= "table" or not bindingInfo.button then
+		return false
+	end
+	local set = ParseHiddenHoverComboSet()
+	if IsInteractionBindingInfo(bindingInfo) then
+		local showKey = "+I:" .. tostring(tonumber(bindingInfo.actionID) or 0)
+		return not set[showKey]
+	end
+	local key = Database.NormalizeComboKey(bindingInfo.modifiers, bindingInfo.button)
+	if not key then
+		return false
+	end
+	return set[key] and true or false
+end
+
+function Database.SetBindingHiddenInHover(bindingInfo, isHidden)
+	if type(bindingInfo) ~= "table" or not bindingInfo.button then
+		return
+	end
+	local set = ParseHiddenHoverComboSet()
+	if IsInteractionBindingInfo(bindingInfo) then
+		local showKey = "+I:" .. tostring(tonumber(bindingInfo.actionID) or 0)
+		if isHidden then
+			set[showKey] = nil
+		else
+			set[showKey] = true
+		end
+		SaveHiddenHoverComboSet(set)
+		return
+	end
+	local key = Database.NormalizeComboKey(bindingInfo.modifiers, bindingInfo.button)
+	if not key then
+		return
+	end
+	if isHidden then
+		set[key] = true
+	else
+		set[key] = nil
+	end
+	SaveHiddenHoverComboSet(set)
+end
+
+function Database.ToggleBindingHiddenInHover(bindingInfo)
+	local isNowHidden = not Database.IsBindingHiddenInHover(bindingInfo)
+	Database.SetBindingHiddenInHover(bindingInfo, isNowHidden)
+	return isNowHidden
+end
+
+--------------------------------------------------------------------------------
+-- Benutzerdefinierte Maustasten- & Modifier-Reihenfolge (Option 7A, inkl. MMO-Mäuse MB6..MB31)
+--------------------------------------------------------------------------------
+
+local BASE_MOUSE_BUTTONS = {
+	"LeftButton",
+	"RightButton",
+	"MiddleButton",
+	"Button4",
+	"Button5",
+}
+
+local function IsValidMouseButtonToken(token)
+	if token == "LeftButton" or token == "RightButton" or token == "MiddleButton" then
+		return true
+	end
+	local num = tonumber(string.match(tostring(token or ""), "^Button(%d+)$"))
+	return (num ~= nil and num >= 4 and num <= 31)
+end
+
+function Database.GetOrderedMouseButtons(includeActiveBindings)
+	local raw = Database.Get("customButtonOrder")
+	if type(raw) ~= "string" or raw == "" then
+		raw = DEFAULTS.customButtonOrder
+	end
+	local list = {}
+	local seen = {}
+	for token in string.gmatch(raw, "([^;|,]+)") do
+		local norm = Constants.NormalizeMouseButtonName and Constants.NormalizeMouseButtonName(token) or token
+		if IsValidMouseButtonToken(norm) and not seen[norm] then
+			seen[norm] = true
+			table.insert(list, norm)
+		end
+	end
+	for _, baseBtn in ipairs(BASE_MOUSE_BUTTONS) do
+		if not seen[baseBtn] then
+			seen[baseBtn] = true
+			table.insert(list, baseBtn)
+		end
+	end
+	if includeActiveBindings ~= false then
+		local extraNums = {}
+		local function CheckBtn(rawBtn)
+			local norm = Constants.NormalizeMouseButtonName and Constants.NormalizeMouseButtonName(rawBtn) or rawBtn
+			if IsValidMouseButtonToken(norm) and not seen[norm] then
+				seen[norm] = true
+				local n = tonumber(string.match(norm, "^Button(%d+)$"))
+				if n then
+					table.insert(extraNums, n)
+				else
+					table.insert(list, norm)
+				end
+			end
+		end
+		if ClickBindingFrame and ClickBindingFrame:IsShown() and ClickBindingFrame.dataProvider then
+			for _, element in ClickBindingFrame.dataProvider:Enumerate() do
+				if element and not element.unbound and element.bindingInfo and element.bindingInfo.button then
+					CheckBtn(element.bindingInfo.button)
+				end
+			end
+		elseif C_ClickBindings and C_ClickBindings.GetProfileInfo then
+			local prof = C_ClickBindings.GetProfileInfo()
+			if type(prof) == "table" then
+				for _, info in ipairs(prof) do
+					if info and info.button then
+						CheckBtn(info.button)
+					end
+				end
+			end
+		end
+		table.sort(extraNums)
+		for _, n in ipairs(extraNums) do
+			table.insert(list, "Button" .. tostring(n))
+		end
+	end
+	return list
+end
+
+function Database.GetButtonOrderIndex(buttonName)
+	local norm = Constants.NormalizeMouseButtonName and Constants.NormalizeMouseButtonName(buttonName) or buttonName
+	if not norm then
+		return nil
+	end
+	local list = Database.GetOrderedMouseButtons(false)
+	for idx, btn in ipairs(list) do
+		if btn == norm then
+			return idx
+		end
+	end
+	local num = tonumber(string.match(tostring(norm), "^Button(%d+)$"))
+	if num then
+		return 100 + num
+	end
+	return nil
+end
+
+function Database.SetOrderedMouseButtons(orderedList)
+	if type(orderedList) ~= "table" then
+		return
+	end
+	local clean = {}
+	local seen = {}
+	for _, token in ipairs(orderedList) do
+		local norm = Constants.NormalizeMouseButtonName and Constants.NormalizeMouseButtonName(token) or token
+		if IsValidMouseButtonToken(norm) and not seen[norm] then
+			seen[norm] = true
+			table.insert(clean, norm)
+		end
+	end
+	for _, baseBtn in ipairs(BASE_MOUSE_BUTTONS) do
+		if not seen[baseBtn] then
+			seen[baseBtn] = true
+			table.insert(clean, baseBtn)
+		end
+	end
+	Database.Set("customButtonOrder", table.concat(clean, ";"))
+end
+
+function Database.MoveMouseButtonInOrder(buttonName, targetIndex)
+	local norm = Constants.NormalizeMouseButtonName and Constants.NormalizeMouseButtonName(buttonName) or buttonName
+	if not IsValidMouseButtonToken(norm) then
+		return
+	end
+	local list = Database.GetOrderedMouseButtons(true)
+	local currentIdx = nil
+	for idx, b in ipairs(list) do
+		if b == norm then
+			currentIdx = idx
+			break
+		end
+	end
+	if not currentIdx then
+		return
+	end
+	targetIndex = math.max(1, math.min(#list, tonumber(targetIndex) or currentIdx))
+	if targetIndex == currentIdx then
+		return
+	end
+	table.remove(list, currentIdx)
+	table.insert(list, targetIndex, norm)
+	Database.SetOrderedMouseButtons(list)
+end
+
+local function ParseMatrixVisibleButtonSet()
+	local raw = Database.Get("matrixVisibleButtons")
+	if type(raw) ~= "string" or raw == "" then
+		raw = DEFAULTS.matrixVisibleButtons
+	end
+	local set = {}
+	local count = 0
+	for token in string.gmatch(raw, "([^;|,]+)") do
+		local norm = Constants.NormalizeMouseButtonName and Constants.NormalizeMouseButtonName(token) or token
+		if IsValidMouseButtonToken(norm) and not set[norm] then
+			set[norm] = true
+			count = count + 1
+		end
+	end
+	if count == 0 then
+		set["LeftButton"] = true
+	end
+	return set
+end
+
+function Database.IsMatrixButtonColumnVisible(buttonName)
+	local norm = Constants.NormalizeMouseButtonName and Constants.NormalizeMouseButtonName(buttonName) or buttonName
+	if not norm then
+		return false
+	end
+	local set = ParseMatrixVisibleButtonSet()
+	return set[norm] and true or false
+end
+
+function Database.SetMatrixButtonColumnVisible(buttonName, isVisible)
+	local norm = Constants.NormalizeMouseButtonName and Constants.NormalizeMouseButtonName(buttonName) or buttonName
+	if not IsValidMouseButtonToken(norm) then
+		return
+	end
+	local set = ParseMatrixVisibleButtonSet()
+	if isVisible then
+		set[norm] = true
+	else
+		set[norm] = nil
+	end
+	local ordered = Database.GetOrderedMouseButtons(true)
+	local out = {}
+	local seen = {}
+	for _, btn in ipairs(ordered) do
+		if set[btn] and not seen[btn] then
+			seen[btn] = true
+			table.insert(out, btn)
+		end
+	end
+	for btn, v in pairs(set) do
+		if v and not seen[btn] then
+			seen[btn] = true
+			table.insert(out, btn)
+		end
+	end
+	if #out == 0 then
+		table.insert(out, "LeftButton")
+	end
+	Database.Set("matrixVisibleButtons", table.concat(out, ";"))
+end
+
+function Database.AddMouseButtonToOrder(buttonName, enableInMatrix)
+	local norm = Constants.NormalizeMouseButtonName and Constants.NormalizeMouseButtonName(buttonName) or buttonName
+	if not IsValidMouseButtonToken(norm) then
+		return
+	end
+	local list = Database.GetOrderedMouseButtons(true)
+	local found = false
+	for _, b in ipairs(list) do
+		if b == norm then
+			found = true
+			break
+		end
+	end
+	if not found then
+		table.insert(list, norm)
+	end
+	Database.SetOrderedMouseButtons(list)
+	if enableInMatrix ~= false then
+		Database.SetMatrixButtonColumnVisible(norm, true)
+	end
+end
+
+function Database.GetActiveMatrixColumns()
+	local ordered = Database.GetOrderedMouseButtons(true)
+	local visibleSet = ParseMatrixVisibleButtonSet()
+	local cols = {}
+	for _, btn in ipairs(ordered) do
+		if visibleSet[btn] then
+			table.insert(cols, {
+				button = btn,
+				short = (Constants.GetShortButtonName and Constants.GetShortButtonName(btn)) or btn,
+			})
+		end
+	end
+	if #cols == 0 then
+		table.insert(cols, { button = "LeftButton", short = "LMB" })
+	end
+	return cols
+end
+
+function Database.GetOrderedModifierIDs()
+	local raw = Database.Get("customModifierOrder")
+	if type(raw) ~= "string" or raw == "" then
+		raw = DEFAULTS.customModifierOrder
+	end
+	local list = {}
+	local seen = {}
+	for token in string.gmatch(raw, "(%d+)") do
+		local id = tonumber(token)
+		if id and id >= 1 and id <= 15 and not seen[id] then
+			seen[id] = true
+			table.insert(list, id)
+		end
+	end
+	for id = 1, 15 do
+		if not seen[id] then
+			seen[id] = true
+			table.insert(list, id)
+		end
+	end
+	return list
+end
+
+function Database.SetOrderedModifierIDs(idList)
+	if type(idList) ~= "table" then
+		return
+	end
+	local clean = {}
+	local seen = {}
+	for _, rawID in ipairs(idList) do
+		local id = tonumber(rawID)
+		if id and id >= 1 and id <= 15 and not seen[id] then
+			seen[id] = true
+			table.insert(clean, tostring(id))
+		end
+	end
+	for id = 1, 15 do
+		if not seen[id] then
+			seen[id] = true
+			table.insert(clean, tostring(id))
+		end
+	end
+	Database.Set("customModifierOrder", table.concat(clean, ";"))
+end
+
+function Database.MoveModifierInOrder(modOrder, targetIndex)
+	local id = tonumber(modOrder)
+	if not id or id < 1 or id > 15 then
+		return
+	end
+	local list = Database.GetOrderedModifierIDs()
+	local currentIdx = nil
+	for idx, m in ipairs(list) do
+		if m == id then
+			currentIdx = idx
+			break
+		end
+	end
+	if not currentIdx then
+		return
+	end
+	targetIndex = math.max(1, math.min(#list, tonumber(targetIndex) or currentIdx))
+	if targetIndex == currentIdx then
+		return
+	end
+	table.remove(list, currentIdx)
+	table.insert(list, targetIndex, id)
+	Database.SetOrderedModifierIDs(list)
+end
+
+function Database.ApplyMiddleMouseCenterOrder()
+	local list = Database.GetOrderedMouseButtons(true)
+	local rest = {}
+	for _, b in ipairs(list) do
+		if b ~= "LeftButton" and b ~= "MiddleButton" and b ~= "RightButton" then
+			table.insert(rest, b)
+		end
+	end
+	local newOrder = { "LeftButton", "MiddleButton", "RightButton" }
+	for _, b in ipairs(rest) do
+		table.insert(newOrder, b)
+	end
+	Database.SetOrderedMouseButtons(newOrder)
+end
+
+function Database.ResetButtonAndModifierOrder()
+	Database.Set("customButtonOrder", DEFAULTS.customButtonOrder)
+	Database.Set("matrixVisibleButtons", DEFAULTS.matrixVisibleButtons)
+	Database.Set("customModifierOrder", DEFAULTS.customModifierOrder)
 end
 
 function Database.SetActivePresetName(name)
