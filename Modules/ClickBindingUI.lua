@@ -1205,7 +1205,7 @@ local function ApplyLineCompactMetrics(lineFrame)
 		if lineFrame.BCCEyeButton and lineFrame.BCCEyeButton:IsShown() then
 			lineFrame.BCCManaText:SetPoint("RIGHT", lineFrame.BCCEyeButton, "LEFT", -4, 0)
 		else
-			lineFrame.BCCManaText:SetPoint("RIGHT", lineFrame, "RIGHT", -(6 + delW + 4), topRowY)
+			lineFrame.BCCManaText:SetPoint("RIGHT", lineFrame, "RIGHT", -8, topRowY)
 		end
 	end
 end
@@ -1528,8 +1528,9 @@ local function UpdateLineEyeButton(lineFrame, elementData)
 	if not eyeBtn then
 		return
 	end
+	local hoverMode = Database.Get("unitHoverMode") or "off"
 	local info = elementData and not elementData.unbound and elementData.bindingInfo
-	if not info or not info.button then
+	if hoverMode == "off" or not info or not info.button then
 		eyeBtn:Hide()
 		return
 	end
@@ -1577,17 +1578,15 @@ local function ApplyRankToLine(lineFrame, elementData, subtext)
 		lineFrame.Icon:SetDesaturated(shouldDesaturate)
 	end
 
-	-- Live-Manakosten rechtsbündig links neben dem Augen-Button (exakt bündig mit dem Rang-Dropdown darunter)
+	-- Live-Manakosten rechtsbündig links neben dem Augen-Button (oder am rechten Zeilenrand, wenn das Hover-Overlay aus ist)
 	local topRowY = lineFrame._bccTopRowY or 9
-	local compact = Database.Get("compactListMode") and true or false
-	local delW = compact and 20 or 22
 	local eyeShown = (lineFrame.BCCEyeButton and lineFrame.BCCEyeButton:IsShown()) and true or false
 	if manaText then
 		manaText:ClearAllPoints()
 		if eyeShown then
 			manaText:SetPoint("RIGHT", lineFrame.BCCEyeButton, "LEFT", -4, 0)
 		else
-			manaText:SetPoint("RIGHT", lineFrame, "RIGHT", -(6 + delW + 4), topRowY)
+			manaText:SetPoint("RIGHT", lineFrame, "RIGHT", -8, topRowY)
 		end
 		local costStr = Database.Get("showLineManaCost") and SpellRanks.GetSpellPowerCostString(actionID) or nil
 		if costStr and costStr ~= "" then
