@@ -59,6 +59,7 @@ local function IsAnyModifierDown()
 	return (IsShiftKeyDown and IsShiftKeyDown())
 		or (IsControlKeyDown and IsControlKeyDown())
 		or (IsAltKeyDown and IsAltKeyDown())
+		or (IsMetaKeyDown and IsMetaKeyDown())
 		or false
 end
 

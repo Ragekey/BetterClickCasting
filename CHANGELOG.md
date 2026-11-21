@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.8.3] (2026-11-21)
+### Added
+- **macOS `Meta` (`Command`) Support in Free Keys Matrix (`5x5` / `12x5`, `/bcc keys meta`) & Hover Overlay:**
+  - Automatically expands the Free Keys Matrix on macOS (`IsMacClient()`) or whenever any active binding uses `META` from `4x5` (20 slots) to **`5x5` (25 slots: `Direct`, `Shift`, `Ctrl`, `Alt`, `Meta`)**, and in combinations mode from `8x5` (40 slots) to **`12x5` (60 slots, adding `Shift + Meta`, `Ctrl + Meta`, and `Alt + Meta` with compact row height)**.
+  - Added `/bcc keys meta [auto|on|off]` so players on any platform can toggle or preview the `Meta` rows at any time.
+  - Extended `UnitHoverTooltip` (`IsAnyModifierDown`) with `IsMetaKeyDown()` so the Unit Frame Hover Overlay triggers when holding the `Command (META)` key on macOS in *"Modifier Only"* mode.
+
+### Fixed
+- **macOS `ALT + META` / `SHIFT + META` / `CTRL + META` Modifier Collision:** Fixed `Constants.GetModifierSortInfo` ignoring `"META"`, which previously caused two-modifier combinations with `META` (such as `ALT + META`) to receive the same sort index as single modifiers (`ALT`) and overwrite the single-modifier cell in the Free Keys Matrix. All 16 `SHIFT / CTRL / ALT / META` combinations now have distinct, collision-free sort orders (`1..16`, verified by `/bcc debug deep`).
+- **Single-Line Modifier Labels in Free Keys Matrix:** Widened the left modifier label column in the Free Keys Matrix (`84 px`) so multi-modifier labels (`Shift + Meta`, `Shift + Ctrl`, `Mayús + Ctrl`, `Mayús + Meta`) always render on a single line without wrapping, and disambiguated Spanish `Mayús+C+A` from `Meta`.
+
 ## [0.8.2] (2026-11-15)
 ### Added
 - **Full Gamepad (Beta) Standby Mode & Failsafe Info Badge (`SetPreferredGamepadInteractTarget` Protection):**

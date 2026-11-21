@@ -2434,14 +2434,18 @@ local MATRIX_COLUMNS = {
 }
 
 local MATRIX_MOD_ROWS = {
-	{ modOrder = 1, shortPrefix = "", labelKey = "MATRIX_ROW_DIRECT", fallback = "Direct", isCombo = false },
-	{ modOrder = 2, shortPrefix = "S-", labelKey = "MATRIX_ROW_SHIFT", fallback = "Shift", isCombo = false },
-	{ modOrder = 3, shortPrefix = "C-", labelKey = "MATRIX_ROW_CTRL", fallback = "Ctrl", isCombo = false },
-	{ modOrder = 4, shortPrefix = "A-", labelKey = "MATRIX_ROW_ALT", fallback = "Alt", isCombo = false },
-	{ modOrder = 5, shortPrefix = "SC-", labelKey = "MATRIX_ROW_SHIFT_CTRL", fallback = "Shift + Ctrl", isCombo = true },
-	{ modOrder = 6, shortPrefix = "SA-", labelKey = "MATRIX_ROW_SHIFT_ALT", fallback = "Shift + Alt", isCombo = true },
-	{ modOrder = 7, shortPrefix = "CA-", labelKey = "MATRIX_ROW_CTRL_ALT", fallback = "Ctrl + Alt", isCombo = true },
-	{ modOrder = 8, shortPrefix = "SCA-", labelKey = "MATRIX_ROW_SHIFT_CTRL_ALT", fallback = "Shift + Ctrl + Alt", isCombo = true },
+	{ modOrder = 1, shortPrefix = "", labelKey = "MATRIX_ROW_DIRECT", fallback = "Direct", isCombo = false, isMeta = false },
+	{ modOrder = 2, shortPrefix = "S-", labelKey = "MATRIX_ROW_SHIFT", fallback = "Shift", isCombo = false, isMeta = false },
+	{ modOrder = 3, shortPrefix = "C-", labelKey = "MATRIX_ROW_CTRL", fallback = "Ctrl", isCombo = false, isMeta = false },
+	{ modOrder = 4, shortPrefix = "A-", labelKey = "MATRIX_ROW_ALT", fallback = "Alt", isCombo = false, isMeta = false },
+	{ modOrder = 5, shortPrefix = "M-", labelKey = "MATRIX_ROW_META", fallback = "Meta", isCombo = false, isMeta = true },
+	{ modOrder = 6, shortPrefix = "SC-", labelKey = "MATRIX_ROW_SHIFT_CTRL", fallback = "Shift + Ctrl", isCombo = true, isMeta = false },
+	{ modOrder = 7, shortPrefix = "SA-", labelKey = "MATRIX_ROW_SHIFT_ALT", fallback = "Shift + Alt", isCombo = true, isMeta = false },
+	{ modOrder = 8, shortPrefix = "CA-", labelKey = "MATRIX_ROW_CTRL_ALT", fallback = "Ctrl + Alt", isCombo = true, isMeta = false },
+	{ modOrder = 9, shortPrefix = "SM-", labelKey = "MATRIX_ROW_SHIFT_META", fallback = "Shift + Meta", isCombo = true, isMeta = true },
+	{ modOrder = 10, shortPrefix = "CM-", labelKey = "MATRIX_ROW_CTRL_META", fallback = "Ctrl + Meta", isCombo = true, isMeta = true },
+	{ modOrder = 11, shortPrefix = "AM-", labelKey = "MATRIX_ROW_ALT_META", fallback = "Alt + Meta", isCombo = true, isMeta = true },
+	{ modOrder = 12, shortPrefix = "SCA-", labelKey = "MATRIX_ROW_SHIFT_CTRL_ALT", fallback = "Shift + Ctrl + Alt", isCombo = true, isMeta = false },
 }
 
 local function NormalizeMatrixButton(buttonName)
@@ -2476,10 +2480,31 @@ local function CollectCurrentActiveBindings()
 	return bindings
 end
 
+-- Ermittelt, ob die Matrix die macOS-Meta-(Cmd)-Zeilen anzeigen soll (automatisch auf macOS
+-- oder sobald mindestens eine aktive Belegung META nutzt, sowie manuell per /bcc keys meta).
+function ClickBindingUI.IsMatrixMetaActive(bindings)
+	local mode = Database.Get("matrixMetaMode") or "auto"
+	if mode == "on" then
+		return true
+	elseif mode == "off" then
+		return false
+	end
+	if IsMacClient and IsMacClient() then
+		return true
+	end
+	bindings = bindings or CollectCurrentActiveBindings()
+	for _, info in ipairs(bindings) do
+		if info and Constants.HasMetaModifier and Constants.HasMetaModifier(info.modifiers) then
+			return true
+		end
+	end
+	return false
+end
+
 function ClickBindingUI.GetFreeKeysSummaryList(bindings)
 	bindings = bindings or CollectCurrentActiveBindings()
 	local includeCombos = Database.Get("matrixShowCombos") and true or false
-	local maxRowCount = includeCombos and 8 or 4
+	local showMeta = ClickBindingUI.IsMatrixMetaActive(bindings)
 	local lookup = {}
 	for _, info in ipairs(bindings) do
 		if info and info.button then
@@ -2490,9 +2515,8 @@ function ClickBindingUI.GetFreeKeysSummaryList(bindings)
 	end
 
 	local freeList = {}
-	for rIdx = 1, maxRowCount do
-		local row = MATRIX_MOD_ROWS[rIdx]
-		if row then
+	for _, row in ipairs(MATRIX_MOD_ROWS) do
+		if (showMeta or not row.isMeta) and (includeCombos or not row.isCombo) then
 			for _, col in ipairs(MATRIX_COLUMNS) do
 				local key = tostring(row.modOrder) .. ":" .. col.button
 				if not lookup[key] then
@@ -2638,7 +2662,7 @@ local function EnsureFreeKeysMatrixFrame()
 	end
 
 	local f = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
-	f:SetSize(560, 320)
+	f:SetSize(586, 320)
 	f:SetFrameStrata("MEDIUM")
 	f:SetToplevel(true)
 	f:SetFrameLevel(20)
@@ -2711,7 +2735,7 @@ local function EnsureFreeKeysMatrixFrame()
 		f:Hide()
 	end)
 
-	local colStartX = 82
+	local colStartX = 104
 	local colW = 90
 	local colGap = 4
 	local rowStartY = -64
@@ -2735,8 +2759,9 @@ local function EnsureFreeKeysMatrixFrame()
 		local y = rowStartY - ((rIdx - 1) * (rowH + rowGap))
 		local rHdr = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
 		rHdr:SetPoint("TOPLEFT", f, "TOPLEFT", 16, y - 14)
-		rHdr:SetWidth(62)
+		rHdr:SetWidth(84)
 		rHdr:SetJustifyH("LEFT")
+		rHdr:SetWordWrap(false)
 		rHdr.labelKey = row.labelKey
 		rHdr.fallback = row.fallback
 		f.RowHeaders[rIdx] = rHdr
@@ -2861,16 +2886,46 @@ function ClickBindingUI.RefreshFreeKeysMatrix()
 		return
 	end
 	local f = freeKeysMatrixFrame
+	local bindings = CollectCurrentActiveBindings()
 	local showCombos = Database.Get("matrixShowCombos") and true or false
-	local activeRowCount = showCombos and 8 or 4
+	local showMeta = ClickBindingUI.IsMatrixMetaActive(bindings)
 
-	f.Title:SetText(showCombos and L["MATRIX_POPUP_TITLE_EXPANDED"] or L["MATRIX_POPUP_TITLE"])
-	f:SetSize(560, showCombos and 512 or 320)
+	local visibleRows = {}
+	local activeModOrders = {}
+	for rIdx, row in ipairs(MATRIX_MOD_ROWS) do
+		if (showMeta or not row.isMeta) and (showCombos or not row.isCombo) then
+			table.insert(visibleRows, { rIdx = rIdx, row = row })
+			activeModOrders[row.modOrder] = true
+		end
+	end
+	local activeRowCount = #visibleRows
+
+	local titleKey = "MATRIX_POPUP_TITLE"
+	if showMeta and showCombos then
+		titleKey = "MATRIX_POPUP_TITLE_META_EXPANDED"
+	elseif showMeta then
+		titleKey = "MATRIX_POPUP_TITLE_META"
+	elseif showCombos then
+		titleKey = "MATRIX_POPUP_TITLE_EXPANDED"
+	end
+	f.Title:SetText(L[titleKey] or L["MATRIX_POPUP_TITLE"])
+
+	local isCompactGrid = activeRowCount > 8
+	local colStartX = 104
+	local colW = 90
+	local colGap = 4
+	local rowStartY = -64
+	local rowH = isCompactGrid and 34 or 44
+	local rowGap = isCompactGrid and 3 or 4
+	local iconSize = isCompactGrid and 20 or 22
+	local windowH = 128 + (activeRowCount * (rowH + rowGap))
+	f:SetSize(586, windowH)
 
 	if f.ComboCheckbox then
 		f.ComboCheckbox:SetChecked(showCombos)
 		if f.ComboCheckbox.Label then
-			f.ComboCheckbox.Label:SetText(L["MATRIX_SHOW_COMBOS_CHECKBOX"])
+			local cbKey = showMeta and "MATRIX_SHOW_COMBOS_META_CHECKBOX" or "MATRIX_SHOW_COMBOS_CHECKBOX"
+			f.ComboCheckbox.Label:SetText(L[cbKey] or L["MATRIX_SHOW_COMBOS_CHECKBOX"])
 		end
 	end
 	if f.AutoOpenCheckbox then
@@ -2880,7 +2935,6 @@ function ClickBindingUI.RefreshFreeKeysMatrix()
 		end
 	end
 
-	local bindings = CollectCurrentActiveBindings()
 	local lookup = {}
 	local extraList = {}
 
@@ -2896,7 +2950,7 @@ function ClickBindingUI.RefreshFreeKeysMatrix()
 		if info and info.button then
 			local modOrder = Constants.GetModifierSortInfo(info.modifiers)
 			local normBtn = NormalizeMatrixButton(info.button)
-			if modOrder >= 1 and modOrder <= activeRowCount and knownCols[normBtn] then
+			if activeModOrders[modOrder] and knownCols[normBtn] then
 				lookup[tostring(modOrder) .. ":" .. tostring(normBtn)] = info
 			else
 				local shortBind = Constants.GetShortBindingString(info) or "?"
@@ -2911,11 +2965,20 @@ function ClickBindingUI.RefreshFreeKeysMatrix()
 	local boundCount = 0
 	local totalSlots = activeRowCount * #MATRIX_COLUMNS
 
+	local visibleIndexByRIdx = {}
+	for vIdx, item in ipairs(visibleRows) do
+		visibleIndexByRIdx[item.rIdx] = vIdx
+	end
+
 	for rIdx, row in ipairs(MATRIX_MOD_ROWS) do
-		local isRowVisible = rIdx <= activeRowCount
+		local vIdx = visibleIndexByRIdx[rIdx]
+		local isRowVisible = (vIdx ~= nil)
+		local y = isRowVisible and (rowStartY - ((vIdx - 1) * (rowH + rowGap))) or 0
 		local rHdr = f.RowHeaders[rIdx]
 		if rHdr then
 			if isRowVisible then
+				rHdr:ClearAllPoints()
+				rHdr:SetPoint("TOPLEFT", f, "TOPLEFT", 16, y - math.floor((rowH - 12) / 2))
 				rHdr:SetText("|cffb8d8ff" .. (L[row.labelKey] or row.fallback) .. "|r")
 				rHdr:Show()
 			else
@@ -2927,6 +2990,11 @@ function ClickBindingUI.RefreshFreeKeysMatrix()
 			if not isRowVisible then
 				cell:Hide()
 			else
+				local x = colStartX + ((cIdx - 1) * (colW + colGap))
+				cell:ClearAllPoints()
+				cell:SetPoint("TOPLEFT", f, "TOPLEFT", x, y)
+				cell:SetSize(colW, rowH)
+				cell.Icon:SetSize(iconSize, iconSize)
 				cell:Show()
 				local key = tostring(row.modOrder) .. ":" .. col.button
 				local info = lookup[key]
@@ -3979,6 +4047,38 @@ local function RunDeepStressSelfTest(findings, infoNotes)
 	local freeKeys = ClickBindingUI.GetFreeKeysSummaryList and ClickBindingUI.GetFreeKeysSummaryList() or {}
 	table.insert(infoNotes, string.format("DeepTest SpellRanks: %d spell group(s), %d rank entry(s), %d pending smart update(s), %d free slot(s)", groupCount, entryCount, #pendingUpdates, #freeKeys))
 
+	-- 3b. Modifier-Sortierung inkl. macOS-META (alle 16 Kombinationen auf Kollisionsfreiheit prüfen)
+	local modTestCases = {
+		{ str = "", expected = 1 },
+		{ str = "SHIFT", expected = 2 },
+		{ str = "CTRL", expected = 3 },
+		{ str = "ALT", expected = 4 },
+		{ str = "META", expected = 5 },
+		{ str = "SHIFT-CTRL", expected = 6 },
+		{ str = "SHIFT-ALT", expected = 7 },
+		{ str = "CTRL-ALT", expected = 8 },
+		{ str = "SHIFT-META", expected = 9 },
+		{ str = "CTRL-META", expected = 10 },
+		{ str = "ALT-META", expected = 11 },
+		{ str = "SHIFT-CTRL-ALT", expected = 12 },
+		{ str = "SHIFT-CTRL-META", expected = 13 },
+		{ str = "SHIFT-ALT-META", expected = 14 },
+		{ str = "CTRL-ALT-META", expected = 15 },
+		{ str = "SHIFT-CTRL-ALT-META", expected = 16 },
+	}
+	local modPassCount = 0
+	for _, tc in ipairs(modTestCases) do
+		local gotOrder = Constants.GetModifierSortInfo(tc.str)
+		if gotOrder ~= tc.expected then
+			table.insert(findings, string.format("DeepTest Modifier order mismatch for '%s': expected=%d, got=%s", tc.str, tc.expected, tostring(gotOrder)))
+		else
+			modPassCount = modPassCount + 1
+		end
+	end
+	if modPassCount == #modTestCases then
+		table.insert(infoNotes, string.format("DeepTest Modifiers (incl. macOS META): %d/%d combinations verified collision-free", modPassCount, #modTestCases))
+	end
+
 	-- 4. UI-Lebenszyklus-Kette (nur außerhalb des Kampfes und im MKB-Modus)
 	if InCombatLockdown and InCombatLockdown() then
 		table.insert(infoNotes, "DeepTest UI lifecycle skipped (InCombatLockdown active)")
@@ -3989,6 +4089,7 @@ local function RunDeepStressSelfTest(findings, infoNotes)
 		local origGrouping = Database.Get("groupingMode")
 		local origCompact = Database.Get("compactListMode")
 		local origCombos = Database.Get("matrixShowCombos")
+		local origMetaMode = Database.Get("matrixMetaMode")
 		local wasCBShown = ClickBindingFrame and ClickBindingFrame:IsShown() or false
 		local wasSettingsShown = _G.BetterClickCastingSettingsFrame and _G.BetterClickCastingSettingsFrame:IsShown() or false
 		local wasMatrixShown = freeKeysMatrixFrame and freeKeysMatrixFrame:IsShown() or false
@@ -4018,10 +4119,14 @@ local function RunDeepStressSelfTest(findings, infoNotes)
 		end
 
 		ClickBindingUI.ShowFreeKeysMatrix()
-		Database.Set("matrixShowCombos", true)
-		ClickBindingUI.RefreshFreeKeysMatrix()
-		Database.Set("matrixShowCombos", false)
-		ClickBindingUI.RefreshFreeKeysMatrix()
+		for _, metaMode in ipairs({ "off", "on" }) do
+			Database.Set("matrixMetaMode", metaMode)
+			Database.Set("matrixShowCombos", false)
+			ClickBindingUI.RefreshFreeKeysMatrix()
+			Database.Set("matrixShowCombos", true)
+			ClickBindingUI.RefreshFreeKeysMatrix()
+		end
+		Database.Set("matrixMetaMode", origMetaMode)
 		Database.Set("matrixShowCombos", origCombos)
 		ClickBindingUI.RefreshFreeKeysMatrix()
 
@@ -4039,7 +4144,7 @@ local function RunDeepStressSelfTest(findings, infoNotes)
 		if not wasCBShown and ClickBindingFrame and ClickBindingFrame:IsShown() and ns.MinimapButton and ns.MinimapButton.ToggleClickCastingWindow then
 			ns.MinimapButton.ToggleClickCastingWindow()
 		end
-		table.insert(infoNotes, "DeepTest UI lifecycle: ClickBindingFrame (4 group modes + compact toggle), SettingsUI (Tabs 1-4), Matrix (4x5/8x5) & Overlays cycled OK")
+		table.insert(infoNotes, "DeepTest UI lifecycle: ClickBindingFrame (4 group modes + compact toggle), SettingsUI (Tabs 1-4), Matrix (4x5/8x5/5x5/12x5) & Overlays cycled OK")
 	end
 end
 

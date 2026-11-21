@@ -4,7 +4,7 @@ local Constants = {}
 ns.Constants = Constants
 
 Constants.ADDON_NAME = addonName or "BetterClickCasting"
-Constants.VERSION = "0.8.2"
+Constants.VERSION = "0.8.3"
 -- Nativer gemipmappter Blizzard-Atlas aus Blizzard_ClickBindingUI.lua
 Constants.ICON_ATLAS = "clickcast-icon-mouse"
 
@@ -68,23 +68,42 @@ function Constants.GetButtonSortOrder(buttonName)
 	return 100
 end
 
-function Constants.GetModifierSortInfo(modifiers)
-	modifiers = modifiers or 0
-	if modifiers == 0 or not GetStringFromModifiers then
-		return 1, ""
+function Constants.HasMetaModifier(modifiers)
+	if not modifiers then
+		return false
 	end
-	local modStr = GetStringFromModifiers(modifiers) or ""
+	local modStr = ""
+	if type(modifiers) == "string" then
+		modStr = modifiers
+	elseif type(modifiers) == "number" and modifiers ~= 0 and GetStringFromModifiers then
+		modStr = GetStringFromModifiers(modifiers) or ""
+	end
+	if modStr == "" then
+		return false
+	end
+	local upper = string.upper(modStr)
+	return (string.find(upper, "META") ~= nil) or (string.find(upper, "CMD") ~= nil)
+end
+
+function Constants.GetModifierSortInfo(modifiers)
+	local modStr = ""
+	if type(modifiers) == "string" then
+		modStr = modifiers
+	elseif type(modifiers) == "number" and modifiers ~= 0 and GetStringFromModifiers then
+		modStr = GetStringFromModifiers(modifiers) or ""
+	end
 	if modStr == "" then
 		return 1, ""
 	end
 
 	local upper = string.upper(modStr)
-	local hasShift = string.find(upper, "SHIFT") ~= nil
+	local hasShift = (string.find(upper, "SHIFT") ~= nil) or (string.find(upper, "MAY") ~= nil)
 	local hasCtrl = (string.find(upper, "CTRL") ~= nil) or (string.find(upper, "STRG") ~= nil)
 	local hasAlt = string.find(upper, "ALT") ~= nil
+	local hasMeta = (string.find(upper, "META") ~= nil) or (string.find(upper, "CMD") ~= nil)
 
-	local count = (hasShift and 1 or 0) + (hasCtrl and 1 or 0) + (hasAlt and 1 or 0)
-	local order = 9
+	local count = (hasShift and 1 or 0) + (hasCtrl and 1 or 0) + (hasAlt and 1 or 0) + (hasMeta and 1 or 0)
+	local order = 99
 	if count == 1 then
 		if hasShift then
 			order = 2
@@ -92,17 +111,35 @@ function Constants.GetModifierSortInfo(modifiers)
 			order = 3
 		elseif hasAlt then
 			order = 4
+		elseif hasMeta then
+			order = 5
 		end
 	elseif count == 2 then
 		if hasShift and hasCtrl then
-			order = 5
-		elseif hasShift and hasAlt then
 			order = 6
-		elseif hasCtrl and hasAlt then
+		elseif hasShift and hasAlt then
 			order = 7
+		elseif hasCtrl and hasAlt then
+			order = 8
+		elseif hasShift and hasMeta then
+			order = 9
+		elseif hasCtrl and hasMeta then
+			order = 10
+		elseif hasAlt and hasMeta then
+			order = 11
 		end
-	elseif count >= 3 then
-		order = 8
+	elseif count == 3 then
+		if hasShift and hasCtrl and hasAlt then
+			order = 12
+		elseif hasShift and hasCtrl and hasMeta then
+			order = 13
+		elseif hasShift and hasAlt and hasMeta then
+			order = 14
+		elseif hasCtrl and hasAlt and hasMeta then
+			order = 15
+		end
+	elseif count >= 4 then
+		order = 16
 	end
 
 	-- Schön formatierter Modifier-String (z. B. "SHIFT + ALT" statt "SHIFT-ALT")

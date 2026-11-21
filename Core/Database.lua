@@ -14,6 +14,7 @@ local DEFAULTS = {
 	compactListMode = true,
 	matrixShowCombos = false,
 	matrixAutoOpen = false,
+	matrixMetaMode = "auto", -- "auto", "on", "off"
 	groupingMode = "modifier", -- "modifier", "button", "type", "none"
 	quickBindSpellbook = true,
 	showSpellbookBadges = true,
