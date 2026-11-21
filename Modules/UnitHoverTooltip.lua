@@ -233,7 +233,6 @@ end
 
 local function CollectBindingsForModifier(modMask)
 	local list = {}
-	local includeInteractions = Database.Get("unitHoverShowInteractions") and true or false
 
 	local function TryAddBinding(bindingInfo)
 		if not bindingInfo or not bindingInfo.button then
@@ -243,7 +242,7 @@ local function CollectBindingsForModifier(modMask)
 		if bindMod ~= modMask then
 			return
 		end
-		if Enum and Enum.ClickBindingType and bindingInfo.type == Enum.ClickBindingType.Interaction and not includeInteractions then
+		if Database.IsBindingHiddenInHover and Database.IsBindingHiddenInHover(bindingInfo) then
 			return
 		end
 		table.insert(list, bindingInfo)

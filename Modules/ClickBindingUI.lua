@@ -1191,9 +1191,22 @@ local function ApplyLineCompactMetrics(lineFrame)
 			lineFrame.BCCRankButton:SetPoint("RIGHT", lineFrame, "RIGHT", -6, bottomRowY)
 		end
 	end
+	if lineFrame.BCCEyeButton then
+		lineFrame.BCCEyeButton:SetSize(delW, btnH)
+		lineFrame.BCCEyeButton:ClearAllPoints()
+		lineFrame.BCCEyeButton:SetPoint("RIGHT", lineFrame, "RIGHT", -6, topRowY)
+		if lineFrame.BCCEyeButton.Icon then
+			local eyeIconSz = compact and 12 or 14
+			lineFrame.BCCEyeButton.Icon:SetSize(eyeIconSz, eyeIconSz)
+		end
+	end
 	if lineFrame.BCCManaText then
 		lineFrame.BCCManaText:ClearAllPoints()
-		lineFrame.BCCManaText:SetPoint("RIGHT", lineFrame, "RIGHT", -8, topRowY)
+		if lineFrame.BCCEyeButton and lineFrame.BCCEyeButton:IsShown() then
+			lineFrame.BCCManaText:SetPoint("RIGHT", lineFrame.BCCEyeButton, "LEFT", -4, 0)
+		else
+			lineFrame.BCCManaText:SetPoint("RIGHT", lineFrame, "RIGHT", -8, topRowY)
+		end
 	end
 end
 
@@ -1386,9 +1399,155 @@ local function EnsureLineManaText(lineFrame)
 	return manaFS
 end
 
+local function ApplyEyeButtonVisualState(eyeBtn, isHidden)
+	if not eyeBtn then
+		return
+	end
+	if isHidden then
+		eyeBtn:SetAlpha(0.28)
+		if eyeBtn.Icon then
+			eyeBtn.Icon:SetDesaturated(true)
+			eyeBtn.Icon:SetVertexColor(0.65, 0.65, 0.65)
+		end
+	else
+		eyeBtn:SetAlpha(1.0)
+		if eyeBtn.Icon then
+			eyeBtn.Icon:SetDesaturated(false)
+			eyeBtn.Icon:SetVertexColor(0.55, 0.90, 1.0)
+		end
+	end
+end
+
+local function ShowEyeButtonTooltip(eyeBtn, lineFrame)
+	if not eyeBtn or not lineFrame or not GameTooltip then
+		return
+	end
+	local elementData = lineFrame.GetElementData and lineFrame:GetElementData()
+	local info = elementData and elementData.bindingInfo
+	local isHidden = (info and Database.IsBindingHiddenInHover and Database.IsBindingHiddenInHover(info)) and true or false
+
+	GameTooltip:SetOwner(eyeBtn, "ANCHOR_RIGHT")
+	GameTooltip_SetTitle(GameTooltip, L["HOVER_EYE_TOOLTIP_TITLE"])
+	GameTooltip:AddLine(isHidden and L["HOVER_EYE_STATUS_HIDDEN"] or L["HOVER_EYE_STATUS_VISIBLE"], 1, 1, 1, true)
+	GameTooltip:AddLine(" ")
+	GameTooltip:AddLine(L["HOVER_EYE_TOOLTIP_HINT"], 0.75, 0.85, 1.0, true)
+	GameTooltip:Show()
+end
+
+local function EnsureLineEyeButton(lineFrame)
+	if lineFrame.BCCEyeButton then
+		if not Constants.IsGamepadUIActive() and lineFrame.BCCEyeButton:GetParent() ~= lineFrame then
+			lineFrame.BCCEyeButton:SetParent(lineFrame)
+			ApplyLineCompactMetrics(lineFrame)
+		end
+		return lineFrame.BCCEyeButton
+	end
+
+	local compact = Database.Get("compactListMode") and true or false
+	local btnW = compact and 20 or 22
+	local btnH = compact and 15 or 18
+	local iconSz = compact and 12 or 14
+
+	local btn = CreateFrame("Button", nil, lineFrame)
+	btn:SetSize(btnW, btnH)
+	btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+
+	-- Freistehendes Augen-Icon ohne Pill-Kasten (Option A), damit zwischen oberer Textzeile
+	-- und unterem DeleteButton ("X") keine Kasten-auf-Kasten-Quetschung entsteht.
+	local icon = btn:CreateTexture(nil, "ARTWORK")
+	icon:SetAtlas("friends-icon-eye")
+	icon:SetSize(iconSz, iconSz)
+	icon:SetPoint("CENTER", btn, "CENTER", 0, 0)
+	btn.Icon = icon
+
+	local hl = btn:CreateTexture(nil, "HIGHLIGHT")
+	hl:SetAtlas("friends-icon-eye")
+	hl:SetBlendMode("ADD")
+	hl:SetAlpha(0.45)
+	hl:SetAllPoints(icon)
+	btn.Highlight = hl
+
+	btn:SetScript("OnMouseDown", function(self)
+		if self.Icon then
+			self.Icon:SetPoint("CENTER", self, "CENTER", 1, -1)
+		end
+	end)
+	btn:SetScript("OnMouseUp", function(self)
+		if self.Icon then
+			self.Icon:SetPoint("CENTER", self, "CENTER", 0, 0)
+		end
+	end)
+	btn:SetScript("OnClick", function(self)
+		local elementData = lineFrame.GetElementData and lineFrame:GetElementData()
+		local info = elementData and not elementData.unbound and elementData.bindingInfo
+		if not info or not info.button or not Database.ToggleBindingHiddenInHover then
+			return
+		end
+		PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
+		local isNowHidden = Database.ToggleBindingHiddenInHover(info)
+		ApplyEyeButtonVisualState(self, isNowHidden)
+		if GameTooltip and GameTooltip:IsOwned(self) then
+			ShowEyeButtonTooltip(self, lineFrame)
+		end
+	end)
+	btn:SetScript("OnEnter", function(self)
+		if lineFrame.DeleteButton and ShouldShowDeleteButton(lineFrame) then
+			lineFrame.DeleteButton:Show()
+		end
+		ShowEyeButtonTooltip(self, lineFrame)
+	end)
+	btn:SetScript("OnLeave", function()
+		if GameTooltip then
+			GameTooltip:Hide()
+		end
+		if lineFrame:IsMouseMotionFocus() then
+			ClickBindingUI.ShowLineTooltip(lineFrame)
+		end
+		if lineFrame.DeleteButton and ShouldShowDeleteButton(lineFrame) then
+			lineFrame.DeleteButton:Show()
+		end
+	end)
+
+	btn:Hide()
+	lineFrame.BCCEyeButton = btn
+	return btn
+end
+
+local function UpdateLineEyeButton(lineFrame, elementData)
+	if not lineFrame then
+		return
+	end
+	if Constants.IsGamepadUIActive() then
+		if lineFrame.BCCEyeButton then
+			lineFrame.BCCEyeButton:Hide()
+			lineFrame.BCCEyeButton:SetParent(nil)
+		end
+		return
+	end
+	local eyeBtn = EnsureLineEyeButton(lineFrame)
+	if not eyeBtn then
+		return
+	end
+	local hoverMode = Database.Get("unitHoverMode") or "off"
+	local info = elementData and not elementData.unbound and elementData.bindingInfo
+	if hoverMode == "off" or not info or not info.button then
+		eyeBtn:Hide()
+		return
+	end
+
+	local topRowY = lineFrame._bccTopRowY or 9
+	eyeBtn:ClearAllPoints()
+	eyeBtn:SetPoint("RIGHT", lineFrame, "RIGHT", -6, topRowY)
+
+	local isHidden = Database.IsBindingHiddenInHover and Database.IsBindingHiddenInHover(info) or false
+	ApplyEyeButtonVisualState(eyeBtn, isHidden)
+	eyeBtn:Show()
+end
+
 local function ApplyRankToLine(lineFrame, elementData, subtext)
 	local rankBtn = EnsureLineRankButton(lineFrame)
 	local manaText = EnsureLineManaText(lineFrame)
+	UpdateLineEyeButton(lineFrame, elementData)
 
 	if not elementData or not elementData.bindingInfo or not Constants.IsSpellOrPetBinding(elementData.bindingInfo) then
 		if rankBtn then
@@ -1419,11 +1578,16 @@ local function ApplyRankToLine(lineFrame, elementData, subtext)
 		lineFrame.Icon:SetDesaturated(shouldDesaturate)
 	end
 
-	-- Live-Manakosten rechtsbündig in Zeile 1 einblenden (Option 1A)
+	-- Live-Manakosten rechtsbündig links neben dem Augen-Button (oder am rechten Zeilenrand, wenn das Hover-Overlay aus ist)
 	local topRowY = lineFrame._bccTopRowY or 9
+	local eyeShown = (lineFrame.BCCEyeButton and lineFrame.BCCEyeButton:IsShown()) and true or false
 	if manaText then
 		manaText:ClearAllPoints()
-		manaText:SetPoint("RIGHT", lineFrame, "RIGHT", -8, topRowY)
+		if eyeShown then
+			manaText:SetPoint("RIGHT", lineFrame.BCCEyeButton, "LEFT", -4, 0)
+		else
+			manaText:SetPoint("RIGHT", lineFrame, "RIGHT", -8, topRowY)
+		end
 		local costStr = Database.Get("showLineManaCost") and SpellRanks.GetSpellPowerCostString(actionID) or nil
 		if costStr and costStr ~= "" then
 			if isDisabled or not isLearned then
@@ -1442,7 +1606,11 @@ local function ApplyRankToLine(lineFrame, elementData, subtext)
 			if lineFrame.Name and lineFrame.Icon then
 				lineFrame.Name:ClearAllPoints()
 				lineFrame.Name:SetPoint("LEFT", lineFrame.Icon, "RIGHT", 5, topRowY)
-				lineFrame.Name:SetPoint("RIGHT", lineFrame, "RIGHT", -8, topRowY)
+				if eyeShown then
+					lineFrame.Name:SetPoint("RIGHT", lineFrame.BCCEyeButton, "LEFT", -6, 0)
+				else
+					lineFrame.Name:SetPoint("RIGHT", lineFrame, "RIGHT", -8, topRowY)
+				end
 			end
 		end
 	end
@@ -1481,6 +1649,7 @@ local function ApplyRankToLine(lineFrame, elementData, subtext)
 				rankBtn:Hide()
 			end
 		end
+		UpdateLineEyeButton(lineFrame, elementData)
 		return
 	end
 
@@ -1488,6 +1657,7 @@ local function ApplyRankToLine(lineFrame, elementData, subtext)
 		if rankBtn then
 			rankBtn:Hide()
 		end
+		UpdateLineEyeButton(lineFrame, elementData)
 		return
 	end
 
@@ -1563,6 +1733,7 @@ local function ApplyRankToLine(lineFrame, elementData, subtext)
 			rankBtn:Hide()
 		end
 	end
+	UpdateLineEyeButton(lineFrame, elementData)
 end
 
 function ClickBindingUI.UpdateLineWithRank(lineFrame, elementData)
@@ -1573,6 +1744,10 @@ function ClickBindingUI.UpdateLineWithRank(lineFrame, elementData)
 		if lineFrame.BCCRankButton then
 			lineFrame.BCCRankButton:Hide()
 			lineFrame.BCCRankButton:SetParent(nil)
+		end
+		if lineFrame.BCCEyeButton then
+			lineFrame.BCCEyeButton:Hide()
+			lineFrame.BCCEyeButton:SetParent(nil)
 		end
 		if lineFrame.BCCManaText then
 			lineFrame.BCCManaText:Hide()
@@ -1594,6 +1769,9 @@ function ClickBindingUI.UpdateLineWithRank(lineFrame, elementData)
 	if lineFrame.BCCRankButton then
 		lineFrame.BCCRankButton:Hide()
 	end
+	if lineFrame.BCCEyeButton then
+		lineFrame.BCCEyeButton:Hide()
+	end
 	if lineFrame.BCCManaText then
 		lineFrame.BCCManaText:Hide()
 	end
@@ -1608,11 +1786,18 @@ function ClickBindingUI.UpdateLineWithRank(lineFrame, elementData)
 	end
 
 	if not elementData or not elementData.bindingInfo or not Constants.IsSpellOrPetBinding(elementData.bindingInfo) then
+		UpdateLineEyeButton(lineFrame, elementData)
+		if lineFrame.Name and lineFrame.Icon and lineFrame.BCCEyeButton and lineFrame.BCCEyeButton:IsShown() then
+			lineFrame.Name:ClearAllPoints()
+			lineFrame.Name:SetPoint("LEFT", lineFrame.Icon, "RIGHT", 5, topRowY)
+			lineFrame.Name:SetPoint("RIGHT", lineFrame.BCCEyeButton, "LEFT", -6, 0)
+		end
 		return
 	end
 
 	local actionID = elementData.bindingInfo.actionID
 	if not actionID then
+		UpdateLineEyeButton(lineFrame, elementData)
 		return
 	end
 
@@ -1694,7 +1879,9 @@ local function HookLineFrame(lineFrame)
 			if self.DeleteButton and ShouldShowDeleteButton(self) then
 				self.DeleteButton:Show()
 			end
-			if self.BCCRankButton and self.BCCRankButton:IsMouseMotionFocus() then
+			if (self.BCCRankButton and self.BCCRankButton:IsMouseMotionFocus())
+				or (self.BCCEyeButton and self.BCCEyeButton:IsMouseMotionFocus())
+			then
 				return
 			end
 			if GameTooltip:GetOwner() == self then
@@ -2446,6 +2633,9 @@ local MATRIX_MOD_ROWS = {
 	{ modOrder = 10, shortPrefix = "CM-", labelKey = "MATRIX_ROW_CTRL_META", fallback = "Ctrl + Meta", isCombo = true, isMeta = true },
 	{ modOrder = 11, shortPrefix = "AM-", labelKey = "MATRIX_ROW_ALT_META", fallback = "Alt + Meta", isCombo = true, isMeta = true },
 	{ modOrder = 12, shortPrefix = "SCA-", labelKey = "MATRIX_ROW_SHIFT_CTRL_ALT", fallback = "Shift + Ctrl + Alt", isCombo = true, isMeta = false },
+	{ modOrder = 13, shortPrefix = "SCM-", labelKey = "MATRIX_ROW_SHIFT_CTRL_META", fallback = "S + C + M", isCombo = true, isMeta = true },
+	{ modOrder = 14, shortPrefix = "SAM-", labelKey = "MATRIX_ROW_SHIFT_ALT_META", fallback = "S + A + M", isCombo = true, isMeta = true },
+	{ modOrder = 15, shortPrefix = "CAM-", labelKey = "MATRIX_ROW_CTRL_ALT_META", fallback = "C + A + M", isCombo = true, isMeta = true },
 }
 
 local function NormalizeMatrixButton(buttonName)
@@ -2501,10 +2691,46 @@ function ClickBindingUI.IsMatrixMetaActive(bindings)
 	return false
 end
 
+function ClickBindingUI.GetMatrixModRowDefinitions()
+	return MATRIX_MOD_ROWS
+end
+
+function ClickBindingUI.GetOrderedMatrixModRows()
+	local byOrder = {}
+	for rIdx, row in ipairs(MATRIX_MOD_ROWS) do
+		byOrder[row.modOrder] = { rIdx = rIdx, row = row }
+	end
+	local orderedIDs = (Database.GetOrderedModifierIDs and Database.GetOrderedModifierIDs()) or {}
+	local out = {}
+	local seen = {}
+	for _, id in ipairs(orderedIDs) do
+		if byOrder[id] and not seen[id] then
+			seen[id] = true
+			table.insert(out, byOrder[id])
+		end
+	end
+	for rIdx, row in ipairs(MATRIX_MOD_ROWS) do
+		if not seen[row.modOrder] then
+			seen[row.modOrder] = true
+			table.insert(out, { rIdx = rIdx, row = row })
+		end
+	end
+	return out
+end
+
+local function GetCurrentMatrixColumns()
+	if Database.GetActiveMatrixColumns then
+		return Database.GetActiveMatrixColumns()
+	end
+	return MATRIX_COLUMNS
+end
+
 function ClickBindingUI.GetFreeKeysSummaryList(bindings)
 	bindings = bindings or CollectCurrentActiveBindings()
 	local includeCombos = Database.Get("matrixShowCombos") and true or false
 	local showMeta = ClickBindingUI.IsMatrixMetaActive(bindings)
+	local activeCols = GetCurrentMatrixColumns()
+	local orderedRows = ClickBindingUI.GetOrderedMatrixModRows()
 	local lookup = {}
 	for _, info in ipairs(bindings) do
 		if info and info.button then
@@ -2515,9 +2741,16 @@ function ClickBindingUI.GetFreeKeysSummaryList(bindings)
 	end
 
 	local freeList = {}
-	for _, row in ipairs(MATRIX_MOD_ROWS) do
-		if (showMeta or not row.isMeta) and (includeCombos or not row.isCombo) then
-			for _, col in ipairs(MATRIX_COLUMNS) do
+	for _, item in ipairs(orderedRows) do
+		local row = item.row
+		local isPinned
+		if Database.IsMatrixRowDefaultVisible then
+			isPinned = Database.IsMatrixRowDefaultVisible(row.modOrder)
+		else
+			isPinned = not row.isCombo
+		end
+		if (showMeta or not row.isMeta) and (includeCombos or isPinned) then
+			for _, col in ipairs(activeCols) do
 				local key = tostring(row.modOrder) .. ":" .. col.button
 				if not lookup[key] then
 					table.insert(freeList, row.shortPrefix .. col.short)
@@ -2753,7 +2986,17 @@ local function EnsureFreeKeysMatrixFrame()
 		f.ColHeaders[cIdx] = hdr
 	end
 
+	local pinHdr = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+	pinHdr:SetPoint("CENTER", f, "TOPLEFT", colStartX + (#MATRIX_COLUMNS * (colW + colGap)) + 20, -49)
+	pinHdr:SetWidth(56)
+	pinHdr:SetJustifyH("CENTER")
+	pinHdr:SetWordWrap(false)
+	pinHdr:SetText("|cff99ccff" .. (L["MATRIX_PIN_COL_HEADER"] or "Default") .. "|r")
+	pinHdr:Hide()
+	f.PinColHeader = pinHdr
+
 	f.RowHeaders = {}
+	f.RowPinChecks = {}
 	f.Cells = {}
 	for rIdx, row in ipairs(MATRIX_MOD_ROWS) do
 		local y = rowStartY - ((rIdx - 1) * (rowH + rowGap))
@@ -2765,6 +3008,28 @@ local function EnsureFreeKeysMatrixFrame()
 		rHdr.labelKey = row.labelKey
 		rHdr.fallback = row.fallback
 		f.RowHeaders[rIdx] = rHdr
+
+		local pinCb = CreateFrame("CheckButton", nil, f, "UICheckButtonTemplate")
+		pinCb:SetSize(22, 22)
+		pinCb.modOrder = row.modOrder
+		pinCb:SetScript("OnClick", function(self)
+			PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
+			if Database.SetMatrixRowDefaultVisible then
+				Database.SetMatrixRowDefaultVisible(self.modOrder, self:GetChecked() and true or false)
+			end
+			ClickBindingUI.RefreshFreeKeysMatrix()
+		end)
+		pinCb:SetScript("OnEnter", function(self)
+			GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+			GameTooltip_SetTitle(GameTooltip, L["MATRIX_PIN_ROW_TOOLTIP_TITLE"])
+			GameTooltip_AddNormalLine(GameTooltip, L["MATRIX_PIN_ROW_TOOLTIP_DESC"], true)
+			GameTooltip:Show()
+		end)
+		pinCb:SetScript("OnLeave", function()
+			GameTooltip:Hide()
+		end)
+		pinCb:Hide()
+		f.RowPinChecks[rIdx] = pinCb
 
 		f.Cells[rIdx] = {}
 		for cIdx, col in ipairs(MATRIX_COLUMNS) do
@@ -2848,7 +3113,7 @@ local function EnsureFreeKeysMatrixFrame()
 
 	local autoOpenCb = CreateFrame("CheckButton", nil, f, "UICheckButtonTemplate")
 	autoOpenCb:SetSize(24, 24)
-	autoOpenCb:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 324, 30)
+	autoOpenCb:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 282, 30)
 	local autoOpenLabel = autoOpenCb:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
 	autoOpenLabel:SetPoint("LEFT", autoOpenCb, "RIGHT", 4, 0)
 	autoOpenLabel:SetJustifyH("LEFT")
@@ -2869,6 +3134,26 @@ local function EnsureFreeKeysMatrixFrame()
 	end)
 	f.AutoOpenCheckbox = autoOpenCb
 
+	local reorderBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+	reorderBtn:SetSize(96, 22)
+	reorderBtn:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -16, 31)
+	reorderBtn:SetScript("OnClick", function()
+		PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
+		if ns.SettingsUI and ns.SettingsUI.ToggleReorderWindow then
+			ns.SettingsUI.ToggleReorderWindow()
+		end
+	end)
+	reorderBtn:SetScript("OnEnter", function(self)
+		GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+		GameTooltip_SetTitle(GameTooltip, L["REORDER_WINDOW_TITLE"])
+		GameTooltip_AddNormalLine(GameTooltip, L["SETTINGS_REORDER_DESC"], true)
+		GameTooltip:Show()
+	end)
+	reorderBtn:SetScript("OnLeave", function()
+		GameTooltip:Hide()
+	end)
+	f.ReorderBtn = reorderBtn
+
 	local extraText = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
 	extraText:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 16, 12)
 	extraText:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -16, 12)
@@ -2881,6 +3166,78 @@ local function EnsureFreeKeysMatrixFrame()
 	return f
 end
 
+local function EnsureMatrixColHeader(f, cIdx)
+	if not f.ColHeaders then
+		f.ColHeaders = {}
+	end
+	if f.ColHeaders[cIdx] then
+		return f.ColHeaders[cIdx]
+	end
+	local hdr = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+	hdr:SetWidth(90)
+	hdr:SetJustifyH("CENTER")
+	f.ColHeaders[cIdx] = hdr
+	return hdr
+end
+
+local function EnsureMatrixCell(f, rIdx, cIdx)
+	if not f.Cells[rIdx] then
+		f.Cells[rIdx] = {}
+	end
+	if f.Cells[rIdx][cIdx] then
+		return f.Cells[rIdx][cIdx]
+	end
+	local cell = CreateFrame("Button", nil, f, "BackdropTemplate")
+	cell:SetSize(90, 44)
+	if cell.SetBackdrop then
+		cell:SetBackdrop({
+			bgFile = "Interface\\Buttons\\WHITE8x8",
+			edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+			tile = true,
+			tileSize = 8,
+			edgeSize = 10,
+			insets = { left = 2, right = 2, top = 2, bottom = 2 },
+		})
+	end
+
+	local cellIcon = cell:CreateTexture(nil, "ARTWORK")
+	cellIcon:SetSize(22, 22)
+	cellIcon:SetPoint("LEFT", cell, "LEFT", 6, 0)
+	cellIcon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+	cell.Icon = cellIcon
+
+	local topText = cell:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+	topText:SetPoint("TOPLEFT", cellIcon, "TOPRIGHT", 5, -1)
+	topText:SetPoint("RIGHT", cell, "RIGHT", -4, 0)
+	topText:SetJustifyH("LEFT")
+	topText:SetWordWrap(false)
+	cell.TopText = topText
+
+	local botText = cell:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+	botText:SetPoint("BOTTOMLEFT", cellIcon, "BOTTOMRIGHT", 5, 1)
+	botText:SetPoint("RIGHT", cell, "RIGHT", -4, 0)
+	botText:SetJustifyH("LEFT")
+	botText:SetWordWrap(false)
+	cell.BotText = botText
+
+	local freeText = cell:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+	freeText:SetPoint("CENTER", cell, "CENTER", 0, 0)
+	freeText:SetJustifyH("CENTER")
+	cell.FreeText = freeText
+
+	cell:SetScript("OnEnter", function(self)
+		ShowMatrixCellTooltip(self)
+	end)
+	cell:SetScript("OnLeave", function()
+		if GameTooltip then
+			GameTooltip:Hide()
+		end
+	end)
+
+	f.Cells[rIdx][cIdx] = cell
+	return cell
+end
+
 function ClickBindingUI.RefreshFreeKeysMatrix()
 	if not freeKeysMatrixFrame or not freeKeysMatrixFrame:IsShown() then
 		return
@@ -2889,37 +3246,82 @@ function ClickBindingUI.RefreshFreeKeysMatrix()
 	local bindings = CollectCurrentActiveBindings()
 	local showCombos = Database.Get("matrixShowCombos") and true or false
 	local showMeta = ClickBindingUI.IsMatrixMetaActive(bindings)
+	local activeCols = GetCurrentMatrixColumns()
+	local orderedRows = ClickBindingUI.GetOrderedMatrixModRows()
 
 	local visibleRows = {}
 	local activeModOrders = {}
-	for rIdx, row in ipairs(MATRIX_MOD_ROWS) do
-		if (showMeta or not row.isMeta) and (showCombos or not row.isCombo) then
+	for _, item in ipairs(orderedRows) do
+		local rIdx = item.rIdx
+		local row = item.row
+		local isPinned
+		if Database.IsMatrixRowDefaultVisible then
+			isPinned = Database.IsMatrixRowDefaultVisible(row.modOrder)
+		else
+			isPinned = not row.isCombo
+		end
+		if (showMeta or not row.isMeta) and (showCombos or isPinned) then
 			table.insert(visibleRows, { rIdx = rIdx, row = row })
 			activeModOrders[row.modOrder] = true
 		end
 	end
+	if #visibleRows == 0 and MATRIX_MOD_ROWS[1] then
+		table.insert(visibleRows, { rIdx = 1, row = MATRIX_MOD_ROWS[1] })
+		activeModOrders[MATRIX_MOD_ROWS[1].modOrder] = true
+	end
 	local activeRowCount = #visibleRows
 
-	local titleKey = "MATRIX_POPUP_TITLE"
-	if showMeta and showCombos then
-		titleKey = "MATRIX_POPUP_TITLE_META_EXPANDED"
-	elseif showMeta then
-		titleKey = "MATRIX_POPUP_TITLE_META"
-	elseif showCombos then
-		titleKey = "MATRIX_POPUP_TITLE_EXPANDED"
+	local colCount = #activeCols
+	if L["MATRIX_POPUP_TITLE_DYNAMIC_FORMAT"] then
+		f.Title:SetText(string.format(L["MATRIX_POPUP_TITLE_DYNAMIC_FORMAT"], activeRowCount, colCount))
+	else
+		f.Title:SetText(L["MATRIX_POPUP_TITLE"])
 	end
-	f.Title:SetText(L[titleKey] or L["MATRIX_POPUP_TITLE"])
 
-	local isCompactGrid = activeRowCount > 8
 	local colStartX = 104
 	local colW = 90
 	local colGap = 4
 	local rowStartY = -64
-	local rowH = isCompactGrid and 34 or 44
-	local rowGap = isCompactGrid and 3 or 4
-	local iconSize = isCompactGrid and 20 or 22
+	local rowH = 44
+	local rowGap = 4
+	local iconSize = 22
+	if activeRowCount > 12 then
+		rowH = 30
+		rowGap = 2
+		iconSize = 18
+	elseif activeRowCount > 8 then
+		rowH = 34
+		rowGap = 3
+		iconSize = 20
+	end
+	local gridRightEdge = colStartX + (colCount * (colW + colGap)) - colGap
+	local windowW = math.max(460, gridRightEdge + (showCombos and 64 or 16))
 	local windowH = 128 + (activeRowCount * (rowH + rowGap))
-	f:SetSize(586, windowH)
+	f:SetSize(windowW, windowH)
+
+	for cIdx, col in ipairs(activeCols) do
+		local hdr = EnsureMatrixColHeader(f, cIdx)
+		local x = colStartX + ((cIdx - 1) * (colW + colGap))
+		hdr:ClearAllPoints()
+		hdr:SetPoint("TOPLEFT", f, "TOPLEFT", x, -44)
+		hdr:SetWidth(colW)
+		hdr:SetText("|cffffd100" .. col.short .. "|r")
+		hdr:Show()
+	end
+	if f.ColHeaders then
+		for cIdx = colCount + 1, #f.ColHeaders do
+			if f.ColHeaders[cIdx] then
+				f.ColHeaders[cIdx]:Hide()
+			end
+		end
+	end
+
+	if f.PinColHeader then
+		f.PinColHeader:ClearAllPoints()
+		f.PinColHeader:SetPoint("CENTER", f, "TOPLEFT", gridRightEdge + 23, -49)
+		f.PinColHeader:SetText("|cff99ccff" .. (L["MATRIX_PIN_COL_HEADER"] or "Default") .. "|r")
+		f.PinColHeader:SetShown(showCombos)
+	end
 
 	if f.ComboCheckbox then
 		f.ComboCheckbox:SetChecked(showCombos)
@@ -2934,17 +3336,17 @@ function ClickBindingUI.RefreshFreeKeysMatrix()
 			f.AutoOpenCheckbox.Label:SetText(L["MATRIX_AUTO_OPEN_CHECKBOX"])
 		end
 	end
+	if f.ReorderBtn then
+		f.ReorderBtn:SetText(L["MATRIX_REORDER_BTN"] or "Reorder")
+	end
 
 	local lookup = {}
 	local extraList = {}
 
-	local knownCols = {
-		LeftButton = true,
-		RightButton = true,
-		MiddleButton = true,
-		Button4 = true,
-		Button5 = true,
-	}
+	local knownCols = {}
+	for _, col in ipairs(activeCols) do
+		knownCols[col.button] = true
+	end
 
 	for _, info in ipairs(bindings) do
 		if info and info.button then
@@ -2963,7 +3365,7 @@ function ClickBindingUI.RefreshFreeKeysMatrix()
 	end
 
 	local boundCount = 0
-	local totalSlots = activeRowCount * #MATRIX_COLUMNS
+	local totalSlots = activeRowCount * colCount
 
 	local visibleIndexByRIdx = {}
 	for vIdx, item in ipairs(visibleRows) do
@@ -2985,8 +3387,21 @@ function ClickBindingUI.RefreshFreeKeysMatrix()
 				rHdr:Hide()
 			end
 		end
-		for cIdx, col in ipairs(MATRIX_COLUMNS) do
-			local cell = f.Cells[rIdx][cIdx]
+		local pinCb = f.RowPinChecks and f.RowPinChecks[rIdx]
+		if pinCb then
+			if isRowVisible and showCombos then
+				local pinX = gridRightEdge + 12
+				pinCb:ClearAllPoints()
+				pinCb:SetPoint("TOPLEFT", f, "TOPLEFT", pinX, y - math.floor((rowH - 22) / 2))
+				local isPinned = (Database.IsMatrixRowDefaultVisible and Database.IsMatrixRowDefaultVisible(row.modOrder)) or false
+				pinCb:SetChecked(isPinned)
+				pinCb:Show()
+			else
+				pinCb:Hide()
+			end
+		end
+		for cIdx, col in ipairs(activeCols) do
+			local cell = EnsureMatrixCell(f, rIdx, cIdx)
 			if not isRowVisible then
 				cell:Hide()
 			else
@@ -2995,6 +3410,7 @@ function ClickBindingUI.RefreshFreeKeysMatrix()
 				cell:SetPoint("TOPLEFT", f, "TOPLEFT", x, y)
 				cell:SetSize(colW, rowH)
 				cell.Icon:SetSize(iconSize, iconSize)
+				cell.comboLabel = row.shortPrefix .. col.short
 				cell:Show()
 				local key = tostring(row.modOrder) .. ":" .. col.button
 				local info = lookup[key]
@@ -3031,6 +3447,13 @@ function ClickBindingUI.RefreshFreeKeysMatrix()
 					cell.FreeText:Show()
 					cell:SetBackdropColor(0.06, 0.18, 0.09, 0.88)
 					cell:SetBackdropBorderColor(0.25, 0.75, 0.38, 0.85)
+				end
+			end
+		end
+		if f.Cells[rIdx] then
+			for cIdx = colCount + 1, #f.Cells[rIdx] do
+				if f.Cells[rIdx][cIdx] then
+					f.Cells[rIdx][cIdx]:Hide()
 				end
 			end
 		end
@@ -3094,6 +3517,9 @@ end
 
 function ClickBindingUI.HideChildPopups()
 	ClickBindingUI.HideFreeKeysMatrix()
+	if ns.SettingsUI and ns.SettingsUI.HideReorderWindow then
+		ns.SettingsUI.HideReorderWindow()
+	end
 	if newPresetPopupFrame and newPresetPopupFrame:IsShown() then
 		newPresetPopupFrame:Hide()
 	end
@@ -4079,6 +4505,83 @@ local function RunDeepStressSelfTest(findings, infoNotes)
 		table.insert(infoNotes, string.format("DeepTest Modifiers (incl. macOS META): %d/%d combinations verified collision-free", modPassCount, #modTestCases))
 	end
 
+	-- 3c. Reorder-, MMO-Button- (MB6..MB31), Matrix-Default-Zeilen- und Hover-Augen-Invariante prüfen
+	local savedBtnOrder = Database.Get("customButtonOrder")
+	local savedVisBtns = Database.Get("matrixVisibleButtons")
+	local savedModOrder = Database.Get("customModifierOrder")
+	local savedDefRows = Database.Get("matrixDefaultRows")
+	local savedHiddenHover = Database.Get("unitHoverHiddenCombos")
+
+	local reorderChecksOk = true
+	-- Test 1: Preset LMB | MMB | RMB + MMO-Maustaste Button12 (MB12)
+	Database.ApplyMiddleMouseCenterOrder()
+	if Constants.GetButtonSortOrder("MiddleButton") >= Constants.GetButtonSortOrder("RightButton") then
+		table.insert(findings, "DeepTest Reorder: ApplyMiddleMouseCenterOrder failed to place MiddleButton before RightButton")
+		reorderChecksOk = false
+	end
+	Database.AddMouseButtonToOrder("Button12", true)
+	if not Database.IsMatrixButtonColumnVisible("Button12") then
+		table.insert(findings, "DeepTest Reorder: AddMouseButtonToOrder('Button12', true) did not activate MB12 column")
+		reorderChecksOk = false
+	end
+	Database.MoveMouseButtonInOrder("Button12", 1)
+	if Constants.GetButtonSortOrder("Button12") ~= 1 then
+		table.insert(findings, "DeepTest Reorder: MoveMouseButtonInOrder('Button12', 1) failed")
+		reorderChecksOk = false
+	end
+
+	-- Test 2: Matrix-Modifikator-Zeilen umsortieren & Default-Zeilen-Sichtbarkeit (inkl. Guard für mindestens 1 aktive Zeile)
+	Database.MoveModifierInOrder(5, 1)
+	local modIds = Database.GetOrderedModifierIDs()
+	if modIds[1] ~= 5 then
+		table.insert(findings, "DeepTest Reorder: MoveModifierInOrder(5, 1) failed")
+		reorderChecksOk = false
+	end
+	Database.SetMatrixRowDefaultVisible(5, false)
+	if Database.IsMatrixRowDefaultVisible(5) then
+		table.insert(findings, "DeepTest Matrix Default-Visible: unchecking Meta (row 5) failed")
+		reorderChecksOk = false
+	end
+	Database.Set("matrixDefaultRows", "")
+	if not Database.IsMatrixRowDefaultVisible(1) then
+		table.insert(findings, "DeepTest Matrix Default-Visible: empty guard did not keep Direct (row 1) visible")
+		reorderChecksOk = false
+	end
+
+	-- Test 3: Hover-Overlay Augen-Sichtbarkeit (Zauber standardmäßig sichtbar, Interaktion standardmäßig ausgeblendet)
+	Database.Set("unitHoverHiddenCombos", "")
+	local dummySpell = { type = (Enum and Enum.ClickBindingType and Enum.ClickBindingType.Spell) or 1, actionID = 1, button = "LeftButton", modifiers = 0 }
+	local dummyInteraction = { type = (Enum and Enum.ClickBindingType and Enum.ClickBindingType.Interaction) or 3, actionID = 1, button = "LeftButton", modifiers = 0 }
+	if Database.IsBindingHiddenInHover(dummySpell) then
+		table.insert(findings, "DeepTest Hover Eye: spell binding should be visible by default")
+		reorderChecksOk = false
+	end
+	Database.ToggleBindingHiddenInHover(dummySpell)
+	if not Database.IsBindingHiddenInHover(dummySpell) then
+		table.insert(findings, "DeepTest Hover Eye: toggling spell binding to hidden failed")
+		reorderChecksOk = false
+	end
+	if not Database.IsBindingHiddenInHover(dummyInteraction) then
+		table.insert(findings, "DeepTest Hover Eye: interaction binding should be hidden by default")
+		reorderChecksOk = false
+	end
+	Database.ToggleBindingHiddenInHover(dummyInteraction)
+	if Database.IsBindingHiddenInHover(dummyInteraction) then
+		table.insert(findings, "DeepTest Hover Eye: toggling interaction binding to visible failed")
+		reorderChecksOk = false
+	end
+
+	-- Originalwerte nach Logik-Tests wiederherstellen
+	Database.Set("customButtonOrder", savedBtnOrder)
+	Database.Set("matrixVisibleButtons", savedVisBtns)
+	Database.Set("customModifierOrder", savedModOrder)
+	Database.Set("matrixDefaultRows", savedDefRows)
+	Database.Set("unitHoverHiddenCombos", savedHiddenHover)
+
+	if reorderChecksOk then
+		table.insert(infoNotes, "DeepTest v0.8.4 logic: Reorder (MMB preset + MB12 MMO column + modifier move), Matrix Default-Visible & Hover Eye (Spell vs. Interaction) verified OK")
+	end
+
 	-- 4. UI-Lebenszyklus-Kette (nur außerhalb des Kampfes und im MKB-Modus)
 	if InCombatLockdown and InCombatLockdown() then
 		table.insert(infoNotes, "DeepTest UI lifecycle skipped (InCombatLockdown active)")
@@ -4117,6 +4620,10 @@ local function RunDeepStressSelfTest(findings, infoNotes)
 				SettingsUI.OpenSettingsTab(tabIdx)
 			end
 		end
+		if SettingsUI and SettingsUI.ShowReorderWindow and SettingsUI.HideReorderWindow then
+			SettingsUI.ShowReorderWindow()
+			SettingsUI.HideReorderWindow()
+		end
 
 		ClickBindingUI.ShowFreeKeysMatrix()
 		for _, metaMode in ipairs({ "off", "on" }) do
@@ -4126,6 +4633,13 @@ local function RunDeepStressSelfTest(findings, infoNotes)
 			Database.Set("matrixShowCombos", true)
 			ClickBindingUI.RefreshFreeKeysMatrix()
 		end
+		-- Dynamische MMO-Spalte (MB6) und benutzerdefinierte Zeilen-Reihenfolge live im Matrix-UI rendern
+		local origBtnOrderUI = Database.Get("customButtonOrder")
+		local origVisBtnsUI = Database.Get("matrixVisibleButtons")
+		Database.AddMouseButtonToOrder("Button6", true)
+		ClickBindingUI.RefreshFreeKeysMatrix()
+		Database.Set("customButtonOrder", origBtnOrderUI)
+		Database.Set("matrixVisibleButtons", origVisBtnsUI)
 		Database.Set("matrixMetaMode", origMetaMode)
 		Database.Set("matrixShowCombos", origCombos)
 		ClickBindingUI.RefreshFreeKeysMatrix()
@@ -4320,7 +4834,9 @@ function ClickBindingUI.RunTaintDiagnostics(subArg)
 						local okElem, srcElem = issecurevariable(itemFrame, "elementData")
 						if not okElem then
 							taintedItems = taintedItems + 1
-							if itemFrame.BCCQuickBindButton and itemFrame.BCCQuickBindButton:IsShown() then
+							if (itemFrame.BCCQuickBindButton and itemFrame.BCCQuickBindButton:IsShown())
+								or (itemFrame.BCCSecureCastButton and itemFrame.BCCSecureCastButton:IsShown())
+							then
 								shieldedItems = shieldedItems + 1
 							end
 							firstTaintSource = firstTaintSource or srcElem

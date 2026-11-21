@@ -945,7 +945,7 @@ local function EnsureSettingsWindow()
 	local exportBtn = RegisterControl(CreateActionButton(
 		page1,
 		-364,
-		492,
+		240,
 		function()
 			return L["SETTINGS_EXPORT_BINDINGS_BTN"]
 		end,
@@ -956,6 +956,21 @@ local function EnsureSettingsWindow()
 		end,
 		"SETTINGS_EXPORT_BINDINGS_DESC"
 	))
+
+	local reorderBtn1 = RegisterControl(CreateActionButton(
+		page1,
+		-364,
+		240,
+		function()
+			return L["SETTINGS_REORDER_BTN"]
+		end,
+		function()
+			SettingsUI.ToggleReorderWindow()
+		end,
+		"SETTINGS_REORDER_DESC"
+	))
+	reorderBtn1:ClearAllPoints()
+	reorderBtn1:SetPoint("TOPLEFT", page1, "TOPLEFT", 270, -364)
 
 	----------------------------------------------------------------------------
 	-- TAB 2: Zauberbuch & Allgemein
@@ -1082,11 +1097,10 @@ local function EnsureSettingsWindow()
 	RegisterControl(CreateDBCheckbox(page3, -196, "unitHoverShowRankTags", "SETTING_UNITHOVER_SHOW_RANK_TAGS", "SETTING_UNITHOVER_SHOW_RANK_TAGS_DESC"))
 	RegisterControl(CreateDBCheckbox(page3, -224, "unitHoverShowRange", "SETTING_UNITHOVER_SHOW_RANGE", "SETTING_UNITHOVER_SHOW_RANGE_DESC"))
 	RegisterControl(CreateDBCheckbox(page3, -252, "unitHoverShowInCombat", "SETTING_UNITHOVER_SHOW_IN_COMBAT", "SETTING_UNITHOVER_SHOW_IN_COMBAT_DESC"))
-	RegisterControl(CreateDBCheckbox(page3, -280, "unitHoverShowInteractions", "SETTING_UNITHOVER_SHOW_INTERACTIONS", "SETTING_UNITHOVER_SHOW_INTERACTIONS_DESC"))
 
 	local unlockMoveCb = RegisterControl(CreateCheckboxControl(
 		page3,
-		-308,
+		-280,
 		"SETTING_UNITHOVER_UNLOCK_MOVE",
 		"SETTING_UNITHOVER_UNLOCK_MOVE_DESC",
 		function()
@@ -1097,6 +1111,19 @@ local function EnsureSettingsWindow()
 		end
 	))
 	win.UnlockMoveCheckbox = unlockMoveCb
+
+	RegisterControl(CreateActionButton(
+		page3,
+		-318,
+		492,
+		function()
+			return L["SETTINGS_REORDER_BTN"]
+		end,
+		function()
+			SettingsUI.ToggleReorderWindow()
+		end,
+		"SETTINGS_REORDER_DESC"
+	))
 
 	----------------------------------------------------------------------------
 	-- TAB 4: Binding-Presets, Charakter-Übernahme & Import/Export
@@ -1439,6 +1466,9 @@ function SettingsUI.RefreshWindow()
 			ctrl:RefreshValue()
 		end
 	end
+	if SettingsUI.RefreshReorderWindow then
+		SettingsUI.RefreshReorderWindow()
+	end
 end
 
 function SettingsUI.OpenSettingsTab(tabIndex)
@@ -1469,6 +1499,527 @@ function SettingsUI.HideWindow()
 	if settingsWindow and settingsWindow:IsShown() then
 		settingsWindow:Hide()
 	end
+	if SettingsUI.HideReorderWindow then
+		SettingsUI.HideReorderWindow()
+	end
+end
+
+--------------------------------------------------------------------------------
+-- Drag-&-Drop Reorder-Editor für Maustasten (inkl. MB6..MB31) & Matrix-Modifikatoren
+--------------------------------------------------------------------------------
+local reorderWindow = nil
+local REORDER_ROW_H = 26
+local REORDER_ROW_GAP = 2
+
+local function GetMouseButtonDisplayLabel(buttonName)
+	local norm = Constants.NormalizeMouseButtonName(buttonName)
+	local short = Constants.GetShortButtonName(norm)
+	local full = short
+	if norm == "LeftButton" then
+		full = L["GROUP_BUTTON_LEFT"] or "Left Click"
+	elseif norm == "RightButton" then
+		full = L["GROUP_BUTTON_RIGHT"] or "Right Click"
+	elseif norm == "MiddleButton" then
+		full = L["GROUP_BUTTON_MIDDLE"] or "Middle Click"
+	else
+		local num = tonumber(string.match(tostring(norm), "^Button(%d+)$"))
+		if num then
+			full = string.format(L["GROUP_BUTTON_NUMBER_FORMAT"] or "Mouse Button %d", num)
+		end
+	end
+	return string.format("|cffffd100%s|r  |cffffffff%s|r", short, full)
+end
+
+local function EnsureReorderListRow(scrollChild, rowsPool, idx, isButtonList)
+	if rowsPool[idx] then
+		return rowsPool[idx]
+	end
+	local row = CreateFrame("Button", nil, scrollChild, "BackdropTemplate")
+	row:SetHeight(REORDER_ROW_H)
+	row:EnableMouse(true)
+	row:RegisterForClicks("LeftButtonUp")
+
+	if row.SetBackdrop then
+		row:SetBackdrop({
+			bgFile = "Interface\\Buttons\\WHITE8x8",
+			edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+			tile = true,
+			tileSize = 8,
+			edgeSize = 10,
+			insets = { left = 2, right = 2, top = 2, bottom = 2 },
+		})
+		row:SetBackdropColor(0.11, 0.14, 0.20, 0.92)
+		row:SetBackdropBorderColor(0.32, 0.42, 0.58, 0.85)
+	end
+
+	local handleText = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+	handleText:SetPoint("LEFT", row, "LEFT", 6, 0)
+	handleText:SetText("|cff8899bb::|r")
+	row.HandleText = handleText
+
+	local labelOffsetLeft = 22
+	if isButtonList then
+		local cb = CreateFrame("CheckButton", nil, row, "UICheckButtonTemplate")
+		cb:SetSize(20, 20)
+		cb:SetPoint("LEFT", row, "LEFT", 18, 0)
+		cb:SetScript("OnClick", function(self)
+			PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
+			if row.itemKey and Database.SetMatrixButtonColumnVisible then
+				Database.SetMatrixButtonColumnVisible(row.itemKey, self:GetChecked() and true or false)
+				SettingsUI.RefreshReorderWindow()
+			end
+		end)
+		cb:SetScript("OnEnter", function(self)
+			GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+			GameTooltip_SetTitle(GameTooltip, L["MATRIX_PIN_COL_HEADER"] or "Matrix")
+			GameTooltip_AddNormalLine(GameTooltip, L["REORDER_COL_CHECK_TOOLTIP"], true)
+			GameTooltip:Show()
+		end)
+		cb:SetScript("OnLeave", function()
+			GameTooltip:Hide()
+		end)
+		row.ColCheckbox = cb
+		labelOffsetLeft = 40
+	end
+
+	local downBtn = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
+	downBtn:SetSize(20, 20)
+	downBtn:SetPoint("RIGHT", row, "RIGHT", -4, 0)
+	downBtn:SetText("v")
+	downBtn:SetScript("OnClick", function()
+		PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
+		if row.onMoveDelta then
+			row.onMoveDelta(1)
+		end
+	end)
+	row.DownBtn = downBtn
+
+	local upBtn = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
+	upBtn:SetSize(20, 20)
+	upBtn:SetPoint("RIGHT", downBtn, "LEFT", -2, 0)
+	upBtn:SetText("^")
+	upBtn:SetScript("OnClick", function()
+		PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
+		if row.onMoveDelta then
+			row.onMoveDelta(-1)
+		end
+	end)
+	row.UpBtn = upBtn
+
+	local label = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+	label:SetPoint("LEFT", row, "LEFT", labelOffsetLeft, 0)
+	label:SetPoint("RIGHT", upBtn, "LEFT", -4, 0)
+	label:SetJustifyH("LEFT")
+	label:SetWordWrap(false)
+	row.Label = label
+
+	row:SetScript("OnEnter", function(self)
+		if not (reorderWindow and reorderWindow.dragState) then
+			if self.SetBackdropBorderColor then
+				self:SetBackdropBorderColor(0.75, 0.85, 1.0, 1.0)
+			end
+			GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+			GameTooltip_SetTitle(GameTooltip, L["REORDER_WINDOW_TITLE"])
+			GameTooltip_AddNormalLine(GameTooltip, L["REORDER_DRAG_HINT_TOOLTIP"], true)
+			GameTooltip:Show()
+		end
+	end)
+	row:SetScript("OnLeave", function(self)
+		GameTooltip:Hide()
+		if not (reorderWindow and reorderWindow.dragState and reorderWindow.dragState.itemKey == self.itemKey) then
+			if self.SetBackdropBorderColor then
+				self:SetBackdropBorderColor(0.32, 0.42, 0.58, 0.85)
+			end
+		end
+	end)
+
+	row:SetScript("OnMouseDown", function(self, button)
+		if button == "LeftButton" and reorderWindow and self.itemKey then
+			GameTooltip:Hide()
+			reorderWindow.dragState = {
+				listType = isButtonList and "button" or "modifier",
+				itemKey = self.itemKey,
+				scrollChild = scrollChild,
+			}
+			SettingsUI.RefreshReorderWindow()
+		end
+	end)
+
+	row:SetScript("OnMouseUp", function(_, button)
+		if button == "LeftButton" and reorderWindow and reorderWindow.dragState then
+			reorderWindow.dragState = nil
+			PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
+			SettingsUI.RefreshReorderWindow()
+		end
+	end)
+
+	rowsPool[idx] = row
+	return row
+end
+
+local function EnsureReorderWindow()
+	if reorderWindow then
+		return reorderWindow
+	end
+
+	local f = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
+	f:SetSize(560, 490)
+	f:SetPoint("CENTER", UIParent, "CENTER", 0, 20)
+	f:SetFrameStrata("DIALOG")
+	f:SetToplevel(true)
+	f:EnableMouse(true)
+	f:SetMovable(true)
+	f:SetClampedToScreen(true)
+	f:RegisterForDrag("LeftButton")
+	f:SetScript("OnDragStart", function(self)
+		self:StartMoving()
+	end)
+	f:SetScript("OnDragStop", function(self)
+		self:StopMovingOrSizing()
+	end)
+
+	if f.SetBackdrop then
+		f:SetBackdrop({
+			bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark",
+			edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
+			tile = true,
+			tileSize = 16,
+			edgeSize = 24,
+			insets = { left = 6, right = 6, top = 6, bottom = 6 },
+		})
+		f:SetBackdropColor(0.06, 0.07, 0.10, 0.97)
+		f:SetBackdropBorderColor(0.85, 0.72, 0.40, 1.0)
+	end
+
+	local icon = f:CreateTexture(nil, "ARTWORK")
+	icon:SetSize(20, 20)
+	icon:SetPoint("TOPLEFT", f, "TOPLEFT", 16, -14)
+	icon:SetAtlas(Constants.ICON_ATLAS)
+
+	local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+	title:SetPoint("LEFT", icon, "RIGHT", 8, 0)
+	f.Title = title
+
+	local closeBtn = CreateFrame("Button", nil, f, "UIPanelCloseButton")
+	closeBtn:SetPoint("TOPRIGHT", f, "TOPRIGHT", -4, -4)
+	closeBtn:SetScript("OnClick", function()
+		PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF)
+		f:Hide()
+	end)
+
+	local subtitle = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+	subtitle:SetPoint("TOPLEFT", f, "TOPLEFT", 16, -40)
+	subtitle:SetPoint("TOPRIGHT", f, "TOPRIGHT", -16, -40)
+	subtitle:SetJustifyH("LEFT")
+	subtitle:SetWordWrap(true)
+	f.Subtitle = subtitle
+
+	local function CreateListBox(xOffset, width, height)
+		local box = CreateFrame("Frame", nil, f, "BackdropTemplate")
+		box:SetSize(width, height)
+		box:SetPoint("TOPLEFT", f, "TOPLEFT", xOffset, -88)
+		if box.SetBackdrop then
+			box:SetBackdrop({
+				bgFile = "Interface\\Buttons\\WHITE8x8",
+				edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+				tile = true,
+				tileSize = 8,
+				edgeSize = 12,
+				insets = { left = 3, right = 3, top = 3, bottom = 3 },
+			})
+			box:SetBackdropColor(0.04, 0.05, 0.08, 0.90)
+			box:SetBackdropBorderColor(0.45, 0.45, 0.55, 0.85)
+		end
+
+		local scrollFrame = CreateFrame("ScrollFrame", nil, box, "UIPanelScrollFrameTemplate")
+		scrollFrame:SetPoint("TOPLEFT", box, "TOPLEFT", 6, -6)
+		scrollFrame:SetPoint("BOTTOMRIGHT", box, "BOTTOMRIGHT", -26, 6)
+
+		local scrollChild = CreateFrame("Frame", nil, scrollFrame)
+		scrollChild:SetSize(width - 34, 1)
+		scrollFrame:SetScrollChild(scrollChild)
+
+		box.ScrollFrame = scrollFrame
+		box.ScrollChild = scrollChild
+		box.Rows = {}
+		return box
+	end
+
+	local leftHeader = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+	leftHeader:SetPoint("TOPLEFT", f, "TOPLEFT", 16, -70)
+	f.LeftHeader = leftHeader
+
+	local rightHeader = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+	rightHeader:SetPoint("TOPLEFT", f, "TOPLEFT", 288, -70)
+	f.RightHeader = rightHeader
+
+	f.LeftBox = CreateListBox(16, 256, 316)
+	f.RightBox = CreateListBox(288, 256, 350)
+
+	local addMmoBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+	addMmoBtn:SetSize(256, 26)
+	addMmoBtn:SetPoint("TOPLEFT", f.LeftBox, "BOTTOMLEFT", 0, -8)
+	addMmoBtn:SetScript("OnClick", function(self)
+		PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
+		if MenuUtil and MenuUtil.CreateContextMenu then
+			MenuUtil.CreateContextMenu(self, function(_, rootDescription)
+				rootDescription:CreateTitle(L["REORDER_ADD_MMO_MENU_TITLE"])
+				rootDescription:SetScrollMode(280)
+				for n = 6, 31 do
+					local btnKey = "Button" .. tostring(n)
+					local short = "MB" .. tostring(n)
+					local full = string.format(L["GROUP_BUTTON_NUMBER_FORMAT"] or "Mouse Button %d", n)
+					local isVisible = Database.IsMatrixButtonColumnVisible and Database.IsMatrixButtonColumnVisible(btnKey)
+					local label = isVisible and string.format("|cff40ff59%s|r (%s)", short, full) or string.format("|cffffd100%s|r (%s)", short, full)
+					rootDescription:CreateButton(label, function()
+						if Database.AddMouseButtonToOrder then
+							Database.AddMouseButtonToOrder(btnKey, true)
+						end
+						SettingsUI.RefreshReorderWindow()
+					end)
+				end
+			end)
+		end
+	end)
+	f.AddMmoBtn = addMmoBtn
+
+	local presetMmbBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+	presetMmbBtn:SetSize(256, 26)
+	presetMmbBtn:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 16, 14)
+	presetMmbBtn:SetScript("OnClick", function()
+		PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
+		if Database.ApplyMiddleMouseCenterOrder then
+			Database.ApplyMiddleMouseCenterOrder()
+		end
+		SettingsUI.RefreshReorderWindow()
+		if DEFAULT_CHAT_FRAME then
+			DEFAULT_CHAT_FRAME:AddMessage(L["CHAT_ORDER_MMB_CENTER"])
+		end
+	end)
+	f.PresetMmbBtn = presetMmbBtn
+
+	local resetOrderBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+	resetOrderBtn:SetSize(256, 26)
+	resetOrderBtn:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -16, 14)
+	resetOrderBtn:SetScript("OnClick", function()
+		PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
+		if Database.ResetButtonAndModifierOrder then
+			Database.ResetButtonAndModifierOrder()
+		end
+		SettingsUI.RefreshReorderWindow()
+		if DEFAULT_CHAT_FRAME then
+			DEFAULT_CHAT_FRAME:AddMessage(L["CHAT_ORDER_RESET"])
+		end
+	end)
+	f.ResetOrderBtn = resetOrderBtn
+
+	-- Live Drag-&-Drop Tracking: Berechnet aus der Maus-Y-Position die Zielzeile und sortiert direkt um
+	f:SetScript("OnUpdate", function(self)
+		local ds = self.dragState
+		if not ds then
+			return
+		end
+		if not IsMouseButtonDown("LeftButton") then
+			self.dragState = nil
+			SettingsUI.RefreshReorderWindow()
+			return
+		end
+		local sc = ds.scrollChild
+		if not sc or not sc:GetTop() then
+			return
+		end
+		local _, cursorY = GetCursorPosition()
+		local scale = sc:GetEffectiveScale() or 1
+		cursorY = cursorY / scale
+		local relY = sc:GetTop() - cursorY
+		local rowPitch = REORDER_ROW_H + REORDER_ROW_GAP
+		local targetIdx = math.floor(relY / rowPitch) + 1
+		if ds.listType == "button" then
+			local list = Database.GetOrderedMouseButtons and Database.GetOrderedMouseButtons(true) or {}
+			if #list > 0 then
+				targetIdx = math.max(1, math.min(#list, targetIdx))
+				local curIdx = Database.GetButtonOrderIndex and Database.GetButtonOrderIndex(ds.itemKey) or targetIdx
+				if targetIdx ~= curIdx and Database.MoveMouseButtonInOrder then
+					Database.MoveMouseButtonInOrder(ds.itemKey, targetIdx)
+					SettingsUI.RefreshReorderWindow()
+				end
+			end
+		elseif ds.listType == "modifier" then
+			local visibleMods = self.visibleModOrders or {}
+			if #visibleMods > 0 then
+				targetIdx = math.max(1, math.min(#visibleMods, targetIdx))
+				local curVisualIdx = nil
+				for i, mId in ipairs(visibleMods) do
+					if mId == ds.itemKey then
+						curVisualIdx = i
+						break
+					end
+				end
+				if curVisualIdx and targetIdx ~= curVisualIdx then
+					local targetModOrder = visibleMods[targetIdx]
+					local fullOrder = Database.GetOrderedModifierIDs and Database.GetOrderedModifierIDs() or {}
+					local fullTargetIdx = nil
+					for i, id in ipairs(fullOrder) do
+						if id == targetModOrder then
+							fullTargetIdx = i
+							break
+						end
+					end
+					if fullTargetIdx and Database.MoveModifierInOrder then
+						Database.MoveModifierInOrder(ds.itemKey, fullTargetIdx)
+						SettingsUI.RefreshReorderWindow()
+					end
+				end
+			end
+		end
+	end)
+
+	f:SetScript("OnHide", function(self)
+		self.dragState = nil
+	end)
+
+	f:Hide()
+	reorderWindow = f
+	return f
+end
+
+function SettingsUI.RefreshReorderWindow()
+	if not reorderWindow or not reorderWindow:IsShown() then
+		return
+	end
+	local f = reorderWindow
+	f.Title:SetText(L["REORDER_WINDOW_TITLE"])
+	f.Subtitle:SetText(L["REORDER_WINDOW_SUBTITLE"])
+	f.LeftHeader:SetText("|cffffd100" .. L["REORDER_HDR_MOUSE_BUTTONS"] .. "|r")
+	f.RightHeader:SetText("|cff99ccff" .. L["REORDER_HDR_MODIFIERS"] .. "|r")
+	f.AddMmoBtn:SetText(L["REORDER_ADD_MMO_BTN"])
+	f.PresetMmbBtn:SetText(L["REORDER_PRESET_MMB_CENTER_BTN"])
+	f.ResetOrderBtn:SetText(L["REORDER_RESET_BTN"])
+
+	local rowPitch = REORDER_ROW_H + REORDER_ROW_GAP
+
+	-- 1. Linke Liste: Maustasten
+	local buttons = Database.GetOrderedMouseButtons and Database.GetOrderedMouseButtons(true) or {}
+	local leftChild = f.LeftBox.ScrollChild
+	local leftWidth = leftChild:GetWidth()
+	for idx, btnName in ipairs(buttons) do
+		local row = EnsureReorderListRow(leftChild, f.LeftBox.Rows, idx, true)
+		row:ClearAllPoints()
+		row:SetPoint("TOPLEFT", leftChild, "TOPLEFT", 0, -((idx - 1) * rowPitch))
+		row:SetWidth(leftWidth)
+		row.itemKey = btnName
+		row.Label:SetText(string.format("|cff888888%d.|r %s", idx, GetMouseButtonDisplayLabel(btnName)))
+		if row.ColCheckbox then
+			local isVis = Database.IsMatrixButtonColumnVisible and Database.IsMatrixButtonColumnVisible(btnName)
+			row.ColCheckbox:SetChecked(isVis and true or false)
+		end
+		row.UpBtn:SetEnabled(idx > 1)
+		row.DownBtn:SetEnabled(idx < #buttons)
+		row.onMoveDelta = function(delta)
+			if Database.MoveMouseButtonInOrder then
+				Database.MoveMouseButtonInOrder(btnName, idx + delta)
+				SettingsUI.RefreshReorderWindow()
+			end
+		end
+		local isDragging = f.dragState and f.dragState.listType == "button" and f.dragState.itemKey == btnName
+		if row.SetBackdropColor then
+			if isDragging then
+				row:SetBackdropColor(0.26, 0.22, 0.08, 0.96)
+				row:SetBackdropBorderColor(1.0, 0.82, 0.25, 1.0)
+			else
+				row:SetBackdropColor(0.11, 0.14, 0.20, 0.92)
+				row:SetBackdropBorderColor(0.32, 0.42, 0.58, 0.85)
+			end
+		end
+		row:Show()
+	end
+	for idx = #buttons + 1, #f.LeftBox.Rows do
+		f.LeftBox.Rows[idx]:Hide()
+	end
+	leftChild:SetHeight(math.max(1, #buttons * rowPitch))
+
+	-- 2. Rechte Liste: Matrix-Modifikatoren
+	local orderedMods = (ns.ClickBindingUI and ns.ClickBindingUI.GetOrderedMatrixModRows and ns.ClickBindingUI.GetOrderedMatrixModRows()) or {}
+	local showMeta = (ns.ClickBindingUI and ns.ClickBindingUI.IsMatrixMetaActive and ns.ClickBindingUI.IsMatrixMetaActive()) or false
+	local visibleMods = {}
+	f.visibleModOrders = {}
+	for _, item in ipairs(orderedMods) do
+		if showMeta or not item.row.isMeta then
+			table.insert(visibleMods, item.row)
+			table.insert(f.visibleModOrders, item.row.modOrder)
+		end
+	end
+
+	local rightChild = f.RightBox.ScrollChild
+	local rightWidth = rightChild:GetWidth()
+	for idx, modRow in ipairs(visibleMods) do
+		local row = EnsureReorderListRow(rightChild, f.RightBox.Rows, idx, false)
+		row:ClearAllPoints()
+		row:SetPoint("TOPLEFT", rightChild, "TOPLEFT", 0, -((idx - 1) * rowPitch))
+		row:SetWidth(rightWidth)
+		row.itemKey = modRow.modOrder
+		local modTitle = L[modRow.labelKey] or modRow.fallback
+		row.Label:SetText(string.format("|cff888888%d.|r |cffb8d8ff%s|r", idx, modTitle))
+		row.UpBtn:SetEnabled(idx > 1)
+		row.DownBtn:SetEnabled(idx < #visibleMods)
+		row.onMoveDelta = function(delta)
+			local targetVisual = visibleMods[idx + delta]
+			if targetVisual and Database.GetOrderedModifierIDs and Database.MoveModifierInOrder then
+				local fullOrder = Database.GetOrderedModifierIDs()
+				for fullIdx, id in ipairs(fullOrder) do
+					if id == targetVisual.modOrder then
+						Database.MoveModifierInOrder(modRow.modOrder, fullIdx)
+						SettingsUI.RefreshReorderWindow()
+						break
+					end
+				end
+			end
+		end
+		local isDragging = f.dragState and f.dragState.listType == "modifier" and f.dragState.itemKey == modRow.modOrder
+		if row.SetBackdropColor then
+			if isDragging then
+				row:SetBackdropColor(0.26, 0.22, 0.08, 0.96)
+				row:SetBackdropBorderColor(1.0, 0.82, 0.25, 1.0)
+			else
+				row:SetBackdropColor(0.11, 0.14, 0.20, 0.92)
+				row:SetBackdropBorderColor(0.32, 0.42, 0.58, 0.85)
+			end
+		end
+		row:Show()
+	end
+	for idx = #visibleMods + 1, #f.RightBox.Rows do
+		f.RightBox.Rows[idx]:Hide()
+	end
+	rightChild:SetHeight(math.max(1, #visibleMods * rowPitch))
+end
+
+function SettingsUI.ShowReorderWindow()
+	if Constants.IsGamepadUIActive and Constants.IsGamepadUIActive() then
+		if DEFAULT_CHAT_FRAME then
+			DEFAULT_CHAT_FRAME:AddMessage(L["CHAT_GAMEPAD_STANDBY"])
+		end
+		return
+	end
+	local f = EnsureReorderWindow()
+	f:Show()
+	if f.Raise then
+		f:Raise()
+	end
+	SettingsUI.RefreshReorderWindow()
+end
+
+function SettingsUI.HideReorderWindow()
+	if reorderWindow and reorderWindow:IsShown() then
+		reorderWindow:Hide()
+	end
+end
+
+function SettingsUI.ToggleReorderWindow()
+	if reorderWindow and reorderWindow:IsShown() then
+		reorderWindow:Hide()
+		return
+	end
+	SettingsUI.ShowReorderWindow()
 end
 
 function SettingsUI.OpenSettingsMenu()

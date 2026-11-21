@@ -11,6 +11,7 @@ ns.SpellBookUI = SpellBookUI
 
 local isHooked = false
 local quickBindCheckbox = nil
+local pendingPostCombatRefresh = false
 
 local function AppendSpellBookBindingTooltip(spellBookItemFrame)
 	if Constants.IsGamepadUIActive and Constants.IsGamepadUIActive() then
@@ -83,6 +84,45 @@ local function ShowQuickBindSpellBookTooltip(spellBookItemFrame)
 	GameTooltip:Show()
 end
 
+-- Zerlegt eine Klickbelegung für das 40px-Zauberbuch-Badge in eine optionale obere Modifier-Zeile
+-- (max. 5 Zeichen, z. B. "SHIFT", "CTRL", "S+C", "S+C+A") und eine untere Maustasten-Zeile (z. B. "MMB", "LMB +1").
+local function GetBadgeLinesForBindings(bindings)
+	if not bindings or #bindings == 0 then
+		return nil, nil
+	end
+	local first = bindings[1]
+	if not first or not first.button then
+		return nil, "✓"
+	end
+
+	local btnShort = Constants.GetShortBindingString({ button = first.button, modifiers = 0 }) or first.button
+	if #bindings > 1 then
+		btnShort = string.format("%s +%d", btnShort, #bindings - 1)
+	end
+
+	local modLine = nil
+	if GetStringFromModifiers and first.modifiers and first.modifiers ~= 0 then
+		local modStr = GetStringFromModifiers(first.modifiers) or ""
+		if modStr ~= "" then
+			local tokens = {}
+			for token in string.gmatch(modStr, "([^-]+)") do
+				table.insert(tokens, token)
+			end
+			if #tokens == 1 then
+				modLine = tokens[1]
+			elseif #tokens > 1 then
+				local initials = {}
+				for _, t in ipairs(tokens) do
+					table.insert(initials, string.sub(t, 1, 1))
+				end
+				modLine = table.concat(initials, "+")
+			end
+		end
+	end
+
+	return modLine, btnShort
+end
+
 local function EnsureSpellBookBindBadge(spellBookItemFrame)
 	if not spellBookItemFrame or not spellBookItemFrame.Button then
 		return nil
@@ -91,59 +131,61 @@ local function EnsureSpellBookBindBadge(spellBookItemFrame)
 		return spellBookItemFrame.BCCBindBadge
 	end
 
+	local iconAnchor = spellBookItemFrame.Button.Icon or spellBookItemFrame.Button
 	local badgeFrame = CreateFrame("Frame", nil, spellBookItemFrame.Button)
-	badgeFrame:SetAllPoints(spellBookItemFrame.Button)
+	badgeFrame:SetSize(44, 15)
+	badgeFrame:SetPoint("BOTTOM", iconAnchor, "TOP", 0, -1)
 	badgeFrame:SetFrameLevel(spellBookItemFrame.Button:GetFrameLevel() + 6)
 
-	-- Modernes abgerundetes Pill-Badge oben links auf dem Zauber-Icon (ohne eingebrannten Pfeil)
+	-- Adaptives 44px Pill-Banner (exakt bündig mit dem äußeren Icon-Rahmen):
+	-- Der Atlas "common-dropdown-c-button" besitzt intern ca. 4px transparenten Rand,
+	-- weshalb die Textur ringsum 4px über badgeFrame hinaus gespannt wird.
 	local bg = badgeFrame:CreateTexture(nil, "OVERLAY", nil, 1)
 	bg:SetAtlas("common-dropdown-c-button")
-	bg:SetVertexColor(0.08, 0.12, 0.16, 0.92)
-	bg:SetPoint("TOPLEFT", spellBookItemFrame.Button, "TOPLEFT", -2, 2)
+	bg:SetVertexColor(0.06, 0.09, 0.13, 0.96)
+	bg:SetPoint("TOPLEFT", badgeFrame, "TOPLEFT", -4, 4)
+	bg:SetPoint("BOTTOMRIGHT", badgeFrame, "BOTTOMRIGHT", 4, -4)
 
-	local text = badgeFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-	local fontPath, fontSize = text:GetFont()
-	if fontPath and fontSize then
-		text:SetFont(fontPath, math.max(10, fontSize - 1), "OUTLINE")
+	local topText = badgeFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+	local fontPath, fontSize = topText:GetFont()
+	local baseFontSize = (fontSize and math.max(9, fontSize - 1)) or 10
+	local smallFontSize = math.max(8, baseFontSize - 1)
+	if fontPath then
+		topText:SetFont(fontPath, smallFontSize, "OUTLINE")
 	end
-	text:SetPoint("TOPLEFT", spellBookItemFrame.Button, "TOPLEFT", 2, -1)
-	text:SetJustifyH("LEFT")
+	topText:SetPoint("TOPLEFT", badgeFrame, "TOPLEFT", 1, -2)
+	topText:SetPoint("TOPRIGHT", badgeFrame, "TOPRIGHT", -1, -2)
+	topText:SetJustifyH("CENTER")
+	topText:SetJustifyV("TOP")
+	topText:SetWordWrap(false)
 
-	bg:SetPoint("BOTTOMRIGHT", text, "BOTTOMRIGHT", 4, -2)
+	local botText = badgeFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+	if fontPath then
+		botText:SetFont(fontPath, baseFontSize, "OUTLINE")
+	end
+	botText:SetPoint("BOTTOMLEFT", badgeFrame, "BOTTOMLEFT", 1, 2)
+	botText:SetPoint("BOTTOMRIGHT", badgeFrame, "BOTTOMRIGHT", -1, 2)
+	botText:SetJustifyH("CENTER")
+	botText:SetJustifyV("BOTTOM")
+	botText:SetWordWrap(false)
 
+	badgeFrame.iconAnchor = iconAnchor
+	badgeFrame.fontPath = fontPath
+	badgeFrame.baseFontSize = baseFontSize
+	badgeFrame.smallFontSize = smallFontSize
 	badgeFrame.Bg = bg
-	badgeFrame.Text = text
+	badgeFrame.TopText = topText
+	badgeFrame.Text = botText
 	badgeFrame:Hide()
 	spellBookItemFrame.BCCBindBadge = badgeFrame
 	return badgeFrame
 end
 
-local function EnsureSpellBookQuickBindOverlay(spellBookItemFrame)
-	if not spellBookItemFrame or not spellBookItemFrame.Button then
-		return nil
-	end
-	if spellBookItemFrame.BCCQuickBindButton then
-		local existing = spellBookItemFrame.BCCQuickBindButton
-		if existing:GetParent() ~= spellBookItemFrame.Button then
-			existing:SetParent(spellBookItemFrame.Button)
-			existing:SetAllPoints(spellBookItemFrame.Button)
-			existing:SetFrameLevel(spellBookItemFrame.Button:GetFrameLevel() + 4)
-		end
-		return existing
-	end
-
-	-- Eigenes Overlay-Button-Frame: Ist nur sichtbar, solange ClickBindingFrame offen
-	-- und 1-Klick Direkt-Binden aktiv ist. Im normalen Spielbetrieb komplett versteckt (:Hide()),
-	-- sodass Blizzards SpellBookItemButton zu 100 % untainted bleibt.
-	local overlay = CreateFrame("Button", nil, spellBookItemFrame.Button)
-	overlay:SetAllPoints(spellBookItemFrame.Button)
-	overlay:SetFrameLevel(spellBookItemFrame.Button:GetFrameLevel() + 4)
-	overlay:RegisterForClicks("AnyUp")
-	overlay:RegisterForDrag("LeftButton")
-
-	-- Wichtig: Niemals spellBookItemFrame:OnIconEnter() oder :OnIconLeave() aus dem Overlay aufrufen,
-	-- da Blizzard dort PetActionBar:ClearPetActionHighlightMarks() und PetActionBar:Update() -> :Hide()
-	-- aufruft und damit PET_ACTION_HIGHLIGHT_MARKS sowie PetActionBar.isShownExternal taintet.
+-- Gemeinsame Hover-, Press- und Drag-Skripte für beide Zauberbuch-Overlays (1-Klick-QuickBind in /bcc
+-- sowie SecureActionButton-Schild außerhalb von /bcc). Niemals spellBookItemFrame:OnIconEnter() oder
+-- :OnIconLeave() aufrufen, da Blizzard dort PetActionBar:ClearPetActionHighlightMarks() und
+-- PetActionBar:Update() -> :Hide() aufruft und damit PET_ACTION_HIGHLIGHT_MARKS sowie PetActionBar taintet.
+local function AttachOverlayHoverAndDragScripts(overlay, spellBookItemFrame)
 	overlay:SetScript("OnEnter", function()
 		if not spellBookItemFrame.HasValidData or not spellBookItemFrame:HasValidData() then
 			return
@@ -200,26 +242,37 @@ local function EnsureSpellBookQuickBindOverlay(spellBookItemFrame)
 			C_SpellBook.PickupSpellBookItem(spellBookItemFrame.slotIndex, spellBookItemFrame.spellBank)
 		end
 	end)
+end
+
+local function EnsureSpellBookQuickBindOverlay(spellBookItemFrame)
+	if not spellBookItemFrame or not spellBookItemFrame.Button then
+		return nil
+	end
+	if spellBookItemFrame.BCCQuickBindButton then
+		local existing = spellBookItemFrame.BCCQuickBindButton
+		if existing:GetParent() ~= spellBookItemFrame.Button then
+			existing:SetParent(spellBookItemFrame.Button)
+			existing:SetAllPoints(spellBookItemFrame.Button)
+			existing:SetFrameLevel(spellBookItemFrame.Button:GetFrameLevel() + 5)
+		end
+		return existing
+	end
+
+	-- Overlay 1 (BCCQuickBindButton): Ist ausschließlich sichtbar, solange ClickBindingFrame (/bcc)
+	-- geöffnet ist (inClickBind == true), um alle Maustasten (LMB, RMB, MMB, MB4, MB5 + Modifier)
+	-- für das 1-Klick-Direktbinden abzufangen. Außerhalb von /bcc immer versteckt (:Hide()).
+	local overlay = CreateFrame("Button", nil, spellBookItemFrame.Button)
+	overlay:SetAllPoints(spellBookItemFrame.Button)
+	overlay:SetFrameLevel(spellBookItemFrame.Button:GetFrameLevel() + 5)
+	overlay:RegisterForClicks("AnyUp")
+	overlay:RegisterForDrag("LeftButton")
+	AttachOverlayHoverAndDragScripts(overlay, spellBookItemFrame)
 
 	overlay:SetScript("OnClick", function(_, mouseButton)
 		if not spellBookItemFrame.HasValidData or not spellBookItemFrame:HasValidData() then
 			return
 		end
-		if not spellBookItemFrame.inClickBindMode then
-			-- Außerhalb von /bcc liegt das Overlay als Hover-Schutz über bereits getainteten Zauberbuch-Slots:
-			-- Normale Zauberbuch-Klicks (Zauber wirken, Flyout, Pet-Autocast, Chat-Link) wie in SpellBookItemButtonMixin:OnClick weiterleiten.
-			if mouseButton == "LeftButton" or mouseButton == "RightButton" then
-				if IsModifiedClick and IsModifiedClick() then
-					if spellBookItemFrame.OnModifiedIconClick then
-						spellBookItemFrame:OnModifiedIconClick(mouseButton)
-					end
-				elseif spellBookItemFrame.OnIconClick then
-					spellBookItemFrame:OnIconClick(mouseButton)
-				end
-			end
-			return
-		end
-		if not spellBookItemFrame.canClickBind or spellBookItemFrame.isUnlearned then
+		if not spellBookItemFrame.inClickBindMode or not spellBookItemFrame.canClickBind or spellBookItemFrame.isUnlearned then
 			return
 		end
 		local actionID = spellBookItemFrame.spellBookItemInfo and spellBookItemFrame.spellBookItemInfo.actionID
@@ -253,6 +306,98 @@ local function EnsureSpellBookQuickBindOverlay(spellBookItemFrame)
 	overlay:Hide()
 	spellBookItemFrame.BCCQuickBindButton = overlay
 	return overlay
+end
+
+-- Overlay 2 (BCCSecureCastButton): Erbt von Blizzards "SecureActionButtonTemplate" und liegt ausschließlich
+-- außerhalb von /bcc (not inClickBind and isItemTainted) über bereits getainteten Zauberbuch-Slots.
+-- Wichtig: Niemals SetScript("OnClick") aufrufen, damit Blizzards natives SecureActionButton_OnClick
+-- aus SecureTemplates.xml zu 100 % [SECURE] bleibt und Zauber ohne CastSpellBookItem()-Taint wirkt.
+local function EnsureSpellBookSecureCastOverlay(spellBookItemFrame)
+	if not spellBookItemFrame or not spellBookItemFrame.Button then
+		return nil
+	end
+	local inCombat = InCombatLockdown and InCombatLockdown() or false
+	if spellBookItemFrame.BCCSecureCastButton then
+		local existing = spellBookItemFrame.BCCSecureCastButton
+		if not inCombat and existing:GetParent() ~= spellBookItemFrame.Button then
+			existing:SetParent(spellBookItemFrame.Button)
+			existing:SetAllPoints(spellBookItemFrame.Button)
+			existing:SetFrameLevel(spellBookItemFrame.Button:GetFrameLevel() + 4)
+		elseif inCombat and existing:GetParent() ~= spellBookItemFrame.Button then
+			pendingPostCombatRefresh = true
+		end
+		return existing
+	end
+	if inCombat then
+		pendingPostCombatRefresh = true
+		return nil
+	end
+
+	local secureBtn = CreateFrame("Button", nil, spellBookItemFrame.Button, "SecureActionButtonTemplate")
+	secureBtn:SetAllPoints(spellBookItemFrame.Button)
+	secureBtn:SetFrameLevel(spellBookItemFrame.Button:GetFrameLevel() + 4)
+	secureBtn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+	secureBtn:RegisterForDrag("LeftButton")
+	secureBtn:SetAttribute("useOnKeyDown", false)
+	secureBtn:SetAttribute("checkselfcast", true)
+	secureBtn:SetAttribute("shift-type*", ATTRIBUTE_NOOP or "")
+	AttachOverlayHoverAndDragScripts(secureBtn, spellBookItemFrame)
+
+	-- Nicht-geschützte Zusatzaktionen (Shift-Klick Chat-/Makro-Link oder Pickup) über PostClick bedienen
+	secureBtn:SetScript("PostClick", function(_, mouseButton)
+		if not spellBookItemFrame.HasValidData or not spellBookItemFrame:HasValidData() then
+			return
+		end
+		if IsModifiedClick and (IsModifiedClick("CHATLINK") or IsModifiedClick("PICKUPACTION")) then
+			if spellBookItemFrame.OnModifiedIconClick then
+				spellBookItemFrame:OnModifiedIconClick(mouseButton)
+			end
+		end
+	end)
+
+	secureBtn:Hide()
+	spellBookItemFrame.BCCSecureCastButton = secureBtn
+	return secureBtn
+end
+
+local function ConfigureSecureCastOverlay(secureBtn, spellBookItemFrame)
+	if not secureBtn or not spellBookItemFrame or (InCombatLockdown and InCombatLockdown()) then
+		return
+	end
+	local noop = ATTRIBUTE_NOOP or ""
+	secureBtn:SetAttribute("type1", noop)
+	secureBtn:SetAttribute("type2", noop)
+	secureBtn:SetAttribute("spell", nil)
+	secureBtn:SetAttribute("spell1", nil)
+	secureBtn:SetAttribute("macrotext2", nil)
+
+	local info = spellBookItemFrame.spellBookItemInfo
+	if not info or spellBookItemFrame.isUnlearned or spellBookItemFrame.isOffSpec then
+		return
+	end
+
+	local itemType = info.itemType
+	local spellID = info.spellID or info.actionID
+	if Enum and Enum.SpellBookItemType then
+		if itemType == Enum.SpellBookItemType.Spell and not info.isPassive and spellID then
+			secureBtn:SetAttribute("type1", "spell")
+			secureBtn:SetAttribute("type2", "spell")
+			secureBtn:SetAttribute("spell", spellID)
+		elseif itemType == Enum.SpellBookItemType.PetAction and not info.isPassive then
+			if spellID then
+				secureBtn:SetAttribute("type1", "spell")
+				secureBtn:SetAttribute("spell1", spellID)
+			end
+			if info.name and info.name ~= "" then
+				secureBtn:SetAttribute("type2", "macro")
+				secureBtn:SetAttribute("macrotext2", "/petautocasttoggle " .. info.name)
+			end
+		elseif itemType == Enum.SpellBookItemType.Flyout and info.actionID then
+			secureBtn:SetAttribute("type1", "flyout")
+			secureBtn:SetAttribute("type2", "flyout")
+			secureBtn:SetAttribute("spell", info.actionID)
+		end
+	end
 end
 
 local function EnsureSpellBookQuickBindCheckbox()
@@ -349,6 +494,7 @@ function SpellBookUI.UpdateItemClickBindVisuals(spellBookItemFrame, bindingsMap)
 	if not spellBookItemFrame then
 		return
 	end
+	local inCombat = InCombatLockdown and InCombatLockdown() or false
 	if Constants.IsGamepadUIActive and Constants.IsGamepadUIActive() then
 		if spellBookItemFrame.BCCBindBadge then
 			spellBookItemFrame.BCCBindBadge:Hide()
@@ -356,6 +502,14 @@ function SpellBookUI.UpdateItemClickBindVisuals(spellBookItemFrame, bindingsMap)
 		if spellBookItemFrame.BCCQuickBindButton then
 			spellBookItemFrame.BCCQuickBindButton:Hide()
 			spellBookItemFrame.BCCQuickBindButton:SetParent(nil)
+		end
+		if spellBookItemFrame.BCCSecureCastButton then
+			if not inCombat then
+				spellBookItemFrame.BCCSecureCastButton:Hide()
+				spellBookItemFrame.BCCSecureCastButton:SetParent(nil)
+			else
+				pendingPostCombatRefresh = true
+			end
 		end
 		return
 	end
@@ -369,6 +523,13 @@ function SpellBookUI.UpdateItemClickBindVisuals(spellBookItemFrame, bindingsMap)
 		end
 		if quickBindOverlay then
 			quickBindOverlay:Hide()
+		end
+		if spellBookItemFrame.BCCSecureCastButton then
+			if not inCombat then
+				spellBookItemFrame.BCCSecureCastButton:Hide()
+			else
+				pendingPostCombatRefresh = true
+			end
 		end
 		return
 	end
@@ -395,11 +556,28 @@ function SpellBookUI.UpdateItemClickBindVisuals(spellBookItemFrame, bindingsMap)
 		end
 	end
 
-	-- Im Click-Cast-Modus sowie auf allen bereits durch /bcc getainteten Zauberbuch-Slots liegt das Overlay
-	-- über dem Button, damit Blizzards OnIconEnter/OnIconLeave niemals auf einem getainteten Zauberbuch-Slot
-	-- ausgelöst wird und _G.PET_ACTION_HIGHLIGHT_MARKS sowie _G.ON_BAR_HIGHLIGHT_MARKS zu 100 % [SECURE] bleiben.
+	-- 1. Solange /bcc offen ist (inClickBind == true), fängt BCCQuickBindButton alle Maustasten zum 1-Klick-Binden ab.
 	if quickBindOverlay then
-		quickBindOverlay:SetShown(inClickBind or isItemTainted)
+		quickBindOverlay:SetShown(inClickBind)
+	end
+
+	-- 2. Außerhalb von /bcc (not inClickBind and isItemTainted) übernimmt BCCSecureCastButton (SecureActionButtonTemplate)
+	-- sowohl den Hover-Schutz für PetActionBar als auch das legale Zauberwirken via SecureActionButton_OnClick.
+	local needSecureCastShield = (not inClickBind) and isItemTainted
+	if needSecureCastShield then
+		local secureBtn = EnsureSpellBookSecureCastOverlay(spellBookItemFrame)
+		if secureBtn and not inCombat then
+			ConfigureSecureCastOverlay(secureBtn, spellBookItemFrame)
+			secureBtn:Show()
+		elseif inCombat then
+			pendingPostCombatRefresh = true
+		end
+	elseif spellBookItemFrame.BCCSecureCastButton then
+		if not inCombat then
+			spellBookItemFrame.BCCSecureCastButton:Hide()
+		else
+			pendingPostCombatRefresh = true
+		end
 	end
 
 	-- Im 1-Klick-Direktbinde-Modus leuchten alle bindbaren Zauber im Zauberbuch
@@ -422,14 +600,51 @@ function SpellBookUI.UpdateItemClickBindVisuals(spellBookItemFrame, bindingsMap)
 	local spellID = itemInfo and itemInfo.spellID
 	local bindings = (actionID and bindingsMap[actionID]) or (spellID and bindingsMap[spellID])
 	if bindings and #bindings > 0 then
-		local firstShort = Constants.GetShortBindingString(bindings[1]) or "✓"
-		if #bindings > 1 then
-			firstShort = string.format("%s +%d", firstShort, #bindings - 1)
+		local modLine, btnLine = GetBadgeLinesForBindings(bindings)
+		local anchor = badgeFrame.iconAnchor or spellBookItemFrame.Button.Icon or spellBookItemFrame.Button
+		local btnFontSize = (btnLine and string.len(btnLine) > 4) and badgeFrame.smallFontSize or badgeFrame.baseFontSize
+		badgeFrame:ClearAllPoints()
+		if modLine and modLine ~= "" then
+			badgeFrame:SetSize(44, 23)
+			badgeFrame:SetPoint("BOTTOM", anchor, "TOP", 0, -5)
+			if badgeFrame.TopText then
+				badgeFrame.TopText:SetText("|cffffd100" .. modLine .. "|r")
+				badgeFrame.TopText:Show()
+			end
+			badgeFrame.Text:ClearAllPoints()
+			badgeFrame.Text:SetPoint("BOTTOMLEFT", badgeFrame, "BOTTOMLEFT", 1, 2)
+			badgeFrame.Text:SetPoint("BOTTOMRIGHT", badgeFrame, "BOTTOMRIGHT", -1, 2)
+			badgeFrame.Text:SetJustifyV("BOTTOM")
+			if badgeFrame.fontPath and btnFontSize then
+				badgeFrame.Text:SetFont(badgeFrame.fontPath, btnFontSize, "OUTLINE")
+			end
+			badgeFrame.Text:SetText(Colors.BIND_BADGE .. (btnLine or "✓") .. Colors.RESET)
+		else
+			badgeFrame:SetSize(44, 15)
+			badgeFrame:SetPoint("BOTTOM", anchor, "TOP", 0, -1)
+			if badgeFrame.TopText then
+				badgeFrame.TopText:SetText("")
+				badgeFrame.TopText:Hide()
+			end
+			badgeFrame.Text:ClearAllPoints()
+			badgeFrame.Text:SetPoint("TOPLEFT", badgeFrame, "TOPLEFT", 1, -1)
+			badgeFrame.Text:SetPoint("BOTTOMRIGHT", badgeFrame, "BOTTOMRIGHT", -1, 1)
+			badgeFrame.Text:SetJustifyV("MIDDLE")
+			if badgeFrame.fontPath and btnFontSize then
+				badgeFrame.Text:SetFont(badgeFrame.fontPath, btnFontSize, "OUTLINE")
+			end
+			badgeFrame.Text:SetText(Colors.BIND_BADGE .. (btnLine or "✓") .. Colors.RESET)
 		end
-		badgeFrame.Text:SetText(Colors.BIND_BADGE .. firstShort .. Colors.RESET)
 		badgeFrame:Show()
 	else
 		badgeFrame:Hide()
+	end
+end
+
+function SpellBookUI.OnCombatEnded()
+	if pendingPostCombatRefresh then
+		pendingPostCombatRefresh = false
+		SpellBookUI.RefreshBadges()
 	end
 end
 
@@ -478,6 +693,13 @@ function SpellBookUI.SetupHooks()
 			end
 			if self and self.BCCQuickBindButton then
 				self.BCCQuickBindButton:Hide()
+			end
+			if self and self.BCCSecureCastButton then
+				if not (InCombatLockdown and InCombatLockdown()) then
+					self.BCCSecureCastButton:Hide()
+				else
+					pendingPostCombatRefresh = true
+				end
 			end
 		end)
 	end
