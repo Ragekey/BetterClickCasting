@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.9.1] (2026-11-22)
+### Added
+- **Dual Spec Preset Linking (`Spec 1` / `Spec 2`, `/bcc preset spec1|spec2`):**
+  - You can now optionally link any saved character preset to your **Primary Spec (`Spec 1`)** or **Secondary Spec (`Spec 2`)** directly in the **`Preset: ...`** context menu (or via `/bcc preset spec1 <Name>` and `/bcc preset spec2 <Name>`).
+  - When you switch specs via Dual Spec (`ACTIVE_TALENT_GROUP_CHANGED`), Better Click Casting automatically notifies you of the linked preset for your new spec (or automatically loads it into `ClickBindingFrame` ready to Save when `/bcc` is open or Trainer Upgrade Behavior is set to *Auto-Open & Prepare*).
+
+### Fixed
+- **Dual Spec Talent Spells Disappearing After Spec Switch (e.g. *Penance*, *Power Infusion*):**
+  - **Preset Loading (`keepUnlearnedSpells`):** Loading a character preset (`/bcc preset load` or via the Preset dropdown) now preserves talent spells from your other spec even while they are currently unlearned (displaying them as `[NOT LEARNED]` until you switch back to that spec), instead of skipping and removing them from the binding list. (Cross-character imports via `/bcc copy` or `!BCC1:...!` strings continue to filter out foreign class spells).
+  - **Protection Against Blizzard's `SPELLS_CHANGED` Purge While `/bcc` Is Open:** Blizzard's native `ClickBindingFrameMixin:OnEvent("SPELLS_CHANGED")` deletes all currently unlearned spells from `ClickBindingFrame.dataProvider` whenever `SPELLS_CHANGED` fires while the Click Cast window is open. Better Click Casting now snapshots active custom bindings in the open window and immediately restores any talent bindings purged by `SPELLS_CHANGED` so saving changes in your off-spec never wipes your main-spec talent bindings.
+  - **`ACTIVE_TALENT_GROUP_CHANGED` & `PLAYER_TALENT_UPDATE` Cache Sync:** Added immediate and delayed Spellbook cache refreshes after Dual Spec switches so newly re-activated multi-rank talent spells (like *Penance*) are recognized immediately.
+
 ## [0.9.0] (2026-11-22)
 ### Added
 - **Drag & Drop Mouse Button & Matrix Modifier Reordering (`/bcc order`, incl. MMO Mice `MB6..MB31`):**

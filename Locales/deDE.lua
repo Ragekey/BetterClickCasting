@@ -406,6 +406,17 @@ L["REORDER_DRAG_HINT_TOOLTIP"] = "Linksklick gedrückt halten und hoch oder runt
 L["CHAT_ORDER_RESET"] = "|cff40ff59Better Click Casting:|r Reihenfolge der Maustasten und Modifikatoren auf Standard zurückgesetzt."
 L["CHAT_ORDER_MMB_CENTER"] = "|cff40ff59Better Click Casting:|r Maustasten-Reihenfolge gesetzt auf |cffffd100LMB | MMB | RMB|r."
 
+-- Dual Spec & Preset Spec Linking (v0.9.1)
+L["PRESET_ACT_LINK_SPEC_1_FORMAT"] = "'%s' mit Primär-Spec (Spec 1) verknüpfen"
+L["PRESET_ACT_LINK_SPEC_2_FORMAT"] = "'%s' mit Sekundär-Spec (Spec 2) verknüpfen"
+L["PRESET_SPEC_TAG_1"] = "|cff55ccff[Spec 1]|r"
+L["PRESET_SPEC_TAG_2"] = "|cff55ccff[Spec 2]|r"
+L["PRESET_SPEC_TAG_BOTH"] = "|cff55ccff[Spec 1+2]|r"
+L["CHAT_PRESET_SPEC_LINKED_FORMAT"] = "|cff40ff59Better Click Casting:|r Preset |cffffd100%s|r mit |cff55ccffSpec %d|r verknüpft."
+L["CHAT_PRESET_SPEC_UNLINKED_FORMAT"] = "|cff99ccffBetter Click Casting:|r Verknüpfung von Preset |cffffd100%s|r mit |cff55ccffSpec %d|r aufgehoben."
+L["CHAT_DUAL_SPEC_PRESET_READY_FORMAT"] = "|cff40ff59Better Click Casting:|r Zu |cff55ccffSpec %d|r gewechselt. Preset |cffffd100%s|r ist mit diesem Spec verknüpft (nutze |cffffd100/bcc preset load %s|r oder das Preset-Menü in /bcc zum Laden)."
+L["CHAT_DUAL_SPEC_RESTORED_FORMAT"] = "|cff40ff59Better Click Casting:|r %d Talent-Klickbelegung(en) beim Spec-Wechsel in der Liste geschützt."
+
 if ns.ApplyLocale then
 	ns.ApplyLocale("auto")
 end

@@ -407,6 +407,17 @@ L["REORDER_DRAG_HINT_TOOLTIP"] = "Mantén pulsado el clic izquierdo y arrastra h
 L["CHAT_ORDER_RESET"] = "|cff40ff59Better Click Casting:|r Orden de botones del ratón y modificadores restablecido por defecto."
 L["CHAT_ORDER_MMB_CENTER"] = "|cff40ff59Better Click Casting:|r Orden de botones del ratón ajustado a |cffffd100LMB | MMB | RMB|r."
 
+-- Dual Spec & Preset Spec Linking (v0.9.1)
+L["PRESET_ACT_LINK_SPEC_1_FORMAT"] = "Vincular '%s' a especialización principal (Spec 1)"
+L["PRESET_ACT_LINK_SPEC_2_FORMAT"] = "Vincular '%s' a especialización secundaria (Spec 2)"
+L["PRESET_SPEC_TAG_1"] = "|cff55ccff[Spec 1]|r"
+L["PRESET_SPEC_TAG_2"] = "|cff55ccff[Spec 2]|r"
+L["PRESET_SPEC_TAG_BOTH"] = "|cff55ccff[Spec 1+2]|r"
+L["CHAT_PRESET_SPEC_LINKED_FORMAT"] = "|cff40ff59Better Click Casting:|r Preajuste |cffffd100%s|r vinculado a |cff55ccffSpec %d|r."
+L["CHAT_PRESET_SPEC_UNLINKED_FORMAT"] = "|cff99ccffBetter Click Casting:|r Preajuste |cffffd100%s|r desvinculado de |cff55ccffSpec %d|r."
+L["CHAT_DUAL_SPEC_PRESET_READY_FORMAT"] = "|cff40ff59Better Click Casting:|r Cambiado a |cff55ccffSpec %d|r. El preajuste |cffffd100%s|r está vinculado a esta especialización (usa |cffffd100/bcc preset load %s|r o el menú de preajustes en /bcc para aplicarlo)."
+L["CHAT_DUAL_SPEC_RESTORED_FORMAT"] = "|cff40ff59Better Click Casting:|r Se conservaron %d asignación(es) de talentos en la lista tras cambiar de especialización."
+
 if ns.ApplyLocale then
 	ns.ApplyLocale("auto")
 end
