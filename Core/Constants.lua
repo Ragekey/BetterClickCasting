@@ -346,7 +346,8 @@ end
 -- Liefert einen eindeutigen Charakter-Schlüssel (inkl. Vorname, Nachname und Realm) für SavedVariables
 function Constants.GetPlayerProfileKey()
 	local fullName = Constants.GetPlayerDisplayName()
-	local realm = (GetRealmName and GetRealmName()) or "Realm"
+	local rawRealm = GetRealmName and GetRealmName() or ""
+	local realm = (rawRealm ~= "" and rawRealm) or "Realm"
 	return fullName .. " (" .. realm .. ")"
 end
 

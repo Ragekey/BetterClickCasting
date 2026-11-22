@@ -556,21 +556,26 @@ function SpellBookUI.UpdateItemClickBindVisuals(spellBookItemFrame, bindingsMap)
 		end
 	end
 
-	-- 1. Solange /bcc offen ist (inClickBind == true), fängt BCCQuickBindButton alle Maustasten zum 1-Klick-Binden ab.
-	if quickBindOverlay then
-		quickBindOverlay:SetShown(inClickBind)
-	end
-
-	-- 2. Außerhalb von /bcc (not inClickBind and isItemTainted) übernimmt BCCSecureCastButton (SecureActionButtonTemplate)
-	-- sowohl den Hover-Schutz für PetActionBar als auch das legale Zauberwirken via SecureActionButton_OnClick.
-	local needSecureCastShield = (not inClickBind) and isItemTainted
-	if needSecureCastShield then
+	-- 1. Lückenloser 2-Schicht-Schild: Auf jedem getainteten Zauberbuch-Slot (isItemTainted) wird
+	-- BCCSecureCastButton (SecureActionButtonTemplate, FrameLevel + 4) bereits außerhalb des Kampfes
+	-- fertig konfiguriert und sichtbar gehalten (auch während /bcc offen ist, direkt unter BCCQuickBindButton).
+	-- Schließt /bcc (selbst mitten im Kampf), verschwindet BCCQuickBindButton (Level + 5) und legt den
+	-- bereits aktiven BCCSecureCastButton ohne 1 ms Lücke frei, sodass SpellBookItemMixin:OnIconEnter()
+	-- niemals auf einem getainteten Slot feuert und _G.ON_BAR_HIGHLIGHT_MARKS / ActionBars zu 100 % [SECURE] bleiben.
+	local secureShieldActive = false
+	if isItemTainted then
 		local secureBtn = EnsureSpellBookSecureCastOverlay(spellBookItemFrame)
-		if secureBtn and not inCombat then
-			ConfigureSecureCastOverlay(secureBtn, spellBookItemFrame)
-			secureBtn:Show()
-		elseif inCombat then
-			pendingPostCombatRefresh = true
+		if secureBtn then
+			if not inCombat then
+				ConfigureSecureCastOverlay(secureBtn, spellBookItemFrame)
+				secureBtn:Show()
+				secureShieldActive = true
+			else
+				secureShieldActive = secureBtn:IsShown() and true or false
+				if not secureShieldActive then
+					pendingPostCombatRefresh = true
+				end
+			end
 		end
 	elseif spellBookItemFrame.BCCSecureCastButton then
 		if not inCombat then
@@ -578,6 +583,14 @@ function SpellBookUI.UpdateItemClickBindVisuals(spellBookItemFrame, bindingsMap)
 		else
 			pendingPostCombatRefresh = true
 		end
+	end
+
+	-- 2. Solange /bcc offen ist (inClickBind == true), liegt BCCQuickBindButton (Level + 5) über
+	-- BCCSecureCastButton und fängt alle Maustasten zum 1-Klick-Direktbinden ab.
+	-- Fallback im Kampf: Falls ein getainteter Slot im Kampf noch keinen aktiven SecureCastButton hat,
+	-- bleibt BCCQuickBindButton als Notfall-Hover-Schild aktiv bis PLAYER_REGEN_ENABLED.
+	if quickBindOverlay then
+		quickBindOverlay:SetShown(inClickBind or (isItemTainted and inCombat and not secureShieldActive))
 	end
 
 	-- Im 1-Klick-Direktbinde-Modus leuchten alle bindbaren Zauber im Zauberbuch

@@ -1553,19 +1553,7 @@ local REORDER_ROW_GAP = 2
 local function GetMouseButtonDisplayLabel(buttonName)
 	local norm = Constants.NormalizeMouseButtonName(buttonName)
 	local short = Constants.GetShortButtonName(norm)
-	local full = short
-	if norm == "LeftButton" then
-		full = L["GROUP_BUTTON_LEFT"] or "Left Click"
-	elseif norm == "RightButton" then
-		full = L["GROUP_BUTTON_RIGHT"] or "Right Click"
-	elseif norm == "MiddleButton" then
-		full = L["GROUP_BUTTON_MIDDLE"] or "Middle Click"
-	else
-		local num = tonumber(string.match(tostring(norm), "^Button(%d+)$"))
-		if num then
-			full = string.format(L["GROUP_BUTTON_NUMBER_FORMAT"] or "Mouse Button %d", num)
-		end
-	end
+	local full = (Constants.GetButtonDisplayName and Constants.GetButtonDisplayName(norm)) or short
 	return string.format("|cffffd100%s|r  |cffffffff%s|r", short, full)
 end
 
@@ -1807,7 +1795,7 @@ local function EnsureReorderWindow()
 				for n = 6, 31 do
 					local btnKey = "Button" .. tostring(n)
 					local short = "MB" .. tostring(n)
-					local full = string.format(L["GROUP_BUTTON_NUMBER_FORMAT"] or "Mouse Button %d", n)
+					local full = (Constants.GetButtonDisplayName and Constants.GetButtonDisplayName(btnKey)) or ("Mouse Button " .. tostring(n))
 					local isVisible = Database.IsMatrixButtonColumnVisible and Database.IsMatrixButtonColumnVisible(btnKey)
 					local label = isVisible and string.format("|cff40ff59%s|r (%s)", short, full) or string.format("|cffffd100%s|r (%s)", short, full)
 					rootDescription:CreateButton(label, function()
