@@ -4,7 +4,7 @@ local Constants = {}
 ns.Constants = Constants
 
 Constants.ADDON_NAME = addonName or "BetterClickCasting"
-Constants.VERSION = "0.9.0"
+Constants.VERSION = "0.9.1"
 -- Nativer gemipmappter Blizzard-Atlas aus Blizzard_ClickBindingUI.lua
 Constants.ICON_ATLAS = "clickcast-icon-mouse"
 
@@ -376,4 +376,24 @@ function Constants.IsGamepadUIActive()
 		end
 	end
 	return false
+end
+
+-- Liefert den aktiven Dual-Spec-Gruppenindex (1 = Primary Spec, 2 = Secondary Spec).
+-- Wichtig: C_SpecializationInfo.GetActiveSpecGroup() immer ohne Argumente aufrufen,
+-- damit niemals getaintete Argumente an die C-Funktion übergeben werden.
+function Constants.GetActiveSpecGroupIndex()
+	if C_SpecializationInfo and C_SpecializationInfo.GetActiveSpecGroup then
+		local idx = tonumber(C_SpecializationInfo.GetActiveSpecGroup())
+		if idx == 2 then
+			return 2
+		end
+		return 1
+	end
+	if GetActiveTalentGroup then
+		local idx = tonumber(GetActiveTalentGroup())
+		if idx == 2 then
+			return 2
+		end
+	end
+	return 1
 end

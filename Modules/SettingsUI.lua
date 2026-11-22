@@ -91,7 +91,16 @@ local function FormatPresetLabel(preset)
 		return L["PRESET_NO_PRESETS_SAVED"] or "None"
 	end
 	local count = (type(preset.bindings) == "table") and #preset.bindings or 0
-	return string.format(L["PRESET_ENTRY_FORMAT"] or "%s (%d)", preset.name or "?", count)
+	local base = string.format(L["PRESET_ENTRY_FORMAT"] or "%s (%d)", preset.name or "?", count)
+	local specTag = ""
+	if preset.spec1 and preset.spec2 then
+		specTag = " " .. (L["PRESET_SPEC_TAG_BOTH"] or "[Spec 1+2]")
+	elseif preset.spec1 then
+		specTag = " " .. (L["PRESET_SPEC_TAG_1"] or "[Spec 1]")
+	elseif preset.spec2 then
+		specTag = " " .. (L["PRESET_SPEC_TAG_2"] or "[Spec 2]")
+	end
+	return base .. specTag
 end
 
 local function FormatCharProfileLabel(prof, currentKey)
@@ -218,6 +227,36 @@ local function PopulatePresetContextMenu(rootDescription, isQuickLoad)
 
 	local targetForAction = isQuickLoad and (activeName and Database.FindPreset(activeName)) or selectedPreset
 	if targetForAction and targetForAction.name then
+		if rootDescription.CreateCheckbox and Database.SetPresetSpecAssignment then
+			rootDescription:CreateCheckbox(
+				string.format(L["PRESET_ACT_LINK_SPEC_1_FORMAT"], targetForAction.name),
+				function()
+					return targetForAction.spec1 and true or false
+				end,
+				function()
+					local newVal = not (targetForAction.spec1 and true or false)
+					Database.SetPresetSpecAssignment(targetForAction.name, 1, newVal)
+					if DEFAULT_CHAT_FRAME then
+						local fmt = newVal and L["CHAT_PRESET_SPEC_LINKED_FORMAT"] or L["CHAT_PRESET_SPEC_UNLINKED_FORMAT"]
+						DEFAULT_CHAT_FRAME:AddMessage(string.format(fmt, targetForAction.name, 1))
+					end
+				end
+			)
+			rootDescription:CreateCheckbox(
+				string.format(L["PRESET_ACT_LINK_SPEC_2_FORMAT"], targetForAction.name),
+				function()
+					return targetForAction.spec2 and true or false
+				end,
+				function()
+					local newVal = not (targetForAction.spec2 and true or false)
+					Database.SetPresetSpecAssignment(targetForAction.name, 2, newVal)
+					if DEFAULT_CHAT_FRAME then
+						local fmt = newVal and L["CHAT_PRESET_SPEC_LINKED_FORMAT"] or L["CHAT_PRESET_SPEC_UNLINKED_FORMAT"]
+						DEFAULT_CHAT_FRAME:AddMessage(string.format(fmt, targetForAction.name, 2))
+					end
+				end
+			)
+		end
 		rootDescription:CreateButton(string.format(L["PRESET_ACT_UPDATE_FORMAT"], targetForAction.name), function()
 			if ns.ClickBindingUI and ns.ClickBindingUI.SavePresetByName then
 				ns.ClickBindingUI.SavePresetByName(targetForAction.name)

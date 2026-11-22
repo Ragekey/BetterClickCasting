@@ -22,6 +22,8 @@ loaderFrame:RegisterEvent("TRAINER_CLOSED")
 loaderFrame:RegisterEvent("PLAYER_REGEN_DISABLED")
 loaderFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
 loaderFrame:RegisterEvent("INPUT_DEVICE_INTERFACE_TRANSITION")
+loaderFrame:RegisterEvent("ACTIVE_TALENT_GROUP_CHANGED")
+loaderFrame:RegisterEvent("PLAYER_TALENT_UPDATE")
 
 loaderFrame:SetScript("OnEvent", function(self, event, arg1)
 	if event == "ADDON_LOADED" then
@@ -93,17 +95,44 @@ loaderFrame:SetScript("OnEvent", function(self, event, arg1)
 		-- LEARNED_SPELL_IN_SKILL_LINE, TRAINER_CLOSED, PLAYER_REGEN_DISABLED, PLAYER_REGEN_ENABLED
 		-- sowie zukünftige Events) werden im Controller-Modus vor jedem Modul-Aufruf abgefangen.
 		if ns.Constants and ns.Constants.IsGamepadUIActive and ns.Constants.IsGamepadUIActive() then
-			if event == "SPELLS_CHANGED" or event == "LEARNED_SPELL_IN_SKILL_LINE" then
+			if event == "SPELLS_CHANGED" or event == "LEARNED_SPELL_IN_SKILL_LINE" or event == "ACTIVE_TALENT_GROUP_CHANGED" or event == "PLAYER_TALENT_UPDATE" then
 				SpellRanks.InvalidateCache()
 			end
 			return
 		end
 		if event == "SPELLS_CHANGED" then
 			SpellRanks.InvalidateCache()
+			if ClickBindingFrame and ClickBindingFrame:IsShown() and ClickBindingUI and ClickBindingUI.RestorePurgedUnlearnedBindings then
+				ClickBindingUI.RestorePurgedUnlearnedBindings(true)
+			end
 			ClickBindingUI.RefreshVisibleLines()
 			SpellBookUI.RefreshBadges()
 			if ClickBindingUI and ClickBindingUI.ScheduleSmartRuleCheck then
 				ClickBindingUI.ScheduleSmartRuleCheck(0.8, false)
+			end
+		elseif event == "ACTIVE_TALENT_GROUP_CHANGED" or event == "PLAYER_TALENT_UPDATE" then
+			SpellRanks.InvalidateCache()
+			if ClickBindingUI and ClickBindingUI.OnActiveSpecGroupChanged then
+				if event == "ACTIVE_TALENT_GROUP_CHANGED" then
+					ClickBindingUI.OnActiveSpecGroupChanged()
+					if C_Timer and C_Timer.After then
+						C_Timer.After(0.5, function()
+							SpellRanks.InvalidateCache()
+							ClickBindingUI.RefreshVisibleLines()
+							if SpellBookUI and SpellBookUI.RefreshBadges then
+								SpellBookUI.RefreshBadges()
+							end
+						end)
+					end
+				else
+					ClickBindingUI.RefreshVisibleLines()
+					if SpellBookUI and SpellBookUI.RefreshBadges then
+						SpellBookUI.RefreshBadges()
+					end
+					if ClickBindingUI.ScheduleSmartRuleCheck then
+						ClickBindingUI.ScheduleSmartRuleCheck(0.8, false)
+					end
+				end
 			end
 		elseif event == "LEARNED_SPELL_IN_SKILL_LINE" then
 			SpellRanks.InvalidateCache()
@@ -447,7 +476,32 @@ SlashCmdList["BETTERCLICKCASTING"] = function(msg)
 				for _, p in ipairs(presets) do
 					local bCount = (type(p.bindings) == "table") and #p.bindings or 0
 					local activeTag = (p.name == activeName) and (" |cff40ff59" .. (L["PROFILE_CURRENT_TAG"] or "[Active]") .. "|r") or ""
-					DEFAULT_CHAT_FRAME:AddMessage(string.format("  |cffffd100%s|r |cff888888(%d)|r%s", tostring(p.name), bCount, activeTag))
+					local specTag = ""
+					if p.spec1 and p.spec2 then
+						specTag = " " .. (L["PRESET_SPEC_TAG_BOTH"] or "[Spec 1+2]")
+					elseif p.spec1 then
+						specTag = " " .. (L["PRESET_SPEC_TAG_1"] or "[Spec 1]")
+					elseif p.spec2 then
+						specTag = " " .. (L["PRESET_SPEC_TAG_2"] or "[Spec 2]")
+					end
+					DEFAULT_CHAT_FRAME:AddMessage(string.format("  |cffffd100%s|r |cff888888(%d)|r%s%s", tostring(p.name), bCount, specTag, activeTag))
+				end
+			end
+		elseif subLower == "spec1" or subLower == "spec2" then
+			local sIdx = (subLower == "spec2") and 2 or 1
+			local targetName = (restRaw ~= "" and restRaw) or Database.GetActivePresetName()
+			local p = targetName and Database.FindPreset(targetName)
+			if not p then
+				if DEFAULT_CHAT_FRAME then
+					DEFAULT_CHAT_FRAME:AddMessage(string.format(L["CHAT_PRESET_NOT_FOUND_FORMAT"], tostring(targetName or "")))
+				end
+			else
+				local field = (sIdx == 2) and "spec2" or "spec1"
+				local newVal = not (p[field] and true or false)
+				Database.SetPresetSpecAssignment(p.name, sIdx, newVal)
+				if DEFAULT_CHAT_FRAME then
+					local fmt = newVal and L["CHAT_PRESET_SPEC_LINKED_FORMAT"] or L["CHAT_PRESET_SPEC_UNLINKED_FORMAT"]
+					DEFAULT_CHAT_FRAME:AddMessage(string.format(fmt, p.name, sIdx))
 				end
 			end
 		elseif subLower == "save" or subLower == "new" then

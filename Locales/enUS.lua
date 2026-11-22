@@ -454,4 +454,15 @@ L["REORDER_DRAG_HINT_TOOLTIP"] = "Hold Left-Click and drag up or down to reorder
 L["CHAT_ORDER_RESET"] = "|cff40ff59Better Click Casting:|r Reset mouse button and modifier order to default."
 L["CHAT_ORDER_MMB_CENTER"] = "|cff40ff59Better Click Casting:|r Mouse button order set to |cffffd100LMB | MMB | RMB|r."
 
+-- Dual Spec & Preset Spec Linking (v0.9.1)
+L["PRESET_ACT_LINK_SPEC_1_FORMAT"] = "Link '%s' to Primary Spec (Spec 1)"
+L["PRESET_ACT_LINK_SPEC_2_FORMAT"] = "Link '%s' to Secondary Spec (Spec 2)"
+L["PRESET_SPEC_TAG_1"] = "|cff55ccff[Spec 1]|r"
+L["PRESET_SPEC_TAG_2"] = "|cff55ccff[Spec 2]|r"
+L["PRESET_SPEC_TAG_BOTH"] = "|cff55ccff[Spec 1+2]|r"
+L["CHAT_PRESET_SPEC_LINKED_FORMAT"] = "|cff40ff59Better Click Casting:|r Linked preset |cffffd100%s|r to |cff55ccffSpec %d|r."
+L["CHAT_PRESET_SPEC_UNLINKED_FORMAT"] = "|cff99ccffBetter Click Casting:|r Unlinked preset |cffffd100%s|r from |cff55ccffSpec %d|r."
+L["CHAT_DUAL_SPEC_PRESET_READY_FORMAT"] = "|cff40ff59Better Click Casting:|r Switched to |cff55ccffSpec %d|r. Preset |cffffd100%s|r is linked to this spec (use |cffffd100/bcc preset load %s|r or the Preset menu in /bcc to apply)."
+L["CHAT_DUAL_SPEC_RESTORED_FORMAT"] = "|cff40ff59Better Click Casting:|r Kept %d talent spell binding(s) in the list across spec switch."
+
 ns.ApplyLocale("auto")

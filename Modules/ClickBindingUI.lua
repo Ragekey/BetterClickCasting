@@ -19,6 +19,10 @@ local presetDropdownButton = nil
 local gamepadStandbyBadge = nil
 local dismissedSignature = nil
 local smartCheckPending = false
+local lastKnownProviderCustomBindings = {}
+local isManualDeleteInProgress = false
+local pendingActivePresetName = nil
+local previousActivePresetName = nil
 
 local SMART_RULE_OPTIONS = {
 	{ mode = SpellRanks.RULE_MAX,         labelKey = "SMART_RULE_MAX" },
@@ -219,7 +223,7 @@ local function BCCElementSortComparator(e1, e2)
 	return false
 end
 
-function ClickBindingUI.RebuildGroups()
+function ClickBindingUI.RebuildGroups(preserveSnapshot)
 	if Constants.IsGamepadUIActive() then
 		return
 	end
@@ -236,7 +240,10 @@ function ClickBindingUI.RebuildGroups()
 	if not provider._bccRemoveHooked and type(provider.Remove) == "function" then
 		hooksecurefunc(provider, "Remove", function()
 			if not isRebuildingGroups then
-				ClickBindingUI.RebuildGroups()
+				-- Wichtig: Wenn nicht manuell über DeleteButton gelöscht wurde (also z. B. durch Blizzards
+				-- SPELLS_CHANGED-Handler), den Snapshot NICHT überschreiben, damit RestorePurgedUnlearnedBindings
+				-- den gelöschten Talent-Zauber unmittelbar danach wiederherstellen kann!
+				ClickBindingUI.RebuildGroups(not isManualDeleteInProgress)
 			end
 		end)
 		provider._bccRemoveHooked = true
@@ -317,7 +324,79 @@ function ClickBindingUI.RebuildGroups()
 	-- 5. Sichtbare Header- und Zeilen-Frames sofort aktualisieren
 	ClickBindingUI.RefreshVisibleLines()
 
+	-- 6. Snapshot der aktuell im DataProvider vorhandenen Custom-Bindings sichern,
+	-- damit Blizzards SPELLS_CHANGED-Handler bei offenem /bcc (z. B. beim Dual-Spec-Wechsel)
+	-- nicht gelernte Talent-Zauber nicht unbemerkt aus dem DataProvider löschen kann.
+	if not preserveSnapshot then
+		local snap = {}
+		for _, element in provider:Enumerate() do
+			if element and element.elementType == ElementDataTypes.CustomsBinding and element.bindingInfo then
+				local bInfo = element.bindingInfo
+				table.insert(snap, {
+					type = bInfo.type,
+					actionID = bInfo.actionID,
+					button = bInfo.button,
+					modifiers = bInfo.modifiers,
+					unbound = element.unbound and true or false,
+				})
+			end
+		end
+		lastKnownProviderCustomBindings = snap
+	end
+
 	isRebuildingGroups = false
+end
+
+-- Stellt Custom-Bindings wieder her, die Blizzards ClickBindingFrameMixin:OnEvent("SPELLS_CHANGED")
+-- während eines offenen ClickBindingFrame wegen vorübergehend fehlendem Zauberbuch-Eintrag (Dual-Spec) entfernt hat.
+function ClickBindingUI.RestorePurgedUnlearnedBindings(silent)
+	if Constants.IsGamepadUIActive() then
+		return 0
+	end
+	if not ClickBindingFrame or not ClickBindingFrame.dataProvider or isManualDeleteInProgress then
+		return 0
+	end
+	if type(lastKnownProviderCustomBindings) ~= "table" or #lastKnownProviderCustomBindings == 0 then
+		return 0
+	end
+
+	local provider = ClickBindingFrame.dataProvider
+	local presentKeys = {}
+	for _, element in provider:Enumerate() do
+		if element and element.elementType == ElementDataTypes.CustomsBinding and element.bindingInfo then
+			local info = element.bindingInfo
+			local key = string.format("%s:%s:%s:%s", tostring(info.type or 0), tostring(info.actionID or 0), tostring(info.button or ""), tostring(info.modifiers or 0))
+			presentKeys[key] = true
+		end
+	end
+
+	local restored = 0
+	for _, saved in ipairs(lastKnownProviderCustomBindings) do
+		local key = string.format("%s:%s:%s:%s", tostring(saved.type or 0), tostring(saved.actionID or 0), tostring(saved.button or ""), tostring(saved.modifiers or 0))
+		if not presentKeys[key] and saved.type == (Enum and Enum.ClickBindingType and Enum.ClickBindingType.Spell or 1) and saved.actionID then
+			provider:Insert({
+				elementType = ElementDataTypes.CustomsBinding,
+				bindingInfo = {
+					type = saved.type,
+					actionID = saved.actionID,
+					button = saved.button,
+					modifiers = saved.modifiers,
+				},
+				unbound = saved.unbound and true or false,
+			})
+			presentKeys[key] = true
+			restored = restored + 1
+		end
+	end
+
+	if restored > 0 then
+		ClickBindingUI.RebuildGroups()
+		ClickBindingUI.RefreshVisibleLines()
+		if not silent and DEFAULT_CHAT_FRAME and L["CHAT_DUAL_SPEC_RESTORED_FORMAT"] then
+			DEFAULT_CHAT_FRAME:AddMessage(string.format(L["CHAT_DUAL_SPEC_RESTORED_FORMAT"], restored))
+		end
+	end
+	return restored
 end
 
 --------------------------------------------------------------------------------
@@ -1109,6 +1188,7 @@ local function EnsureDeleteButtonStyled(lineFrame)
 	end
 
 	delBtn:HookScript("OnMouseDown", function(self)
+		isManualDeleteInProgress = true
 		if self.Icon then
 			self.Icon:SetPoint("CENTER", self, "CENTER", 1, -1)
 		end
@@ -1118,6 +1198,20 @@ local function EnsureDeleteButtonStyled(lineFrame)
 		if self.Icon then
 			self.Icon:SetPoint("CENTER", self, "CENTER", 0, 0)
 		end
+		if C_Timer and C_Timer.After then
+			C_Timer.After(0.05, function()
+				isManualDeleteInProgress = false
+			end)
+		else
+			isManualDeleteInProgress = false
+		end
+	end)
+
+	-- Zusätzlicher OnClick-Guard: Nach einem bestätigten Klick auf DeleteButton den Snapshot
+	-- direkt mit dem neuen Zustand ohne die gelöschte Zeile synchronisieren.
+	delBtn:HookScript("OnClick", function()
+		isManualDeleteInProgress = false
+		ClickBindingUI.RebuildGroups(false)
 	end)
 
 	-- Blizzards XML-Skript und ClickBindingLineMixin:OnLeave verstecken DeleteButton bei OnLeave;
@@ -2433,13 +2527,14 @@ local debugCopyFrame = nil
 local importPopupFrame = nil
 local newPresetPopupFrame = nil
 
-local function ShowDebugCopyPopup(reportText, customTitle)
+local function ShowDebugCopyPopup(reportText, customTitle, coloredReportText)
 	if not debugCopyFrame then
 		local f = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
-		f:SetSize(520, 240)
-		f:SetPoint("CENTER", UIParent, "CENTER", 0, 120)
+		f:SetSize(680, 440)
+		f:SetPoint("CENTER", UIParent, "CENTER", 0, 40)
 		f:SetFrameStrata("DIALOG")
 		f:SetFrameLevel(200)
+		f:SetClampedToScreen(true)
 		f:EnableMouse(true)
 		f:SetMovable(true)
 		f:RegisterForDrag("LeftButton")
@@ -2454,11 +2549,13 @@ local function ShowDebugCopyPopup(reportText, customTitle)
 				edgeSize = 24,
 				insets = { left = 6, right = 6, top = 6, bottom = 6 },
 			})
+			f:SetBackdropColor(0.05, 0.06, 0.09, 0.97)
+			f:SetBackdropBorderColor(0.85, 0.72, 0.40, 1.0)
 		end
 
 		local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
 		title:SetPoint("TOPLEFT", f, "TOPLEFT", 16, -14)
-		title:SetText("Better Click Casting Debug (Strg+C zum Kopieren)")
+		title:SetText("Better Click Casting Debug")
 		f.Title = title
 
 		local closeBtn = CreateFrame("Button", nil, f, "UIPanelCloseButton")
@@ -2468,30 +2565,108 @@ local function ShowDebugCopyPopup(reportText, customTitle)
 			f:Hide()
 		end)
 
-		local scrollFrame = CreateFrame("ScrollFrame", nil, f, "UIPanelScrollFrameTemplate")
-		scrollFrame:SetPoint("TOPLEFT", f, "TOPLEFT", 16, -42)
-		scrollFrame:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -34, 16)
+		local consoleBg = CreateFrame("Frame", nil, f, "BackdropTemplate")
+		consoleBg:SetPoint("TOPLEFT", f, "TOPLEFT", 14, -40)
+		consoleBg:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -14, 46)
+		if consoleBg.SetBackdrop then
+			consoleBg:SetBackdrop({
+				bgFile = "Interface\\Buttons\\WHITE8x8",
+				edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+				tile = true,
+				tileSize = 8,
+				edgeSize = 12,
+				insets = { left = 3, right = 3, top = 3, bottom = 3 },
+			})
+			consoleBg:SetBackdropColor(0.03, 0.04, 0.06, 0.96)
+			consoleBg:SetBackdropBorderColor(0.35, 0.42, 0.55, 0.85)
+		end
+		f.ConsoleBg = consoleBg
+
+		local scrollFrame = CreateFrame("ScrollFrame", nil, consoleBg, "UIPanelScrollFrameTemplate")
+		scrollFrame:SetPoint("TOPLEFT", consoleBg, "TOPLEFT", 10, -8)
+		scrollFrame:SetPoint("BOTTOMRIGHT", consoleBg, "BOTTOMRIGHT", -28, 8)
+		f.ScrollFrame = scrollFrame
 
 		local editBox = CreateFrame("EditBox", nil, scrollFrame)
 		editBox:SetMultiLine(true)
 		editBox:SetAutoFocus(false)
 		editBox:SetFontObject(ChatFontNormal or GameFontHighlightSmall)
-		editBox:SetWidth(460)
+		editBox:SetWidth(604)
 		editBox:SetScript("OnEscapePressed", function()
 			f:Hide()
 		end)
 		scrollFrame:SetScrollChild(editBox)
 		f.EditBox = editBox
+
+		local modeBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+		modeBtn:SetSize(210, 26)
+		modeBtn:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 16, 12)
+		modeBtn:SetScript("OnClick", function()
+			PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
+			f.plainCopyMode = not f.plainCopyMode
+			if f.plainCopyMode then
+				f.EditBox:SetText(f.plainReportText or "")
+				f.EditBox:SetFocus()
+				f.EditBox:HighlightText()
+				f.ModeBtn:SetText("Back to Console View")
+			else
+				f.EditBox:SetText(f.coloredReportText or f.plainReportText or "")
+				f.EditBox:ClearFocus()
+				f.ModeBtn:SetText("Compact Report (Ctrl+C)")
+			end
+			if f.ScrollFrame and f.ScrollFrame.SetVerticalScroll then
+				f.ScrollFrame:SetVerticalScroll(0)
+			end
+		end)
+		f.ModeBtn = modeBtn
+
+		local closeFooterBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+		closeFooterBtn:SetSize(120, 26)
+		closeFooterBtn:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -16, 12)
+		closeFooterBtn:SetText(CLOSE or "Close")
+		closeFooterBtn:SetScript("OnClick", function()
+			PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF)
+			f:Hide()
+		end)
+		f.CloseFooterBtn = closeFooterBtn
+
 		debugCopyFrame = f
 	end
+
+	local isConsoleReport = (type(coloredReportText) == "string" and coloredReportText ~= "")
+	if isConsoleReport then
+		debugCopyFrame:SetSize(680, 440)
+		debugCopyFrame.EditBox:SetWidth(604)
+		debugCopyFrame.ModeBtn:Show()
+	else
+		debugCopyFrame:SetSize(560, 280)
+		debugCopyFrame.EditBox:SetWidth(484)
+		debugCopyFrame.ModeBtn:Hide()
+	end
+
+	debugCopyFrame.plainReportText = reportText or ""
+	debugCopyFrame.coloredReportText = coloredReportText
+	debugCopyFrame.plainCopyMode = not isConsoleReport
 
 	if debugCopyFrame.Title then
 		debugCopyFrame.Title:SetText(customTitle or "Better Click Casting Debug (Ctrl+C to Copy)")
 	end
 	debugCopyFrame:Show()
-	debugCopyFrame.EditBox:SetText(reportText or "")
-	debugCopyFrame.EditBox:SetFocus()
-	debugCopyFrame.EditBox:HighlightText()
+	if debugCopyFrame.Raise then
+		debugCopyFrame:Raise()
+	end
+	if isConsoleReport then
+		debugCopyFrame.EditBox:SetText(coloredReportText)
+		debugCopyFrame.EditBox:ClearFocus()
+		debugCopyFrame.ModeBtn:SetText("Compact Report (Ctrl+C)")
+	else
+		debugCopyFrame.EditBox:SetText(reportText or "")
+		debugCopyFrame.EditBox:SetFocus()
+		debugCopyFrame.EditBox:HighlightText()
+	end
+	if debugCopyFrame.ScrollFrame and debugCopyFrame.ScrollFrame.SetVerticalScroll then
+		debugCopyFrame.ScrollFrame:SetVerticalScroll(0)
+	end
 end
 
 -- Erzeugt eine kopierbare Text-Übersicht aller aktiven Klickbelegungen inkl. Taste, Zaubername, Rang, Manakosten und Smart-Regel (/bcc list).
@@ -3566,8 +3741,10 @@ function ClickBindingUI.ShowExportStringPopup(scope)
 	ShowDebugCopyPopup(exportStr, L[titleKey] or L["EXPORT_POPUP_TITLE"])
 end
 
--- Spielt eine Liste importierter/kopierter Klickbelegungen taintfrei in ClickBindingFrame.dataProvider ein
-function ClickBindingUI.ApplyImportedBindings(importedBindings, mergeMode)
+-- Spielt eine Liste importierter/kopierter Klickbelegungen taintfrei in ClickBindingFrame.dataProvider ein.
+-- keepUnlearnedSpells = true (für eigene Charakter-Presets bei Dual-Spec) behält Talent-Zauber mit gültiger actionID
+-- auch dann in der Liste (als [NOT LEARNED]), wenn das Talent im aktuell aktiven Spec gerade nicht geskillt ist.
+function ClickBindingUI.ApplyImportedBindings(importedBindings, mergeMode, keepUnlearnedSpells)
 	if InCombatLockdown and InCombatLockdown() then
 		if DEFAULT_CHAT_FRAME then
 			DEFAULT_CHAT_FRAME:AddMessage(L["CHAT_COMBAT_ERR"])
@@ -3637,6 +3814,22 @@ function ClickBindingUI.ApplyImportedBindings(importedBindings, mergeMode)
 						table.insert(resolvedCustom, bindInfo)
 						if ruleMode then
 							table.insert(resolvedRules, { bindInfo = bindInfo, ruleMode = ruleMode, rankEntry = targetEntry })
+						end
+						seenCombo[comboKey] = true
+						appliedCount = appliedCount + 1
+					elseif keepUnlearnedSpells and tonumber(entry.actionID) and tonumber(entry.actionID) > 0 then
+						-- Dual-Spec-Erhalt: Eigene Talent-Zauber des anderen Specs (wie Penance / Power Infusion)
+						-- behalten ihre gespeicherte actionID, damit sie nach dem Spec-Wechsel sofort wieder aktiv sind.
+						local rawActID = tonumber(entry.actionID)
+						local bindInfo = {
+							type = bType,
+							actionID = rawActID,
+							button = button,
+							modifiers = modifiers,
+						}
+						table.insert(resolvedCustom, bindInfo)
+						if entry.ruleMode then
+							table.insert(resolvedRules, { bindInfo = bindInfo, ruleMode = entry.ruleMode, rankEntry = nil })
 						end
 						seenCombo[comboKey] = true
 						appliedCount = appliedCount + 1
@@ -3938,12 +4131,18 @@ function ClickBindingUI.LoadPreset(presetOrName)
 		return false
 	end
 
-	-- Ein Loadout-Preset ersetzt die aktuelle Liste vollständig (mergeMode = false)
-	local appliedCount, skippedCount, ok = ClickBindingUI.ApplyImportedBindings(preset.bindings, false)
+	-- Ein eigenes Charakter-Preset ersetzt die aktuelle Liste vollständig (mergeMode = false)
+	-- und behält auch aktuell nicht gelernte Dual-Spec-Talent-Zauber (keepUnlearnedSpells = true).
+	local appliedCount, skippedCount, ok = ClickBindingUI.ApplyImportedBindings(preset.bindings, false, true)
 	if not ok then
 		return false
 	end
 
+	-- Vorherigen aktiven Preset-Namen merken, falls der Spieler /bcc ohne Klick auf "Speichern" schließt
+	if not pendingActivePresetName then
+		previousActivePresetName = Database.GetActivePresetName()
+	end
+	pendingActivePresetName = preset.name
 	Database.SetActivePresetName(preset.name)
 	ClickBindingUI.UpdatePresetDropdownButton()
 	if ns.SettingsUI and ns.SettingsUI.RefreshWindow then
@@ -3968,6 +4167,47 @@ function ClickBindingUI.DeletePresetByName(name)
 		DEFAULT_CHAT_FRAME:AddMessage(string.format(L["CHAT_PRESET_DELETED_FORMAT"], deletedKey or tostring(name)))
 	end
 	return true
+end
+
+-- Reagiert auf einen Dual-Spec-Wechsel (ACTIVE_TALENT_GROUP_CHANGED / PLAYER_TALENT_UPDATE):
+-- Stellt bei offenem ClickBindingFrame versehentlich durch Blizzard gelöschte Talent-Zauber wieder her,
+-- aktualisiert Zauberbuch-Cache & UI und lädt (oder meldet) ein mit dem neuen Spec (1 oder 2) verknüpftes Preset.
+function ClickBindingUI.OnActiveSpecGroupChanged(specIndexOverride, isSilentTest)
+	if Constants.IsGamepadUIActive() then
+		SpellRanks.InvalidateCache()
+		return false
+	end
+	SpellRanks.InvalidateCache()
+	SpellRanks.EnsureCache()
+	if ClickBindingFrame and ClickBindingFrame:IsShown() then
+		ClickBindingUI.RestorePurgedUnlearnedBindings(isSilentTest)
+	end
+	ClickBindingUI.RefreshVisibleLines()
+	if SpellBookUI and SpellBookUI.RefreshBadges then
+		SpellBookUI.RefreshBadges()
+	end
+
+	local specIdx = tonumber(specIndexOverride) or (Constants.GetActiveSpecGroupIndex and Constants.GetActiveSpecGroupIndex()) or 1
+	local linkedPreset = Database.GetPresetForSpecGroup and Database.GetPresetForSpecGroup(specIdx)
+	if linkedPreset and linkedPreset.name then
+		local activeName = Database.GetActivePresetName and Database.GetActivePresetName()
+		if activeName ~= linkedPreset.name then
+			local behavior = Database.Get("trainerUpgradeBehavior") or "card"
+			if not isSilentTest and not (InCombatLockdown and InCombatLockdown()) and (behavior == "auto" or (ClickBindingFrame and ClickBindingFrame:IsShown())) then
+				ClickBindingUI.LoadPreset(linkedPreset)
+				return true, linkedPreset.name
+			else
+				if not isSilentTest and DEFAULT_CHAT_FRAME and L["CHAT_DUAL_SPEC_PRESET_READY_FORMAT"] then
+					DEFAULT_CHAT_FRAME:AddMessage(string.format(L["CHAT_DUAL_SPEC_PRESET_READY_FORMAT"], specIdx, linkedPreset.name, linkedPreset.name))
+				end
+				return true, linkedPreset.name
+			end
+		end
+	end
+	if not isSilentTest and ClickBindingUI.ScheduleSmartRuleCheck then
+		ClickBindingUI.ScheduleSmartRuleCheck(0.6, false)
+	end
+	return false, nil
 end
 
 function ClickBindingUI.ShowNewPresetPopup(initialName, onSavedCallback)
@@ -4579,7 +4819,7 @@ local function RunDeepStressSelfTest(findings, infoNotes)
 	Database.Set("unitHoverHiddenCombos", savedHiddenHover)
 
 	if reorderChecksOk then
-		table.insert(infoNotes, "DeepTest v0.8.4 logic: Reorder (MMB preset + MB12 MMO column + modifier move), Matrix Default-Visible & Hover Eye (Spell vs. Interaction) verified OK")
+		table.insert(infoNotes, string.format("DeepTest v%s logic: Reorder (MMB preset + MB12 MMO column + modifier move), Matrix Default-Visible & Hover Eye (Spell vs. Interaction) verified OK", tostring(Constants.VERSION or "0.9.0")))
 	end
 
 	-- 4. UI-Lebenszyklus-Kette (nur außerhalb des Kampfes und im MKB-Modus)
@@ -4643,6 +4883,167 @@ local function RunDeepStressSelfTest(findings, infoNotes)
 		Database.Set("matrixMetaMode", origMetaMode)
 		Database.Set("matrixShowCombos", origCombos)
 		ClickBindingUI.RefreshFreeKeysMatrix()
+
+		-- 4b. Vollständiger Dual-Spec- & Preset-Zyklus-Test (funktioniert auf jedem Charakter-Level):
+		-- Prüft keepUnlearnedSpells=true (Presets) vs. keepUnlearnedSpells=false (Cross-Char-Import),
+		-- Blizzards SPELLS_CHANGED-Löschschutz im offenen ClickBindingFrame, Spec-1/Spec-2-Preset-Verknüpfung
+		-- und die vollständige Wiederherstellung des Ausgangszustands.
+		if ClickBindingFrame and ClickBindingFrame.dataProvider then
+			local origPending = ClickBindingFrame.pendingChanges
+			local origGlowShown = (ClickBindingFrame.SaveButton and ClickBindingFrame.SaveButton.BCCGlowFrame and ClickBindingFrame.SaveButton.BCCGlowFrame:IsShown()) or false
+			local origActivePreset = Database.GetActivePresetName and Database.GetActivePresetName()
+			local origProviderElements = {}
+			for _, el in ClickBindingFrame.dataProvider:Enumerate() do
+				if el and (el.elementType == ElementDataTypes.CustomsBinding or el.elementType == ElementDataTypes.InteractionBinding) and el.bindingInfo then
+					table.insert(origProviderElements, {
+						elementType = el.elementType,
+						unbound = el.unbound and true or false,
+						bindingInfo = {
+							type = el.bindingInfo.type,
+							actionID = el.bindingInfo.actionID,
+							button = el.bindingInfo.button,
+							modifiers = el.bindingInfo.modifiers,
+						},
+					})
+				end
+			end
+
+			-- Nicht gelernte Talent-SpellID wählen (10060 = Power Infusion, Fallback 402174 = Penance)
+			local unlearnedSpellID = 10060
+			if SpellRanks.GetRankEntryForAction(unlearnedSpellID) then
+				unlearnedSpellID = 402174
+			end
+			local spellType = (Enum and Enum.ClickBindingType and Enum.ClickBindingType.Spell) or 1
+			local dummyUnlearnedList = {
+				{
+					type = spellType,
+					actionID = unlearnedSpellID,
+					button = "Button31",
+					modifiers = 0,
+					spellName = "BCCDeepTestUnlearnedTalent",
+					subName = "",
+					rankNum = 0,
+					ruleMode = SpellRanks.RULE_MAX,
+				},
+			}
+
+			-- Test A: Cross-Character-Import (keepUnlearnedSpells = false) MUSS unbekannten Zauber überspringen
+			local appCross, skipCross = ClickBindingUI.ApplyImportedBindings(dummyUnlearnedList, true, false)
+			if appCross ~= 0 or skipCross ~= 1 then
+				table.insert(findings, string.format("DeepTest DualSpec: Cross-char import should skip unlearned spell (got applied=%s, skipped=%s)", tostring(appCross), tostring(skipCross)))
+			end
+
+			-- Test B: Eigenes Charakter-Preset (keepUnlearnedSpells = true) MUSS nicht gelernten Talent-Zauber behalten
+			local appPreset, skipPreset = ClickBindingUI.ApplyImportedBindings(dummyUnlearnedList, true, true)
+			if appPreset ~= 1 or skipPreset ~= 0 then
+				table.insert(findings, string.format("DeepTest DualSpec: Preset load with keepUnlearnedSpells=true failed (got applied=%s, skipped=%s)", tostring(appPreset), tostring(skipPreset)))
+			end
+
+			-- Test C: Blizzards SPELLS_CHANGED-Handler auf offenem ClickBindingFrame simulieren und Wiederherstellung prüfen
+			if ClickBindingFrame.GetScript then
+				local onEventScript = ClickBindingFrame:GetScript("OnEvent")
+				if type(onEventScript) == "function" then
+					onEventScript(ClickBindingFrame, "SPELLS_CHANGED")
+				end
+			end
+			local foundAfterSpellsChanged = false
+			for _, el in ClickBindingFrame.dataProvider:Enumerate() do
+				if el and el.elementType == ElementDataTypes.CustomsBinding and el.bindingInfo and el.bindingInfo.actionID == unlearnedSpellID and el.bindingInfo.button == "Button31" then
+					foundAfterSpellsChanged = true
+					break
+				end
+			end
+			if not foundAfterSpellsChanged then
+				table.insert(findings, "DeepTest DualSpec: unlearned talent spell was purged by SPELLS_CHANGED and not restored by RestorePurgedUnlearnedBindings")
+			end
+
+			-- Test C2: Manuelles Löschen (isManualDeleteInProgress = true) darf durch SPELLS_CHANGED NICHT wiederhergestellt werden
+			local dummyToManualDelete = nil
+			for _, el in ClickBindingFrame.dataProvider:Enumerate() do
+				if el and el.elementType == ElementDataTypes.CustomsBinding and el.bindingInfo and el.bindingInfo.actionID == unlearnedSpellID and el.bindingInfo.button == "Button31" then
+					dummyToManualDelete = el
+					break
+				end
+			end
+			if dummyToManualDelete then
+				isManualDeleteInProgress = true
+				ClickBindingFrame.dataProvider:Remove(dummyToManualDelete)
+				isManualDeleteInProgress = false
+				ClickBindingUI.RebuildGroups(false)
+				if ClickBindingFrame.GetScript then
+					local onEventScript = ClickBindingFrame:GetScript("OnEvent")
+					if type(onEventScript) == "function" then
+						onEventScript(ClickBindingFrame, "SPELLS_CHANGED")
+					end
+				end
+				for _, el in ClickBindingFrame.dataProvider:Enumerate() do
+					if el and el.elementType == ElementDataTypes.CustomsBinding and el.bindingInfo and el.bindingInfo.actionID == unlearnedSpellID and el.bindingInfo.button == "Button31" then
+						table.insert(findings, "DeepTest DualSpec: manually deleted binding was unexpectedly resurrected by SPELLS_CHANGED")
+						break
+					end
+				end
+			end
+
+			-- Test D: Preset Spec-1 / Spec-2 Verknüpfung & OnActiveSpecGroupChanged-Auflösung
+			local testPresetName = "__BCC_DEEP_TEST_SPEC__"
+			local charProfile = Database.GetCurrentCharProfile()
+			local prevSpec1Preset = Database.GetPresetForSpecGroup and Database.GetPresetForSpecGroup(1)
+			local prevSpec2Preset = Database.GetPresetForSpecGroup and Database.GetPresetForSpecGroup(2)
+			local prevSpec1Name = prevSpec1Preset and prevSpec1Preset.name
+			local prevSpec2Name = prevSpec2Preset and prevSpec2Preset.name
+
+			if charProfile and type(charProfile.presets) == "table" then
+				charProfile.presets[testPresetName] = {
+					name = testPresetName,
+					updatedAt = 0,
+					bindings = dummyUnlearnedList,
+					spec1 = false,
+					spec2 = false,
+				}
+				Database.SetPresetSpecAssignment(testPresetName, 2, true)
+				local linked2 = Database.GetPresetForSpecGroup(2)
+				if not linked2 or linked2.name ~= testPresetName then
+					table.insert(findings, "DeepTest DualSpec: SetPresetSpecAssignment failed to link preset to Spec 2")
+				end
+				Database.SetActivePresetName("__OTHER__")
+				local triggered, trigName = ClickBindingUI.OnActiveSpecGroupChanged(2, true)
+				if not triggered or trigName ~= testPresetName then
+					table.insert(findings, string.format("DeepTest DualSpec: OnActiveSpecGroupChanged(2) did not resolve linked preset (got %s, %s)", tostring(triggered), tostring(trigName)))
+				end
+				charProfile.presets[testPresetName] = nil
+				if prevSpec1Name then
+					Database.SetPresetSpecAssignment(prevSpec1Name, 1, true)
+				end
+				if prevSpec2Name then
+					Database.SetPresetSpecAssignment(prevSpec2Name, 2, true)
+				end
+			end
+
+			-- Ausgangszustand von ClickBindingFrame.dataProvider exakt wiederherstellen
+			local toClear = {}
+			for _, el in ClickBindingFrame.dataProvider:Enumerate() do
+				if el and (el.elementType == ElementDataTypes.CustomsBinding or el.elementType == ElementDataTypes.InteractionBinding) then
+					table.insert(toClear, el)
+				end
+			end
+			if #toClear > 0 then
+				ClickBindingFrame.dataProvider:Remove(unpack(toClear))
+			end
+			for _, savedEl in ipairs(origProviderElements) do
+				ClickBindingFrame.dataProvider:Insert(savedEl)
+			end
+			Database.SetActivePresetName(origActivePreset)
+			pendingActivePresetName = nil
+			previousActivePresetName = nil
+			ClickBindingUI.RebuildGroups(false)
+			ClickBindingFrame.pendingChanges = origPending
+			SetSaveButtonGlowShown(origGlowShown)
+			ClickBindingUI.RefreshVisibleLines()
+			if SpellBookUI and SpellBookUI.RefreshBadges then
+				SpellBookUI.RefreshBadges()
+			end
+			table.insert(infoNotes, "DeepTest DualSpec simulator: keepUnlearned preset load, SPELLS_CHANGED purge protection, manual-delete non-resurrection & Spec 1/2 preset linking verified OK")
+		end
 
 		if SettingsUI and SettingsUI.SetOverlaysUnlocked then
 			SettingsUI.SetOverlaysUnlocked(true, true)
@@ -4884,35 +5285,146 @@ function ClickBindingUI.RunTaintDiagnostics(subArg)
 	end
 
 	local taintLogVal = (GetCVar and GetCVar("taintLog")) or "0"
-	local reportLines = {}
-	if #findings == 0 then
-		local okMsg = string.format("0 critical taints found on PetActionBar, ActionBars, EditModeManagerFrame, and highlight globals! (taintLog=%s)", tostring(taintLogVal))
-		DEFAULT_CHAT_FRAME:AddMessage("|cff40ff40Better Click Casting (Debug):|r " .. okMsg)
-		table.insert(reportLines, okMsg)
-		for _, note in ipairs(infoNotes) do
-			DEFAULT_CHAT_FRAME:AddMessage("  |cff80c0ff• Info:|r " .. note)
-			table.insert(reportLines, "- Info: " .. note)
+	local compactParts = {}
+	local colorLines = {}
+	local okCount = 0
+	local warnCount = 0
+	local errCount = #findings
+
+	local sepHeavy = string.rep("=", 62)
+	local sepLight = string.rep("-", 78)
+	local playerName = Constants.GetPlayerDisplayName and Constants.GetPlayerDisplayName() or "Player"
+	local specIdx = Constants.GetActiveSpecGroupIndex and Constants.GetActiveSpecGroupIndex() or 1
+	local modeTitle = isDeepMode and "DEEP SELF-TEST & TAINT DIAGNOSTICS" or "LIVE TAINT DIAGNOSTICS"
+
+	local function AddHeader()
+		table.insert(colorLines, "|cffd4af37" .. sepHeavy .. "|r")
+		table.insert(colorLines, string.format("  |cffffd100BETTER CLICK CASTING v%s|r  |cff888888/|r  |cffffffff%s|r", tostring(Constants.VERSION or "?"), modeTitle))
+		table.insert(colorLines, string.format("  |cff99ccffCharacter:|r %s  |cff888888/|r  |cff99ccffSpec:|r %d  |cff888888/|r  |cff99ccffGamepadUI:|r %s  |cff888888/|r  |cff99ccfftaintLog:|r %s", tostring(playerName), specIdx, isGamepadActive and "|cffff5555ON|r" or "|cff40ff59OFF|r", tostring(taintLogVal)))
+		table.insert(colorLines, "|cffd4af37" .. sepHeavy .. "|r")
+		table.insert(colorLines, "")
+	end
+
+	local function WrapIndentedDetail(text, maxChars, indentStr)
+		local out = {}
+		local cur = ""
+		for word in string.gmatch(tostring(text or ""), "%S+") do
+			if cur == "" then
+				cur = word
+			elseif string.len(cur) + 1 + string.len(word) <= maxChars then
+				cur = cur .. " " .. word
+			else
+				table.insert(out, indentStr .. "|cffaaaaaa" .. cur .. "|r")
+				cur = word
+			end
 		end
-	else
-		local headerMsg = string.format("%d tainted field(s) found (taintLog=%s):", #findings, tostring(taintLogVal))
-		DEFAULT_CHAT_FRAME:AddMessage("|cffff4040Better Click Casting (Debug):|r " .. headerMsg)
-		table.insert(reportLines, headerMsg)
-		for _, line in ipairs(findings) do
-			DEFAULT_CHAT_FRAME:AddMessage("  |cffffb833•|r " .. line)
-			table.insert(reportLines, "- " .. line)
+		if cur ~= "" then
+			table.insert(out, indentStr .. "|cffaaaaaa" .. cur .. "|r")
 		end
-		for _, note in ipairs(infoNotes) do
-			DEFAULT_CHAT_FRAME:AddMessage("  |cff80c0ff• Info:|r " .. note)
-			table.insert(reportLines, "- Info: " .. note)
+		return out
+	end
+
+	local function AddTestLine(status, label, detail)
+		local shortTag = "OK"
+		local cTag = "|cff40ff59[ OK ]|r"
+		if status == "WARN" then
+			warnCount = warnCount + 1
+			shortTag = "WARN"
+			cTag = "|cffffb833[WARN]|r"
+		elseif status == "ERR" then
+			shortTag = "ERR"
+			cTag = "|cffff4444[ERR ]|r"
+		else
+			okCount = okCount + 1
+		end
+		table.insert(colorLines, string.format("%s  |cffffffff%s|r", cTag, tostring(label)))
+		if detail and detail ~= "" then
+			local wrapped = WrapIndentedDetail(detail, 94, "            ")
+			for _, wLine in ipairs(wrapped) do
+				table.insert(colorLines, wLine)
+			end
+		end
+		-- Komprimierter Copy-Block: nur Status + Kerninfo (OK-Details stark verkürzt, WARN/ERR vollständig)
+		if status == "OK" then
+			table.insert(compactParts, string.format("%s:%s", shortTag, tostring(label)))
+		else
+			local d = (detail and detail ~= "") and ("=" .. tostring(detail)) or ""
+			table.insert(compactParts, string.format("%s:%s%s", shortTag, tostring(label), d))
 		end
 	end
 
-	local fullReport = table.concat(reportLines, "\n")
+	AddHeader()
+
+	-- Info-Zeilen sauber nach [ OK ] vs. [WARN] klassifizieren:
+	-- Vollständig durch unser Overlay abgeschirmte SpellBook-Slots ("shielded by overlay") sind ein erwartetes [ OK ].
+	for _, note in ipairs(infoNotes) do
+		local titlePart, detailPart = string.match(note, "^([^:]+):%s*(.+)$")
+		titlePart = titlePart or note
+		detailPart = detailPart or ""
+		local lowerNote = string.lower(note)
+		local isShieldedOk = string.find(lowerNote, "shielded by overlay", 1, true) ~= nil
+		if string.find(lowerNote, "skipped", 1, true)
+			or (string.find(lowerNote, "tainted", 1, true) and not isShieldedOk)
+		then
+			AddTestLine("WARN", titlePart, detailPart)
+		else
+			AddTestLine("OK", titlePart, detailPart)
+		end
+	end
+
+	-- Globale Sicherheitsprüfung (issecurevariable) als eigenen Testblock ausweisen
+	if #findings == 0 then
+		AddTestLine("OK", "SecurityScan", "0 critical taints on PetActionBar, ActionBars, UnitFrames, EditMode & Globals")
+	else
+		AddTestLine("ERR", string.format("SecurityScan(%d)", #findings), table.concat(findings, " ; "))
+		for _, failLine in ipairs(findings) do
+			table.insert(colorLines, "       |cffff5555[ERR ]|r |cffffcccc" .. tostring(failLine) .. "|r")
+		end
+	end
+
+	local overallPass = (errCount == 0)
+	local resultWord = overallPass and "PASS" or "FAIL"
+	local resultColor = overallPass and "|cff40ff59PASS|r" or "|cffff4444FAIL|r"
+
+	table.insert(colorLines, "")
+	table.insert(colorLines, "|cff556677" .. sepLight .. "|r")
+	table.insert(colorLines, string.format("  RESULT: %s  |cff888888/|r  |cff40ff59%d OK|r  |cff888888/|r  |cffffb833%d WARN|r  |cff888888/|r  |cffff4444%d ERR|r", resultColor, okCount, warnCount, errCount))
+	table.insert(colorLines, "|cff556677" .. sepLight .. "|r")
+
+	-- Komprimierter Einzeiler für Copy (nur für uns zum schnellen Einfügen in den Chat/Bugreport)
+	local fullCompactReport = string.format(
+		"BCCDBG|v%s|%s|spec=%d|gp=%d|tl=%s|%s(ok=%d,w=%d,e=%d)|%s",
+		tostring(Constants.VERSION or "?"),
+		isDeepMode and "DEEP" or "DBG",
+		specIdx,
+		isGamepadActive and 1 or 0,
+		tostring(taintLogVal),
+		resultWord,
+		okCount,
+		warnCount,
+		errCount,
+		table.concat(compactParts, " | ")
+	)
+
+	-- Kompakte Zusammenfassung im Chat
+	DEFAULT_CHAT_FRAME:AddMessage(string.format(
+		"|cff99ccffBetter Click Casting (%s):|r %s |cff888888(|r|cff40ff59%d OK|r, |cffffb833%d WARN|r, |cffff4444%d ERR|r|cff888888)|r",
+		isDeepMode and "Deep Test" or "Debug",
+		resultColor,
+		okCount,
+		warnCount,
+		errCount
+	))
+
+	local fullColorReport = table.concat(colorLines, "\n")
 	if type(BetterClickCastingDB) == "table" then
-		BetterClickCastingDB.lastDebugReport = fullReport
+		BetterClickCastingDB.lastDebugReport = fullCompactReport
 	end
 	if #findings > 0 or subArg == "copy" or isDeepMode then
-		ShowDebugCopyPopup(fullReport)
+		local winTitle = isDeepMode
+			and string.format("Better Click Casting v%s: Deep Self-Test Console", tostring(Constants.VERSION or "?"))
+			or string.format("Better Click Casting v%s: Debug Diagnostics", tostring(Constants.VERSION or "?"))
+		ShowDebugCopyPopup(fullCompactReport, winTitle, fullColorReport)
 	end
 end
 
@@ -5116,6 +5628,19 @@ function ClickBindingUI.SetupHooks()
 		if gamepadStandbyBadge then
 			gamepadStandbyBadge:Hide()
 		end
+		-- Snapshot beim Schließen leeren, damit keine veralteten Zeilen aus einer früheren Sitzung kleben bleiben
+		lastKnownProviderCustomBindings = {}
+		isManualDeleteInProgress = false
+		-- Wurde ein Preset geladen, aber das Fenster ohne Klick auf "Speichern" geschlossen,
+		-- den aktiven Preset-Namen sauber auf den vorherigen Stand zurücksetzen.
+		if pendingActivePresetName then
+			Database.SetActivePresetName(previousActivePresetName)
+			pendingActivePresetName = nil
+			previousActivePresetName = nil
+			if ns.SettingsUI and ns.SettingsUI.RefreshWindow then
+				ns.SettingsUI.RefreshWindow()
+			end
+		end
 		SetSaveButtonGlowShown(false)
 		ClickBindingUI.HideChildPopups()
 		if SettingsUI and SettingsUI.HideWindow then
@@ -5189,6 +5714,12 @@ function ClickBindingUI.SetupHooks()
 
 	if ClickBindingFrame.SaveButton and not ClickBindingFrame.SaveButton._bccSnapshotHooked then
 		ClickBindingFrame.SaveButton:HookScript("OnClick", function()
+			-- Geladenes Preset wurde per Hardware-Klick auf "Speichern" bestätigt
+			if pendingActivePresetName then
+				Database.SetActivePresetName(pendingActivePresetName)
+				pendingActivePresetName = nil
+				previousActivePresetName = nil
+			end
 			if C_Timer and C_Timer.After and Database and Database.SaveCharacterSnapshot then
 				C_Timer.After(0.1, Database.SaveCharacterSnapshot)
 			end
@@ -5204,10 +5735,19 @@ function ClickBindingUI.SetupHooks()
 
 	if ClickBindingFrame.ResetToDefaultProfile then
 		hooksecurefunc(ClickBindingFrame, "ResetToDefaultProfile", function()
+			lastKnownProviderCustomBindings = {}
 			SetSaveButtonGlowShown(false)
 			ClickBindingUI.RebuildGroups()
 		end)
 	end
+
+	-- Dual-Spec-Schutz gegen Blizzards ClickBindingFrameMixin:OnEvent("SPELLS_CHANGED"),
+	-- das bei geöffnetem ClickBindingFrame alle aktuell nicht gelernten Talent-Zauber aus dataProvider löscht.
+	ClickBindingFrame:HookScript("OnEvent", function(self, event)
+		if event == "SPELLS_CHANGED" and self:IsShown() and not Constants.IsGamepadUIActive() then
+			ClickBindingUI.RestorePurgedUnlearnedBindings(true)
+		end
+	end)
 
 	-- Falls ClickBindingFrame beim erstmaligen Laden bereits offen ist, sofort synchronisieren
 	if ClickBindingFrame:IsShown() then

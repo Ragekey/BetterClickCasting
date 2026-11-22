@@ -994,8 +994,14 @@ function Database.SavePreset(rawName)
 
 	-- Falls bereits ein Preset mit identischem Namen (unabhängig von Groß-/Kleinschreibung) existiert, dessen Schlüssel aktualisieren
 	local lowerTarget = string.lower(cleanName)
+	local prevSpec1 = false
+	local prevSpec2 = false
 	for existingKey, existingPreset in pairs(profile.presets) do
 		if string.lower(tostring(existingKey)) == lowerTarget or (type(existingPreset) == "table" and string.lower(tostring(existingPreset.name or "")) == lowerTarget) then
+			if type(existingPreset) == "table" then
+				prevSpec1 = existingPreset.spec1 and true or false
+				prevSpec2 = existingPreset.spec2 and true or false
+			end
 			if existingKey ~= cleanName then
 				profile.presets[existingKey] = nil
 			end
@@ -1008,6 +1014,8 @@ function Database.SavePreset(rawName)
 		name = cleanName,
 		updatedAt = (time and time()) or 0,
 		bindings = bindings,
+		spec1 = prevSpec1,
+		spec2 = prevSpec2,
 	}
 	profile.presets[cleanName] = preset
 	profile.activePreset = cleanName
@@ -1045,6 +1053,51 @@ function Database.DeletePreset(name)
 		ns.SettingsUI.RefreshWindow()
 	end
 	return true, keyToDelete
+end
+
+-- Verknüpft ein Charakter-Preset optional mit einer Dual-Spec-Gruppe (1 = Primary Spec, 2 = Secondary Spec)
+function Database.SetPresetSpecAssignment(presetName, specIndex, enabled)
+	specIndex = tonumber(specIndex)
+	if (specIndex ~= 1 and specIndex ~= 2) or type(presetName) ~= "string" or presetName == "" then
+		return false
+	end
+	local profile = Database.GetCurrentCharProfile()
+	if not profile or type(profile.presets) ~= "table" then
+		return false
+	end
+	local targetPreset = Database.FindPreset(presetName)
+	if not targetPreset then
+		return false
+	end
+	local field = (specIndex == 2) and "spec2" or "spec1"
+	if enabled then
+		for _, p in pairs(profile.presets) do
+			if type(p) == "table" then
+				p[field] = (p == targetPreset)
+			end
+		end
+	else
+		targetPreset[field] = false
+	end
+	if ns.ClickBindingUI and ns.ClickBindingUI.UpdatePresetDropdownButton then
+		ns.ClickBindingUI.UpdatePresetDropdownButton()
+	end
+	if ns.SettingsUI and ns.SettingsUI.RefreshWindow then
+		ns.SettingsUI.RefreshWindow()
+	end
+	return true
+end
+
+function Database.GetPresetForSpecGroup(specIndex)
+	specIndex = tonumber(specIndex) or ((Constants.GetActiveSpecGroupIndex and Constants.GetActiveSpecGroupIndex()) or 1)
+	local field = (specIndex == 2) and "spec2" or "spec1"
+	local presets = Database.GetPresets()
+	for _, p in ipairs(presets) do
+		if type(p) == "table" and p[field] then
+			return p
+		end
+	end
+	return nil
 end
 
 -- Sichere URL-Hex-Kodierung für Sonderzeichen in Export-Strings (ohne loadstring)

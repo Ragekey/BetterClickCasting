@@ -86,8 +86,9 @@ The optional **Unit Frame Hover Overlay** shows a compact, live HUD card wheneve
 
 **Better Click Casting** automatically snapshots your Settings, Click Cast Keybinds, and Smart Rules per character (including full *WoW Forever* first and last names).
 
-* **Per-Character Binding Presets / Loadouts (`/bcc preset`)**:
-  * Save multiple named Click Cast setups on the same character (for example **Raid**, **Dungeon**, or **Solo / Off-Spec**) and switch between them anytime via the **`Preset: ...`** button in the top-left header of `ClickBindingFrame`, in Tab 4 (`Profiles & Share`), or via **`/bcc preset [load|save|del|list] <Name>`**.
+* **Per-Character Binding Presets & Dual Spec Support (`/bcc preset`)**:
+  * Save multiple named Click Cast setups on the same character (for example **Discipline**, **Shadow**, **Raid**, or **Dungeon**) and switch between them anytime via the **`Preset: ...`** button in the top-left header of `ClickBindingFrame`, in Tab 4 (`Profiles & Share`), or via **`/bcc preset [load|save|del|list|spec1|spec2] <Name>`**.
+  * **Dual Spec Talent Protection & Spec Linking**: Presets preserve talent-specific spells (such as *Penance* or *Power Infusion*) even if loaded while in your off-spec, and protect open `ClickBindingFrame` lists against Blizzard's `SPELLS_CHANGED` purge. You can also link any preset to **Primary Spec (`Spec 1`)** or **Secondary Spec (`Spec 2`)** in the Preset menu.
 * **Direct Character Copy (`/bcc copy`)**:
   * Select any of your characters in Tab 4 (`Profiles & Share`) and choose **Settings + Keybinds**, **Keybinds Only**, or **Settings Only**.
   * **Cross-Character Spell Rank Resolution**: When copying bindings to a lower-level alt or twink, **Better Click Casting** automatically matches spells by name and applies your Smart Rule (`MAX`, `MAX-1`, `MAX-2`, `MAX-3`, `FIXED`) using the highest compatible rank learned by the target character! Macros are matched automatically by name.
@@ -108,7 +109,7 @@ Every setting and action can be controlled both in the graphical Settings window
 | `/bcc` | Toggle Blizzard's Click Cast Bindings window + Spellbook |
 | `/bcc cfg [1\|2\|3\|4]` | Open the Better Click Casting Settings window (optionally directly on Tab 1 to 4) |
 | `/bcc profile` | Open Tab 4 (`Profiles & Share`) |
-| `/bcc preset [load\|save\|del\|list] <Name>` | Load, save, delete, or list named Click Cast presets for the current character |
+| `/bcc preset [load\|save\|del\|list\|spec1\|spec2] <Name>` | Load, save, delete, list, or link named Click Cast presets to Dual Spec (`Spec 1` / `Spec 2`) |
 | `/bcc export [all\|bindings\|settings]` | Open the `!BCC1:...!` export popup |
 | `/bcc import [all\|bindings\|settings]` | Open the `!BCC1:...!` import popup |
 | `/bcc copy [all\|bindings\|settings] <Name>` | Copy Settings and/or Keybinds from a saved character (supports first + last name) |
