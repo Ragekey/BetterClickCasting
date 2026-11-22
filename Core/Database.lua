@@ -97,10 +97,18 @@ function Database.GetCurrentCharProfile()
 		Database.Init()
 	end
 	local fullName = Constants.GetPlayerDisplayName()
-	local realm = (GetRealmName and GetRealmName()) or "Realm"
+	local rawRealm = GetRealmName and GetRealmName() or ""
+	local realm = (rawRealm ~= "" and rawRealm) or "Realm"
 	local charKey = Constants.GetPlayerProfileKey()
 
-	-- Automatische Migration älterer Nur-Vorname-Profile desselben Charakters und Realms
+	-- Automatische Migration älterer Nur-Vorname-Profile oder leerer Realm-Keys ("Name ()")
+	local emptyRealmKey = fullName .. " ()"
+	if emptyRealmKey ~= charKey and rawRealm ~= "" and type(BetterClickCastingDB.charProfiles[emptyRealmKey]) == "table" then
+		if type(BetterClickCastingDB.charProfiles[charKey]) ~= "table" then
+			BetterClickCastingDB.charProfiles[charKey] = BetterClickCastingDB.charProfiles[emptyRealmKey]
+		end
+		BetterClickCastingDB.charProfiles[emptyRealmKey] = nil
+	end
 	local firstName = Constants.GetPlayerFirstName and Constants.GetPlayerFirstName() or nil
 	if firstName and firstName ~= fullName then
 		local legacyKey = firstName .. " (" .. realm .. ")"
@@ -1372,7 +1380,7 @@ function Database.NotifyChanged(key, value)
 		if key == "compactListMode" and ns.ClickBindingUI.ApplyScrollBoxLayout then
 			ns.ClickBindingUI.ApplyScrollBoxLayout()
 		end
-		if (key == "groupingMode" or key == "moveInteractionsToBottom" or key == "addonLocale") and ns.ClickBindingUI.RebuildGroups then
+		if (key == "groupingMode" or key == "moveInteractionsToBottom" or key == "addonLocale" or key == "customButtonOrder" or key == "customModifierOrder") and ns.ClickBindingUI.RebuildGroups then
 			ns.ClickBindingUI.RebuildGroups()
 		end
 		if (key == "enableSmartRankRules" or key == "trainerUpgradeBehavior" or key == "addonLocale") and ns.ClickBindingUI.ScheduleSmartRuleCheck then

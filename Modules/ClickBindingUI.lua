@@ -113,6 +113,8 @@ local function GetPrimarySectionRank(e)
 		return moveBottom and 70 or 20
 	elseif e.elementType == ElementDataTypes.CustomsHeader and not e.isBCCGroupHeader then
 		return 30
+	elseif e.isBCCNewSlotHeader then
+		return 45
 	elseif e.elementType == ElementDataTypes.NewSlot then
 		return 50
 	end
@@ -269,8 +271,11 @@ function ClickBindingUI.RebuildGroups(preserveSnapshot)
 	-- 2. Gruppen-Metadaten und Gesamtzähler auf allen Custom-Bindings berechnen
 	local groups = {}
 	local totalCustomCount = 0
+	local hasNewSlot = false
 	for _, element in provider:Enumerate() do
-		if element and element.elementType == ElementDataTypes.CustomsBinding then
+		if element and element.elementType == ElementDataTypes.NewSlot then
+			hasNewSlot = true
+		elseif element and element.elementType == ElementDataTypes.CustomsBinding then
 			totalCustomCount = totalCustomCount + 1
 			local groupOrder, groupTitle = GetElementGroupMetadata(element, mode)
 			if mode ~= "none" and groupTitle ~= "" then
@@ -307,6 +312,20 @@ function ClickBindingUI.RebuildGroups(preserveSnapshot)
 				bccGroupTitle = grp.title,
 				bccGroupCount = grp.count,
 				bccHeaderText = string.format("%s%s%s  %s(%d)%s", Colors.HEADER_SUB, grp.title, Colors.RESET, Colors.MUTED, grp.count, Colors.RESET),
+			})
+		end
+		-- Bei aktiver Gruppierung und vorhandenen Gruppen den grünen "Neuen Slot hinzufügen"-Eintrag
+		-- optisch sauber durch einen eigenen Sektions-Header von der letzten Gruppe absetzen.
+		if hasNewSlot and totalCustomCount > 0 then
+			local newSlotLabel = (CLICK_BINDING_ADD_BINDING or "Add Binding")
+			table.insert(newHeaders, {
+				elementType = ElementDataTypes.CustomsHeader,
+				isBCCGroupHeader = true,
+				isBCCNewSlotHeader = true,
+				_bccGroupOrder = 9999,
+				bccGroupTitle = newSlotLabel,
+				bccGroupCount = 0,
+				bccHeaderText = string.format("%s%s%s", Colors.TAG_MAX, newSlotLabel, Colors.RESET),
 			})
 		end
 		if #newHeaders > 0 then
@@ -4767,6 +4786,11 @@ local function RunDeepStressSelfTest(findings, infoNotes)
 	Database.MoveMouseButtonInOrder("Button12", 1)
 	if Constants.GetButtonSortOrder("Button12") ~= 1 then
 		table.insert(findings, "DeepTest Reorder: MoveMouseButtonInOrder('Button12', 1) failed")
+		reorderChecksOk = false
+	end
+	local dispBtn6 = Constants.GetButtonDisplayName and Constants.GetButtonDisplayName("Button6") or ""
+	if dispBtn6 == "" or string.find(dispBtn6, "GROUP_BUTTON_", 1, true) then
+		table.insert(findings, string.format("DeepTest Reorder: invalid button display label '%s'", tostring(dispBtn6)))
 		reorderChecksOk = false
 	end
 
