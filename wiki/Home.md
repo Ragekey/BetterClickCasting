@@ -88,7 +88,7 @@ The optional **Unit Frame Hover Overlay** shows a compact, live HUD card wheneve
 
 * **Per-Character Binding Presets & Dual Spec Support (`/bcc preset`)**:
   * Save multiple named Click Cast setups on the same character (for example **Discipline**, **Shadow**, **Raid**, or **Dungeon**) and switch between them anytime via the **`Preset: ...`** button in the top-left header of `ClickBindingFrame`, in Tab 4 (`Profiles & Share`), or via **`/bcc preset [load|save|del|list|spec1|spec2] <Name>`**.
-  * **Dual Spec Talent Protection & Spec Linking**: Presets preserve talent-specific spells (such as *Penance* or *Power Infusion*) even if loaded while in your off-spec, and protect open `ClickBindingFrame` lists against Blizzard's `SPELLS_CHANGED` purge. You can also link any preset to **Primary Spec (`Spec 1`)** or **Secondary Spec (`Spec 2`)** in the Preset menu.
+  * **Dual Spec Talent Protection, Spec Linking & Hero-Card Popup**: Presets preserve talent-specific spells (such as *Penance* or *Power Infusion*) even if loaded while in your off-spec, and protect open `ClickBindingFrame` lists against Blizzard's `SPELLS_CHANGED` purge. Link any preset to **Primary Spec (`Spec 1`)** or **Secondary Spec (`Spec 2`)** in the Preset menu (with live tag updates inside the open dropdown): switching specs automatically pops up a 1-click **Dual Spec Hero-Card** with your new spec's talent-tree icon (or auto-loads into `/bcc` in *Auto-Open* mode), and a combat shield over Blizzard's **Save** button prevents `SetProfileByInfo` errors during combat.
 * **Direct Character Copy (`/bcc copy`)**:
   * Select any of your characters in Tab 4 (`Profiles & Share`) and choose **Settings + Keybinds**, **Keybinds Only**, or **Settings Only**.
   * **Cross-Character Spell Rank Resolution**: When copying bindings to a lower-level alt or twink, **Better Click Casting** automatically matches spells by name and applies your Smart Rule (`MAX`, `MAX-1`, `MAX-2`, `MAX-3`, `FIXED`) using the highest compatible rank learned by the target character! Macros are matched automatically by name.
@@ -133,6 +133,7 @@ Every setting and action can be controlled both in the graphical Settings window
 | `/bcc compact` / `/bcc range` | Toggle Compact Binding Rows (`32 px`) or Hover Overlay Out-of-Range (`[OOR]`) indicator |
 | `/bcc rules` / `/bcc bottom` / `/bcc tooltips` / `/bcc minimap` | Toggle Smart Rank Rules, Move Interactions to Bottom, Tooltips, or Minimap Button |
 | `/bcc status` | Print current active settings in chat |
+| `/bcc test [spec [1\|2]]` | Prepare 2 spells for the Smart Rule Hero-Card test, or preview the Dual Spec Hero-Card live for Spec 1 or 2 |
 | `/bcc debug [deep\|copy]` | Run live `issecurevariable` taint diagnostics (`deep` runs the 5-stage automated stress & roundtrip self-test) |
 | `/bcc help` | List all available slash commands in chat |
 
@@ -141,7 +142,7 @@ Every setting and action can be controlled both in the graphical Settings window
 ## 7. Frequently Asked Questions (FAQ)
 
 **Q: Does Better Click Casting cause action bar or pet bar taint in combat?**
-**A:** No. Better Click Casting uses non-destructive `hooksecurefunc` hooks, shields spellbook slots when switching tabs, suppresses restricted cooldown secret-values on tainted spellbook items, reads unit frames passively without attaching scripts to protected frames, and leaves final profile saving to a hardware click on Blizzard's native `SaveButton`. You can verify this anytime in-game with `/bcc debug`.
+**A:** No. Better Click Casting uses non-destructive `hooksecurefunc` hooks, shields spellbook slots with a 2-layer overlay (`BCCSecureCastButton` + `BCCQuickBindButton`), suppresses restricted cooldown secret-values on tainted spellbook items, shields Blizzard's **Save** button during combat against `SetProfileByInfo` errors, reads unit frames passively without attaching scripts to protected frames, and leaves final profile saving to a hardware click on Blizzard's native `SaveButton`. Tip: If you configure any MultiBar to *InCombat* / *OutOfCombat* visibility in Blizzard's Edit Mode, open Click Casting via Blizzard's native `/clickcast` (or open your Spellbook via `P` first) so Blizzard's `MultiActionBar_ShowAllGrids` runs completely untainted. You can verify your UI status anytime in-game with `/bcc debug deep`.
 
 **Q: Does the Unit Frame Hover Overlay work with third-party unit frames (like ElvUI, Cell, Grid2, ShadowedUnitFrames)?**
 **A:** Yes! Any unit frame that uses Blizzard's `SecureUnitButtonTemplate` (`unit` attribute) or registers in the standard global `ClickCastFrames` table is detected automatically.

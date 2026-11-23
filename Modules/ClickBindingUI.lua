@@ -469,6 +469,73 @@ local function SetSaveButtonGlowShown(shown)
 	end
 end
 
+-- Schützt Blizzards SaveButton während InCombatLockdown() durch ein reines, auf UIParent
+-- geparentetes Schutz-Overlay (taintfrei, keine Änderung am SaveButton selbst), damit ein versehentlicher
+-- Klick auf "Speichern" im Kampf kein ADDON_ACTION_BLOCKED: SetProfileByInfo() auslöst.
+local saveCombatShield = nil
+
+function ClickBindingUI.UpdateSaveButtonCombatShield(forceCombatState)
+	local inCombat = (forceCombatState ~= nil) and forceCombatState or ((InCombatLockdown and InCombatLockdown()) and true or false)
+	if Constants.IsGamepadUIActive()
+		or not inCombat
+		or not ClickBindingFrame
+		or not ClickBindingFrame:IsShown()
+		or not ClickBindingFrame.SaveButton
+	then
+		if saveCombatShield then
+			saveCombatShield:Hide()
+		end
+		return
+	end
+
+	local saveBtn = ClickBindingFrame.SaveButton
+	if not saveCombatShield then
+		local shield = CreateFrame("Button", nil, UIParent)
+		shield:SetFrameStrata("DIALOG")
+		shield:SetFrameLevel(500)
+		shield:EnableMouse(true)
+		shield:RegisterForClicks("AnyUp")
+
+		local dim = shield:CreateTexture(nil, "ARTWORK")
+		dim:SetAllPoints()
+		dim:SetColorTexture(0.18, 0.02, 0.02, 0.55)
+
+		local hint = shield:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+		hint:SetPoint("BOTTOMRIGHT", shield, "TOPRIGHT", 0, 5)
+		hint:SetJustifyH("RIGHT")
+		shield.Hint = hint
+
+		shield:SetScript("OnClick", function()
+			PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF)
+			if DEFAULT_CHAT_FRAME then
+				DEFAULT_CHAT_FRAME:AddMessage(L["CHAT_COMBAT_ERR"])
+			end
+		end)
+		shield:SetScript("OnEnter", function(self)
+			GameTooltip:SetOwner(self, "ANCHOR_TOP")
+			GameTooltip_SetTitle(GameTooltip, L["SAVE_COMBAT_LOCKED_HINT"])
+			GameTooltip_AddNormalLine(GameTooltip, L["SAVE_COMBAT_LOCKED_TOOLTIP"], true)
+			GameTooltip:Show()
+		end)
+		shield:SetScript("OnLeave", function()
+			GameTooltip:Hide()
+		end)
+		shield:SetScript("OnUpdate", function(self)
+			if not ClickBindingFrame or not ClickBindingFrame:IsShown() or not (InCombatLockdown and InCombatLockdown()) then
+				self:Hide()
+			end
+		end)
+		saveCombatShield = shield
+	end
+
+	saveCombatShield:ClearAllPoints()
+	saveCombatShield:SetAllPoints(saveBtn)
+	if saveCombatShield.Hint then
+		saveCombatShield.Hint:SetText(L["SAVE_COMBAT_LOCKED_HINT"])
+	end
+	saveCombatShield:Show()
+end
+
 --------------------------------------------------------------------------------
 -- Rang einer bestehenden Zeile ändern (ohne Taste neu zu binden)
 --------------------------------------------------------------------------------
@@ -2126,6 +2193,12 @@ local function EnsureHeroCardFrame()
 			ns.SettingsUI.SetOverlaysUnlocked(false)
 			return
 		end
+		if card.mode == "spec_preset" then
+			card.pendingSpecPreset = nil
+			card.mode = "smart_rules"
+			card:Hide()
+			return
+		end
 		if card.currentSignature then
 			dismissedSignature = card.currentSignature
 		end
@@ -2196,6 +2269,14 @@ local function EnsureHeroCardFrame()
 			end
 			return
 		end
+		if card.mode == "spec_preset" and card.pendingSpecPreset then
+			local targetPreset = card.pendingSpecPreset
+			card.pendingSpecPreset = nil
+			card.mode = "smart_rules"
+			card:Hide()
+			ClickBindingUI.LoadPreset(targetPreset)
+			return
+		end
 		card:Hide()
 		if ClickBindingFrame and ClickBindingFrame:IsShown() then
 			ClickBindingUI.ApplySmartRulesToDataProvider(false)
@@ -2212,6 +2293,9 @@ local function EnsureHeroCardFrame()
 		if heroCardPreviewUnlocked then
 			GameTooltip_SetTitle(GameTooltip, L["OVERLAY_UNLOCK_BTN_LOCK_ALL"])
 			GameTooltip_AddNormalLine(GameTooltip, L["SETTING_UNITHOVER_UNLOCK_MOVE_DESC"], true)
+		elseif card.mode == "spec_preset" and card.pendingSpecPreset then
+			GameTooltip_SetTitle(GameTooltip, string.format(L["HEROCARD_SPEC_BTN_LOAD_FORMAT"], tostring(card.pendingSpecPreset.name or "")))
+			GameTooltip_AddNormalLine(GameTooltip, L["HEROCARD_SPEC_BTN_LOAD_DESC"], true)
 		else
 			GameTooltip_SetTitle(GameTooltip, L["HEROCARD_BTN_OPEN_APPLY"])
 			GameTooltip_AddNormalLine(GameTooltip, L["HEROCARD_BTN_OPEN_APPLY_DESC"], true)
@@ -2238,6 +2322,12 @@ local function EnsureHeroCardFrame()
 			return
 		end
 		PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF)
+		if card.mode == "spec_preset" then
+			card.pendingSpecPreset = nil
+			card.mode = "smart_rules"
+			card:Hide()
+			return
+		end
 		local updates = card.pendingUpdates or {}
 		local lockedCount = 0
 		for _, u in ipairs(updates) do
@@ -2257,6 +2347,9 @@ local function EnsureHeroCardFrame()
 		if heroCardPreviewUnlocked then
 			GameTooltip_SetTitle(GameTooltip, L["OVERLAY_UNLOCK_BTN_RESET_POS"])
 			GameTooltip_AddNormalLine(GameTooltip, L["OVERLAY_UNLOCK_BTN_RESET_POS_DESC"], true)
+		elseif card.mode == "spec_preset" then
+			GameTooltip_SetTitle(GameTooltip, L["HEROCARD_SPEC_BTN_DISMISS"])
+			GameTooltip_AddNormalLine(GameTooltip, L["HEROCARD_SPEC_BTN_DISMISS_DESC"], true)
 		else
 			GameTooltip_SetTitle(GameTooltip, L["HEROCARD_BTN_KEEP_CURRENT"])
 			GameTooltip_AddNormalLine(GameTooltip, L["HEROCARD_BTN_KEEP_CURRENT_DESC"], true)
@@ -2267,6 +2360,7 @@ local function EnsureHeroCardFrame()
 		GameTooltip:Hide()
 	end)
 	card.KeepButton = keepBtn
+	card.mode = "smart_rules"
 
 	card:Hide()
 	heroCardFrame = card
@@ -2334,6 +2428,8 @@ function ClickBindingUI.HideHeroCard()
 		ClickBindingUI.SetHeroCardPreviewUnlocked(false)
 	end
 	if heroCardFrame then
+		heroCardFrame.pendingSpecPreset = nil
+		heroCardFrame.mode = "smart_rules"
 		heroCardFrame:Hide()
 	end
 end
@@ -2349,6 +2445,12 @@ function ClickBindingUI.CheckAndShowHeroCard(resetDismissed)
 	end
 
 	if heroCardPreviewUnlocked then
+		return
+	end
+
+	-- Eine aktive Dual-Spec-Preset-Hero-Card darf durch einen nachfolgenden Hintergrund-Smart-Rule-Check
+	-- nicht sofort wieder ausgeblendet werden.
+	if heroCardFrame and heroCardFrame:IsShown() and heroCardFrame.mode == "spec_preset" then
 		return
 	end
 
@@ -2399,8 +2501,18 @@ function ClickBindingUI.CheckAndShowHeroCard(resetDismissed)
 	end
 
 	local card = EnsureHeroCardFrame()
+	card.mode = "smart_rules"
+	card.pendingSpecPreset = nil
 	card.pendingUpdates = updates
 	card.currentSignature = sig
+	ApplySavedHeroCardPosition(card)
+	if card.SetBackdropBorderColor then
+		card:SetBackdropBorderColor(1.0, 1.0, 1.0, 1.0)
+	end
+	card.Title:SetText(L["HEROCARD_TITLE"])
+	card.Subtitle:SetText(L["HEROCARD_SUBTITLE"])
+	card.ApplyButton:SetText(L["HEROCARD_BTN_OPEN_APPLY"])
+	card.KeepButton:SetText(L["HEROCARD_BTN_KEEP_CURRENT"])
 
 	-- Alle Zeilen-Widgets zuerst verstecken (Frame-Recycling-Hygiene)
 	for i = 1, MAX_HERO_ROWS do
@@ -4157,15 +4269,18 @@ function ClickBindingUI.LoadPreset(presetOrName)
 		return false
 	end
 
-	-- Vorherigen aktiven Preset-Namen merken, falls der Spieler /bcc ohne Klick auf "Speichern" schließt
-	if not pendingActivePresetName then
-		previousActivePresetName = Database.GetActivePresetName()
-	end
-	pendingActivePresetName = preset.name
-	Database.SetActivePresetName(preset.name)
-	ClickBindingUI.UpdatePresetDropdownButton()
-	if ns.SettingsUI and ns.SettingsUI.RefreshWindow then
-		ns.SettingsUI.RefreshWindow()
+	-- Vorherigen aktiven Preset-Namen merken, falls der Spieler /bcc ohne Klick auf "Speichern" schließt.
+	-- Bei einem temporären In-Memory-Demo-Preset (/bcc test spec) wird der aktive Preset-Name nicht verändert.
+	if not preset._bccIsDemoTest then
+		if not pendingActivePresetName then
+			previousActivePresetName = Database.GetActivePresetName()
+		end
+		pendingActivePresetName = preset.name
+		Database.SetActivePresetName(preset.name)
+		ClickBindingUI.UpdatePresetDropdownButton()
+		if ns.SettingsUI and ns.SettingsUI.RefreshWindow then
+			ns.SettingsUI.RefreshWindow()
+		end
 	end
 
 	if DEFAULT_CHAT_FRAME then
@@ -4188,9 +4303,110 @@ function ClickBindingUI.DeletePresetByName(name)
 	return true
 end
 
+-- Zeigt nach einem Dual-Spec-Wechsel (Spec 1 <-> Spec 2) die Hero-Card mit einem 1-Klick-Button
+-- zum Öffnen & Laden des mit dem neuen Spec verknüpften Presets an (da C_ClickBindings.SetProfileByInfo
+-- geschützt ist und stets den Hardware-Klick des Spielers auf Blizzards Speichern-Button erfordert).
+function ClickBindingUI.ShowSpecPresetHeroCard(specIdx, linkedPreset)
+	if Constants.IsGamepadUIActive() or heroCardPreviewUnlocked then
+		return false
+	end
+	if InCombatLockdown and InCombatLockdown() then
+		return false
+	end
+	if type(linkedPreset) ~= "table" or not linkedPreset.name or linkedPreset.name == "" then
+		return false
+	end
+
+	local card = EnsureHeroCardFrame()
+	card.mode = "spec_preset"
+	card.pendingSpecPreset = linkedPreset
+	card.pendingUpdates = nil
+	card.currentSignature = nil
+
+	ApplySavedHeroCardPosition(card)
+	if card.SetBackdropBorderColor then
+		card:SetBackdropBorderColor(0.35, 0.80, 1.0, 1.0)
+	end
+
+	local specNum = tonumber(specIdx) or 1
+	local presetName = tostring(linkedPreset.name)
+	local bCount = (type(linkedPreset.bindings) == "table") and #linkedPreset.bindings or 0
+
+	card.Title:SetText(string.format(L["HEROCARD_SPEC_TITLE_FORMAT"], specNum))
+	card.Subtitle:SetText(string.format(L["HEROCARD_SPEC_SUBTITLE_FORMAT"], presetName))
+	card.ApplyButton:SetText(string.format(L["HEROCARD_SPEC_BTN_LOAD_FORMAT"], presetName))
+	card.KeepButton:SetText(L["HEROCARD_SPEC_BTN_DISMISS"])
+
+	for i = 1, MAX_HERO_ROWS do
+		card.Rows[i]:Hide()
+	end
+	card.MoreText:Hide()
+
+	-- Dominantes Talentbaum-Icon des Ziel-Specs (z. B. Schatten / Heilig / Disziplin);
+	-- Fallback auf Blizzards neutrales Talent-Icon (132222), wenn Spec 2 nicht freigeschaltet oder ohne Punkte ist.
+	local rowIconID = (Constants.GetPrimaryTalentTreeIconForSpecGroup and Constants.GetPrimaryTalentTreeIconForSpecGroup(specNum)) or 132222
+
+	card.Rows[1].Icon:SetTexture(rowIconID)
+	card.Rows[1].Text:SetText(string.format(L["HEROCARD_SPEC_ROW_FORMAT"], presetName, bCount))
+	card.Rows[1]:Show()
+
+	card:SetHeight(110 + 22)
+	card:Show()
+	return true
+end
+
+-- Interaktiver Live-Simulator (/bcc test spec [1|2]):
+-- Simuliert einen Dual-Spec-Wechsel auf Spec 1 oder 2 und zeigt die echte Dual-Spec Hero-Card
+-- (bzw. lädt im Modus "auto" direkt in /bcc), ohne SavedVariables zu verändern.
+function ClickBindingUI.SimulateDualSpecHeroCardTest(specIndexOverride, isSilentTest)
+	if Constants.IsGamepadUIActive() then
+		return false
+	end
+	if InCombatLockdown and InCombatLockdown() then
+		if not isSilentTest and DEFAULT_CHAT_FRAME then
+			DEFAULT_CHAT_FRAME:AddMessage(L["CHAT_COMBAT_ERR"])
+		end
+		return false
+	end
+
+	local curSpec = (Constants.GetActiveSpecGroupIndex and Constants.GetActiveSpecGroupIndex()) or 1
+	local targetSpec = tonumber(specIndexOverride)
+	if targetSpec ~= 1 and targetSpec ~= 2 then
+		targetSpec = (curSpec == 1) and 2 or 1
+	end
+
+	local linkedPreset = Database.GetPresetForSpecGroup and Database.GetPresetForSpecGroup(targetSpec)
+	local isDemoFallback = false
+	if not linkedPreset then
+		isDemoFallback = true
+		local snapBindings = (Database.CaptureBindingsSnapshot and Database.CaptureBindingsSnapshot(false)) or {}
+		linkedPreset = {
+			name = "Demo Spec " .. tostring(targetSpec),
+			bindings = snapBindings,
+			_bccIsDemoTest = true,
+		}
+	end
+
+	local behavior = Database.Get("trainerUpgradeBehavior") or "card"
+	if not isSilentTest and behavior == "auto" then
+		ClickBindingUI.LoadPreset(linkedPreset)
+		if DEFAULT_CHAT_FRAME then
+			DEFAULT_CHAT_FRAME:AddMessage(string.format("|cff40ff40Better Click Casting (Test):|r Dual-Spec-Wechsel auf Spec %d simuliert (Modus: Auto-Öffnen, Preset '%s').", targetSpec, tostring(linkedPreset.name)))
+		end
+		return true
+	end
+
+	local shown = ClickBindingUI.ShowSpecPresetHeroCard(targetSpec, linkedPreset)
+	if shown and not isSilentTest and DEFAULT_CHAT_FRAME then
+		local srcHint = isDemoFallback and "temporäres Demo-Preset ohne DB-Änderung" or "echtes verknüpftes Spec-Preset"
+		DEFAULT_CHAT_FRAME:AddMessage(string.format("|cff40ff40Better Click Casting (Test):|r Dual-Spec Hero-Card für Spec %d eingeblendet ('%s', %s).", targetSpec, tostring(linkedPreset.name), srcHint))
+	end
+	return shown
+end
+
 -- Reagiert auf einen Dual-Spec-Wechsel (ACTIVE_TALENT_GROUP_CHANGED / PLAYER_TALENT_UPDATE):
 -- Stellt bei offenem ClickBindingFrame versehentlich durch Blizzard gelöschte Talent-Zauber wieder her,
--- aktualisiert Zauberbuch-Cache & UI und lädt (oder meldet) ein mit dem neuen Spec (1 oder 2) verknüpftes Preset.
+-- aktualisiert Zauberbuch-Cache & UI und lädt (oder zeigt per Hero-Card) ein mit dem neuen Spec (1 oder 2) verknüpftes Preset.
 function ClickBindingUI.OnActiveSpecGroupChanged(specIndexOverride, isSilentTest)
 	if Constants.IsGamepadUIActive() then
 		SpellRanks.InvalidateCache()
@@ -4212,15 +4428,19 @@ function ClickBindingUI.OnActiveSpecGroupChanged(specIndexOverride, isSilentTest
 		local activeName = Database.GetActivePresetName and Database.GetActivePresetName()
 		if activeName ~= linkedPreset.name then
 			local behavior = Database.Get("trainerUpgradeBehavior") or "card"
-			if not isSilentTest and not (InCombatLockdown and InCombatLockdown()) and (behavior == "auto" or (ClickBindingFrame and ClickBindingFrame:IsShown())) then
-				ClickBindingUI.LoadPreset(linkedPreset)
-				return true, linkedPreset.name
-			else
-				if not isSilentTest and DEFAULT_CHAT_FRAME and L["CHAT_DUAL_SPEC_PRESET_READY_FORMAT"] then
-					DEFAULT_CHAT_FRAME:AddMessage(string.format(L["CHAT_DUAL_SPEC_PRESET_READY_FORMAT"], specIdx, linkedPreset.name, linkedPreset.name))
+			if not isSilentTest and not (InCombatLockdown and InCombatLockdown()) then
+				if behavior == "auto" or (ClickBindingFrame and ClickBindingFrame:IsShown()) then
+					ClickBindingUI.LoadPreset(linkedPreset)
+					return true, linkedPreset.name
+				elseif behavior == "card" then
+					ClickBindingUI.ShowSpecPresetHeroCard(specIdx, linkedPreset)
+					return true, linkedPreset.name
 				end
-				return true, linkedPreset.name
 			end
+			if not isSilentTest and DEFAULT_CHAT_FRAME and L["CHAT_DUAL_SPEC_PRESET_READY_FORMAT"] then
+				DEFAULT_CHAT_FRAME:AddMessage(string.format(L["CHAT_DUAL_SPEC_PRESET_READY_FORMAT"], specIdx, linkedPreset.name, linkedPreset.name))
+			end
+			return true, linkedPreset.name
 		end
 	end
 	if not isSilentTest and ClickBindingUI.ScheduleSmartRuleCheck then
@@ -5034,7 +5254,33 @@ local function RunDeepStressSelfTest(findings, infoNotes)
 				if not triggered or trigName ~= testPresetName then
 					table.insert(findings, string.format("DeepTest DualSpec: OnActiveSpecGroupChanged(2) did not resolve linked preset (got %s, %s)", tostring(triggered), tostring(trigName)))
 				end
+				-- Test D2: Dual-Spec-Hero-Card-Lebenszyklus, Talentbaum-Icon-Abfrage & Live-Simulator (/bcc test spec)
+				if Constants.GetPrimaryTalentTreeIconForSpecGroup then
+					for sIdx = 1, 2 do
+						local tIcon = Constants.GetPrimaryTalentTreeIconForSpecGroup(sIdx)
+						if tIcon ~= nil and (type(tIcon) ~= "number" or tIcon <= 0) then
+							table.insert(findings, string.format("DeepTest DualSpec: GetPrimaryTalentTreeIconForSpecGroup(%d) returned invalid icon %s", sIdx, tostring(tIcon)))
+						end
+					end
+				end
+				local wasHeroShown = heroCardFrame and heroCardFrame:IsShown()
+				local specCardShown = ClickBindingUI.SimulateDualSpecHeroCardTest(2, true)
+				if not specCardShown or not (heroCardFrame and heroCardFrame:IsShown() and heroCardFrame.mode == "spec_preset" and heroCardFrame.pendingSpecPreset and heroCardFrame.pendingSpecPreset.name == testPresetName) then
+					table.insert(findings, "DeepTest DualSpec: SimulateDualSpecHeroCardTest(2) failed to show linked preset heroCardFrame")
+				end
+				-- Demo-Fallback testen (wenn kein Preset an Spec 2 verknüpft ist)
 				charProfile.presets[testPresetName] = nil
+				local demoCardShown = ClickBindingUI.SimulateDualSpecHeroCardTest(2, true)
+				if not demoCardShown or not (heroCardFrame and heroCardFrame:IsShown() and heroCardFrame.pendingSpecPreset and heroCardFrame.pendingSpecPreset._bccIsDemoTest == true) then
+					table.insert(findings, "DeepTest DualSpec: SimulateDualSpecHeroCardTest(2) Demo fallback failed")
+				end
+				if heroCardFrame then
+					heroCardFrame.pendingSpecPreset = nil
+					heroCardFrame.mode = "smart_rules"
+					if not wasHeroShown then
+						heroCardFrame:Hide()
+					end
+				end
 				if prevSpec1Name then
 					Database.SetPresetSpecAssignment(prevSpec1Name, 1, true)
 				end
@@ -5072,6 +5318,16 @@ local function RunDeepStressSelfTest(findings, infoNotes)
 		if SettingsUI and SettingsUI.SetOverlaysUnlocked then
 			SettingsUI.SetOverlaysUnlocked(true, true)
 			SettingsUI.SetOverlaysUnlocked(wasUnlocked, true)
+		end
+
+		-- Combat-Save-Shield-Lebenszyklus testen (taintfreies UIParent-Overlay über SaveButton)
+		ClickBindingUI.UpdateSaveButtonCombatShield(true)
+		if not (saveCombatShield and saveCombatShield:IsShown()) then
+			table.insert(findings, "DeepTest SaveCombatShield: shield failed to show when forceCombatState=true")
+		end
+		ClickBindingUI.UpdateSaveButtonCombatShield(false)
+		if saveCombatShield and saveCombatShield:IsShown() then
+			table.insert(findings, "DeepTest SaveCombatShield: shield failed to hide when forceCombatState=false")
 		end
 
 		if not wasMatrixShown then
@@ -5149,10 +5405,13 @@ function ClickBindingUI.RunTaintDiagnostics(subArg)
 	local bars = {
 		{ frame = _G.PetActionBar, name = "PetActionBar" },
 		{ frame = _G.MainActionBar, name = "MainActionBar" },
-		{ frame = _G.MultiBarBottomLeft, name = "MultiBarBottomLeft" },
-		{ frame = _G.MultiBarBottomRight, name = "MultiBarBottomRight" },
-		{ frame = _G.MultiBarRight, name = "MultiBarRight" },
-		{ frame = _G.MultiBarLeft, name = "MultiBarLeft" },
+		{ frame = _G.MultiBarBottomLeft, name = "MultiBarBottomLeft", isMultiBar = true },
+		{ frame = _G.MultiBarBottomRight, name = "MultiBarBottomRight", isMultiBar = true },
+		{ frame = _G.MultiBarRight, name = "MultiBarRight", isMultiBar = true },
+		{ frame = _G.MultiBarLeft, name = "MultiBarLeft", isMultiBar = true },
+		{ frame = _G.MultiBar5, name = "MultiBar5", isMultiBar = true },
+		{ frame = _G.MultiBar6, name = "MultiBar6", isMultiBar = true },
+		{ frame = _G.MultiBar7, name = "MultiBar7", isMultiBar = true },
 		{ frame = _G.StanceBar, name = "StanceBar" },
 		{ frame = _G.PossessActionBar, name = "PossessActionBar" },
 	}
@@ -5173,12 +5432,27 @@ function ClickBindingUI.RunTaintDiagnostics(subArg)
 		"ShowBase",
 	}
 
+	local expectedShowAllBars = {}
 	for _, entry in ipairs(bars) do
 		local bar = entry.frame
 		if bar then
 			for _, k in ipairs(barKeys) do
 				if bar[k] ~= nil then
-					checkVar(bar, k, entry.name)
+					if k == "showAllButtons" and entry.isMultiBar then
+						local okShowAll, srcShowAll = issecurevariable(bar, k)
+						if not okShowAll then
+							if srcShowAll == Constants.ADDON_NAME then
+								-- Bekannter Blizzard-Seiteneffekt: Sobald /bcc (oder /bcc debug deep) PlayerSpellsFrame
+								-- öffnet, ruft Blizzard_PlayerSpellsFrame:OnShow() MultiActionBar_ShowAllGrids(4) auf.
+								-- Als transparente [WARN]-Meldung statt [ERR] ausweisen.
+								table.insert(expectedShowAllBars, entry.name)
+							else
+								table.insert(findings, string.format("%s.%s (by %s)", entry.name, tostring(k), tostring(srcShowAll or "unknown")))
+							end
+						end
+					else
+						checkVar(bar, k, entry.name)
+					end
 				end
 			end
 			if type(bar.snappedFrames) == "table" then
@@ -5200,6 +5474,14 @@ function ClickBindingUI.RunTaintDiagnostics(subArg)
 				end
 			end
 		end
+	end
+	if #expectedShowAllBars > 0 then
+		table.insert(infoNotes, string.format(
+			"MultiBar.showAllButtons: %d bar(s) tainted by %s (%s; expected Blizzard side-effect when /bcc opens Spellbook; use /clickcast for untainted combat-visibility bars)",
+			#expectedShowAllBars,
+			tostring(Constants.ADDON_NAME),
+			table.concat(expectedShowAllBars, ", ")
+		))
 	end
 
 	-- 3. EditModeManagerFrame, UnitFrames, PlayerSpellsFrame und SpellBookFrame prüfen
@@ -5646,11 +5928,15 @@ function ClickBindingUI.SetupHooks()
 		if SpellBookUI and SpellBookUI.RefreshBadges then
 			SpellBookUI.RefreshBadges()
 		end
+		ClickBindingUI.UpdateSaveButtonCombatShield()
 	end)
 
 	ClickBindingFrame:HookScript("OnHide", function()
 		if gamepadStandbyBadge then
 			gamepadStandbyBadge:Hide()
+		end
+		if saveCombatShield then
+			saveCombatShield:Hide()
 		end
 		-- Snapshot beim Schließen leeren, damit keine veralteten Zeilen aus einer früheren Sitzung kleben bleiben
 		lastKnownProviderCustomBindings = {}

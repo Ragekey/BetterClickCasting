@@ -25,6 +25,40 @@ loaderFrame:RegisterEvent("INPUT_DEVICE_INTERFACE_TRANSITION")
 loaderFrame:RegisterEvent("ACTIVE_TALENT_GROUP_CHANGED")
 loaderFrame:RegisterEvent("PLAYER_TALENT_UPDATE")
 
+-- Merkt sich den zuletzt aktiven Dual-Spec-Index (1 oder 2), damit ein Wechsel zwischen Primär- und
+-- Sekundär-Spec auch dann zuverlässig erkannt wird, wenn der Client nur PLAYER_TALENT_UPDATE oder SPELLS_CHANGED feuert.
+local lastActiveSpecGroup = nil
+local pendingSpecChangeTimer = false
+
+local function CheckSpecGroupTransition(forceTrigger)
+	local curSpec = (ns.Constants and ns.Constants.GetActiveSpecGroupIndex and ns.Constants.GetActiveSpecGroupIndex()) or 1
+	if not forceTrigger and (lastActiveSpecGroup == nil or curSpec == lastActiveSpecGroup) then
+		lastActiveSpecGroup = curSpec
+		return false
+	end
+	lastActiveSpecGroup = curSpec
+	if pendingSpecChangeTimer then
+		return true
+	end
+	pendingSpecChangeTimer = true
+	local function RunSpecUpdate()
+		pendingSpecChangeTimer = false
+		SpellRanks.InvalidateCache()
+		if ClickBindingUI and ClickBindingUI.OnActiveSpecGroupChanged then
+			ClickBindingUI.OnActiveSpecGroupChanged(curSpec)
+		end
+		if SpellBookUI and SpellBookUI.RefreshBadges then
+			SpellBookUI.RefreshBadges()
+		end
+	end
+	if C_Timer and C_Timer.After then
+		C_Timer.After(0.4, RunSpecUpdate)
+	else
+		RunSpecUpdate()
+	end
+	return true
+end
+
 loaderFrame:SetScript("OnEvent", function(self, event, arg1)
 	if event == "ADDON_LOADED" then
 		if arg1 == addonName or arg1 == "BetterClickCasting" or arg1 == "BetterClickCastings" then
@@ -51,6 +85,9 @@ loaderFrame:SetScript("OnEvent", function(self, event, arg1)
 	elseif event == "PLAYER_LOGIN" then
 		Database.Init()
 		MinimapButton.Init()
+		if ns.Constants and ns.Constants.GetActiveSpecGroupIndex then
+			lastActiveSpecGroup = ns.Constants.GetActiveSpecGroupIndex()
+		end
 		if ns.SettingsUI and ns.SettingsUI.RegisterBlizzardOptions then
 			ns.SettingsUI.RegisterBlizzardOptions()
 		end
@@ -68,6 +105,9 @@ loaderFrame:SetScript("OnEvent", function(self, event, arg1)
 		end
 	elseif event == "PLAYER_ENTERING_WORLD" then
 		SpellRanks.InvalidateCache()
+		if ns.Constants and ns.Constants.GetActiveSpecGroupIndex then
+			lastActiveSpecGroup = ns.Constants.GetActiveSpecGroupIndex()
+		end
 		if C_Timer and C_Timer.After and Database and Database.SaveCharacterSnapshot then
 			C_Timer.After(1.0, Database.SaveCharacterSnapshot)
 		end
@@ -97,6 +137,9 @@ loaderFrame:SetScript("OnEvent", function(self, event, arg1)
 		if ns.Constants and ns.Constants.IsGamepadUIActive and ns.Constants.IsGamepadUIActive() then
 			if event == "SPELLS_CHANGED" or event == "LEARNED_SPELL_IN_SKILL_LINE" or event == "ACTIVE_TALENT_GROUP_CHANGED" or event == "PLAYER_TALENT_UPDATE" then
 				SpellRanks.InvalidateCache()
+				if ns.Constants.GetActiveSpecGroupIndex then
+					lastActiveSpecGroup = ns.Constants.GetActiveSpecGroupIndex()
+				end
 			end
 			return
 		end
@@ -107,31 +150,19 @@ loaderFrame:SetScript("OnEvent", function(self, event, arg1)
 			end
 			ClickBindingUI.RefreshVisibleLines()
 			SpellBookUI.RefreshBadges()
-			if ClickBindingUI and ClickBindingUI.ScheduleSmartRuleCheck then
+			if not CheckSpecGroupTransition(false) and ClickBindingUI and ClickBindingUI.ScheduleSmartRuleCheck then
 				ClickBindingUI.ScheduleSmartRuleCheck(0.8, false)
 			end
 		elseif event == "ACTIVE_TALENT_GROUP_CHANGED" or event == "PLAYER_TALENT_UPDATE" then
 			SpellRanks.InvalidateCache()
-			if ClickBindingUI and ClickBindingUI.OnActiveSpecGroupChanged then
-				if event == "ACTIVE_TALENT_GROUP_CHANGED" then
-					ClickBindingUI.OnActiveSpecGroupChanged()
-					if C_Timer and C_Timer.After then
-						C_Timer.After(0.5, function()
-							SpellRanks.InvalidateCache()
-							ClickBindingUI.RefreshVisibleLines()
-							if SpellBookUI and SpellBookUI.RefreshBadges then
-								SpellBookUI.RefreshBadges()
-							end
-						end)
-					end
-				else
-					ClickBindingUI.RefreshVisibleLines()
-					if SpellBookUI and SpellBookUI.RefreshBadges then
-						SpellBookUI.RefreshBadges()
-					end
-					if ClickBindingUI.ScheduleSmartRuleCheck then
-						ClickBindingUI.ScheduleSmartRuleCheck(0.8, false)
-					end
+			local specChanged = CheckSpecGroupTransition(event == "ACTIVE_TALENT_GROUP_CHANGED")
+			if not specChanged then
+				ClickBindingUI.RefreshVisibleLines()
+				if SpellBookUI and SpellBookUI.RefreshBadges then
+					SpellBookUI.RefreshBadges()
+				end
+				if ClickBindingUI and ClickBindingUI.ScheduleSmartRuleCheck then
+					ClickBindingUI.ScheduleSmartRuleCheck(0.8, false)
 				end
 			end
 		elseif event == "LEARNED_SPELL_IN_SKILL_LINE" then
@@ -153,7 +184,13 @@ loaderFrame:SetScript("OnEvent", function(self, event, arg1)
 			if ClickBindingUI and ClickBindingUI.HideHeroCard then
 				ClickBindingUI.HideHeroCard()
 			end
+			if ClickBindingUI and ClickBindingUI.UpdateSaveButtonCombatShield then
+				ClickBindingUI.UpdateSaveButtonCombatShield(true)
+			end
 		elseif event == "PLAYER_REGEN_ENABLED" then
+			if ClickBindingUI and ClickBindingUI.UpdateSaveButtonCombatShield then
+				ClickBindingUI.UpdateSaveButtonCombatShield(false)
+			end
 			if SpellBookUI and SpellBookUI.OnCombatEnded then
 				SpellBookUI.OnCombatEnded()
 			end
@@ -582,7 +619,13 @@ SlashCmdList["BETTERCLICKCASTING"] = function(msg)
 			PrintSettingState("SETTING_UNITHOVER_SHOW_RANGE", Database.Get("unitHoverShowRange"))
 		end
 	elseif cmd == "test" or cmd == "testcard" then
-		if ClickBindingUI and ClickBindingUI.PrepareSmartRuleTest then
+		local firstTestWord = string.match(arg, "^(%S+)") or ""
+		if firstTestWord == "spec" or firstTestWord == "dualspec" or firstTestWord == "preset" then
+			local specNum = tonumber(string.match(arg, "(%d+)"))
+			if ClickBindingUI and ClickBindingUI.SimulateDualSpecHeroCardTest then
+				ClickBindingUI.SimulateDualSpecHeroCardTest(specNum, false)
+			end
+		elseif ClickBindingUI and ClickBindingUI.PrepareSmartRuleTest then
 			ClickBindingUI.PrepareSmartRuleTest()
 		end
 	elseif cmd == "debug" then

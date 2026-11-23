@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.9.2] (2026-11-23)
+### Added
+- **Dual Spec Switch Hero-Card Popup (`ShowSpecPresetHeroCard`):**
+  - Switching between Primary (`Spec 1`) and Secondary (`Spec 2`) with a linked preset now automatically pops up the movable Hero-Card in the default *Hero-Card* mode, displaying your new spec's dominant talent-tree icon (via *WoW Forever*'s `C_Traits` API), the linked preset name and binding count, and a 1-click **`Load '<Preset>'`** button that opens `/bcc`, loads the preset, and highlights Blizzard's **Save** button.
+  - Added `/bcc test spec [1|2]` so you can preview and click through the Dual Spec Hero-Card anytime (using your linked preset or an in-memory demo preset without modifying SavedVariables).
+- **Combat Shield on Blizzard's `Save` Button (`SetProfileByInfo` Protection):**
+  - Added a taint-free `UIParent`-parented combat overlay over `ClickBindingFrame.SaveButton` while `InCombatLockdown()` is active (`Combat active: Click Save after combat!`), preventing accidental combat clicks from triggering `[ADDON_ACTION_BLOCKED] SetProfileByInfo()`.
+
+### Fixed
+- **Reliable Dual Spec Switch Detection (`PLAYER_TALENT_UPDATE` & `SPELLS_CHANGED` Diff Tracking):** Tracks `lastActiveSpecGroup` across `PLAYER_LOGIN`, `PLAYER_ENTERING_WORLD`, `ACTIVE_TALENT_GROUP_CHANGED`, `PLAYER_TALENT_UPDATE`, and `SPELLS_CHANGED` (with a `0.4s` debounce) so switching Primary and Secondary specs in *WoW Forever*'s Talents tab always triggers the linked preset popup or auto-load reliably.
+- **Live `[Spec 1]` / `[Spec 2]` Tags in Open Preset Dropdown:** Linking or unlinking a preset to `Spec 1` or `Spec 2` now updates all `[Spec 1]` / `[Spec 2]` tags live inside the open Preset dropdown via `MenuResponse.Refresh` (`AddInitializer`) and immediately refreshes Tab 4 without needing to close and reopen the menu.
+- **Extended ActionBar Diagnostics in `/bcc debug deep`:** Expanded `MultiBar` checks to include `MultiBar5`, `MultiBar6`, and `MultiBar7`, and cleanly classifies the known Blizzard `MultiBar*.showAllButtons` side-effect (triggered whenever `/bcc` opens a closed `PlayerSpellsFrame`) as a transparent `[WARN]` note rather than a false `[ERR]` failure.
+
 ## [0.9.1] (2026-11-22)
 ### Added
 - **Dual Spec Preset Linking (`Spec 1` / `Spec 2`, `/bcc preset spec1|spec2`):**

@@ -464,5 +464,14 @@ L["CHAT_PRESET_SPEC_LINKED_FORMAT"] = "|cff40ff59Better Click Casting:|r Linked 
 L["CHAT_PRESET_SPEC_UNLINKED_FORMAT"] = "|cff99ccffBetter Click Casting:|r Unlinked preset |cffffd100%s|r from |cff55ccffSpec %d|r."
 L["CHAT_DUAL_SPEC_PRESET_READY_FORMAT"] = "|cff40ff59Better Click Casting:|r Switched to |cff55ccffSpec %d|r. Preset |cffffd100%s|r is linked to this spec (use |cffffd100/bcc preset load %s|r or the Preset menu in /bcc to apply)."
 L["CHAT_DUAL_SPEC_RESTORED_FORMAT"] = "|cff40ff59Better Click Casting:|r Kept %d talent spell binding(s) in the list across spec switch."
+L["SAVE_COMBAT_LOCKED_HINT"] = "|cffff5555Combat active: Click Save after combat!|r"
+L["SAVE_COMBAT_LOCKED_TOOLTIP"] = "Blizzard blocks saving Click Cast profiles (SetProfileByInfo) during combat. Wait until combat ends and then click Save."
+L["HEROCARD_SPEC_TITLE_FORMAT"] = "Dual Spec Changed (Spec %d)"
+L["HEROCARD_SPEC_SUBTITLE_FORMAT"] = "Linked preset '%s' is ready to load:"
+L["HEROCARD_SPEC_ROW_FORMAT"] = "Preset: |cffffd100%s|r  |cff888888(%d bindings, click Save in /bcc)|r"
+L["HEROCARD_SPEC_BTN_LOAD_FORMAT"] = "Load '%s'"
+L["HEROCARD_SPEC_BTN_LOAD_DESC"] = "Opens /bcc, loads the linked preset into the list and highlights Blizzard's Save button so you can apply it with one click."
+L["HEROCARD_SPEC_BTN_DISMISS"] = "Not Now"
+L["HEROCARD_SPEC_BTN_DISMISS_DESC"] = "Hides this reminder without changing your current Click Cast bindings."
 
 ns.ApplyLocale("auto")
