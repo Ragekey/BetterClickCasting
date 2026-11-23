@@ -22,7 +22,42 @@ local smartCheckPending = false
 local lastKnownProviderCustomBindings = {}
 local isManualDeleteInProgress = false
 local pendingActivePresetName = nil
-local previousActivePresetName = nil
+local lastHiddenPendingPresetName = nil
+
+local function OnClickBindingFrameHidePendingPreset()
+	-- Blizzards SaveButton:OnClick ruft zuerst HideUIPanel(ClickBindingFrame) (= OnHide) auf,
+	-- bevor unser SaveButton-Post-Hook läuft. Deshalb puffern wir pendingActivePresetName für
+	-- genau diesen synchronen Klick-Frame in lastHiddenPendingPresetName und leeren es per Timer(0).
+	if pendingActivePresetName then
+		lastHiddenPendingPresetName = pendingActivePresetName
+		pendingActivePresetName = nil
+		if C_Timer and C_Timer.After then
+			C_Timer.After(0, function()
+				lastHiddenPendingPresetName = nil
+			end)
+		end
+	end
+end
+
+local function CommitPendingPresetOnSave()
+	local committedName = pendingActivePresetName or lastHiddenPendingPresetName
+	if committedName then
+		Database.SetActivePresetName(committedName)
+		pendingActivePresetName = nil
+		lastHiddenPendingPresetName = nil
+		ClickBindingUI.UpdatePresetDropdownButton()
+		if ns.SettingsUI and ns.SettingsUI.RefreshWindow then
+			ns.SettingsUI.RefreshWindow()
+		end
+	end
+end
+
+function ClickBindingUI.GetEffectiveActivePresetName()
+	if pendingActivePresetName and pendingActivePresetName ~= "" then
+		return pendingActivePresetName
+	end
+	return Database.GetActivePresetName and Database.GetActivePresetName() or nil
+end
 
 local SMART_RULE_OPTIONS = {
 	{ mode = SpellRanks.RULE_MAX,         labelKey = "SMART_RULE_MAX" },
@@ -4269,14 +4304,12 @@ function ClickBindingUI.LoadPreset(presetOrName)
 		return false
 	end
 
-	-- Vorherigen aktiven Preset-Namen merken, falls der Spieler /bcc ohne Klick auf "Speichern" schließt.
-	-- Bei einem temporären In-Memory-Demo-Preset (/bcc test spec) wird der aktive Preset-Name nicht verändert.
+	-- Das geladene Preset zunächst nur als Vorschau (pendingActivePresetName) merken und erst
+	-- beim echten Hardware-Klick auf Blizzards Speichern-Button dauerhaft in die DB übernehmen.
+	-- Bei einem temporären In-Memory-Demo-Preset (/bcc test spec) wird nichts vorgemerkt.
 	if not preset._bccIsDemoTest then
-		if not pendingActivePresetName then
-			previousActivePresetName = Database.GetActivePresetName()
-		end
 		pendingActivePresetName = preset.name
-		Database.SetActivePresetName(preset.name)
+		lastHiddenPendingPresetName = nil
 		ClickBindingUI.UpdatePresetDropdownButton()
 		if ns.SettingsUI and ns.SettingsUI.RefreshWindow then
 			ns.SettingsUI.RefreshWindow()
@@ -4670,7 +4703,7 @@ function ClickBindingUI.UpdatePresetDropdownButton()
 		return
 	end
 	UpdatePresetDropdownAnchor(btn)
-	local activeName = Database.GetActivePresetName()
+	local activeName = ClickBindingUI.GetEffectiveActivePresetName()
 	local labelStr = (activeName and activeName ~= "") and activeName or L["PRESET_NONE_SELECTED"]
 	btn.Text:SetText(string.format(L["PRESET_BUTTON_FORMAT"], labelStr))
 	btn:Show()
@@ -5289,6 +5322,27 @@ local function RunDeepStressSelfTest(findings, infoNotes)
 				end
 			end
 
+			-- Test D3: Transaktionaler Preset-Commit (Blizzard ruft HideUIPanel/OnHide VOR SaveButton-Post-Hook auf!)
+			if charProfile and type(charProfile.presets) == "table" then
+				charProfile.presets["__BCC_PREV__"] = { name = "__BCC_PREV__", updatedAt = 0, bindings = {} }
+				charProfile.presets["__BCC_COMMITTED__"] = { name = "__BCC_COMMITTED__", updatedAt = 0, bindings = {} }
+				Database.SetActivePresetName("__BCC_PREV__")
+				pendingActivePresetName = "__BCC_COMMITTED__"
+				lastHiddenPendingPresetName = nil
+				-- Fall 1: Abbruch ohne Save (OnHide allein darf DB-Wert nicht ändern)
+				OnClickBindingFrameHidePendingPreset()
+				if Database.GetActivePresetName() ~= "__BCC_PREV__" then
+					table.insert(findings, "DeepTest DualSpec: OnHide without Save unexpectedly modified activePresetName")
+				end
+				-- Fall 2: SaveButton-Klick (OnHide gefolgt von CommitPendingPresetOnSave MUSS neuen Namen übernehmen)
+				CommitPendingPresetOnSave()
+				if Database.GetActivePresetName() ~= "__BCC_COMMITTED__" then
+					table.insert(findings, string.format("DeepTest DualSpec: SaveButton commit after OnHide failed (got %s)", tostring(Database.GetActivePresetName())))
+				end
+				charProfile.presets["__BCC_PREV__"] = nil
+				charProfile.presets["__BCC_COMMITTED__"] = nil
+			end
+
 			-- Ausgangszustand von ClickBindingFrame.dataProvider exakt wiederherstellen
 			local toClear = {}
 			for _, el in ClickBindingFrame.dataProvider:Enumerate() do
@@ -5304,7 +5358,7 @@ local function RunDeepStressSelfTest(findings, infoNotes)
 			end
 			Database.SetActivePresetName(origActivePreset)
 			pendingActivePresetName = nil
-			previousActivePresetName = nil
+			lastHiddenPendingPresetName = nil
 			ClickBindingUI.RebuildGroups(false)
 			ClickBindingFrame.pendingChanges = origPending
 			SetSaveButtonGlowShown(origGlowShown)
@@ -5911,6 +5965,8 @@ function ClickBindingUI.SetupHooks()
 
 	-- Auto-Show-All-Spell-Ranks, Smart-Rule-Sync und Zauberbuch-Sync beim Öffnen und Schließen des ClickBindingFrames
 	ClickBindingFrame:HookScript("OnShow", function()
+		pendingActivePresetName = nil
+		lastHiddenPendingPresetName = nil
 		ClickBindingUI.HideHeroCard()
 		if Constants.IsGamepadUIActive() then
 			ClickBindingUI.UpdateGamepadStandbyState()
@@ -5941,15 +5997,11 @@ function ClickBindingUI.SetupHooks()
 		-- Snapshot beim Schließen leeren, damit keine veralteten Zeilen aus einer früheren Sitzung kleben bleiben
 		lastKnownProviderCustomBindings = {}
 		isManualDeleteInProgress = false
-		-- Wurde ein Preset geladen, aber das Fenster ohne Klick auf "Speichern" geschlossen,
-		-- den aktiven Preset-Namen sauber auf den vorherigen Stand zurücksetzen.
-		if pendingActivePresetName then
-			Database.SetActivePresetName(previousActivePresetName)
-			pendingActivePresetName = nil
-			previousActivePresetName = nil
-			if ns.SettingsUI and ns.SettingsUI.RefreshWindow then
-				ns.SettingsUI.RefreshWindow()
-			end
+		-- Pending-Preset für den synchron nachfolgenden SaveButton-Hook puffern; bei Abbruch ohne Speichern
+		-- bleibt Database.GetActivePresetName() komplett unverändert.
+		OnClickBindingFrameHidePendingPreset()
+		if ns.SettingsUI and ns.SettingsUI.RefreshWindow then
+			ns.SettingsUI.RefreshWindow()
 		end
 		SetSaveButtonGlowShown(false)
 		ClickBindingUI.HideChildPopups()
@@ -6024,12 +6076,8 @@ function ClickBindingUI.SetupHooks()
 
 	if ClickBindingFrame.SaveButton and not ClickBindingFrame.SaveButton._bccSnapshotHooked then
 		ClickBindingFrame.SaveButton:HookScript("OnClick", function()
-			-- Geladenes Preset wurde per Hardware-Klick auf "Speichern" bestätigt
-			if pendingActivePresetName then
-				Database.SetActivePresetName(pendingActivePresetName)
-				pendingActivePresetName = nil
-				previousActivePresetName = nil
-			end
+			-- Geladenes Preset wurde per Hardware-Klick auf "Speichern" bestätigt (auch wenn HideUIPanel/OnHide zuvor lief)
+			CommitPendingPresetOnSave()
 			if C_Timer and C_Timer.After and Database and Database.SaveCharacterSnapshot then
 				C_Timer.After(0.1, Database.SaveCharacterSnapshot)
 			end
@@ -6046,6 +6094,8 @@ function ClickBindingUI.SetupHooks()
 	if ClickBindingFrame.ResetToDefaultProfile then
 		hooksecurefunc(ClickBindingFrame, "ResetToDefaultProfile", function()
 			lastKnownProviderCustomBindings = {}
+			pendingActivePresetName = nil
+			lastHiddenPendingPresetName = nil
 			SetSaveButtonGlowShown(false)
 			ClickBindingUI.RebuildGroups()
 		end)

@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.9.3] (2026-11-23)
+### Fixed
+- **Active Preset Persistence on Save (`HideUIPanel` Before `SaveButton` Post-Hook):** Fixed a race where Blizzard's native `SaveButton:OnClick` called `HideUIPanel(ClickBindingFrame)` (`OnHide`) before our post-hook ran, causing newly loaded presets to roll back to the previously active preset even when clicking **Save**. Loaded presets are now held strictly as a preview until **Save** is clicked and reliably committed right after `OnHide` (verified by a new regression test in `/bcc debug deep`).
+- **False Dual Spec Popup on Login / `/reload`:** Removed `forceTrigger` on `ACTIVE_TALENT_GROUP_CHANGED` and added a `1.5s` boot grace window after `PLAYER_ENTERING_WORLD` so initial login, `/reload`, and zone transitions never trigger a false Dual Spec Hero-Card popup when your active spec has not actually changed.
+
 ## [0.9.2] (2026-11-23)
 ### Added
 - **Dual Spec Switch Hero-Card Popup (`ShowSpecPresetHeroCard`):**

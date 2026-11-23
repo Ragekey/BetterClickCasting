@@ -26,13 +26,39 @@ loaderFrame:RegisterEvent("ACTIVE_TALENT_GROUP_CHANGED")
 loaderFrame:RegisterEvent("PLAYER_TALENT_UPDATE")
 
 -- Merkt sich den zuletzt aktiven Dual-Spec-Index (1 oder 2), damit ein Wechsel zwischen Primär- und
--- Sekundär-Spec auch dann zuverlässig erkannt wird, wenn der Client nur PLAYER_TALENT_UPDATE oder SPELLS_CHANGED feuert.
+-- Sekundär-Spec zuverlässig erkannt wird, aber Login-/Reload-Init-Events (ACTIVE_TALENT_GROUP_CHANGED
+-- mit unverändertem Spec) niemals ein falsches Spec-Wechsel-Popup auslösen.
 local lastActiveSpecGroup = nil
+local isSpecTrackingReady = false
+local specBootToken = 0
 local pendingSpecChangeTimer = false
 
-local function CheckSpecGroupTransition(forceTrigger)
+local function ArmSpecTrackingAfterBoot()
+	isSpecTrackingReady = false
+	specBootToken = specBootToken + 1
+	local token = specBootToken
+	if ns.Constants and ns.Constants.GetActiveSpecGroupIndex then
+		lastActiveSpecGroup = ns.Constants.GetActiveSpecGroupIndex()
+	end
+	local function FinishBoot()
+		if token ~= specBootToken then
+			return
+		end
+		if ns.Constants and ns.Constants.GetActiveSpecGroupIndex then
+			lastActiveSpecGroup = ns.Constants.GetActiveSpecGroupIndex()
+		end
+		isSpecTrackingReady = true
+	end
+	if C_Timer and C_Timer.After then
+		C_Timer.After(1.5, FinishBoot)
+	else
+		FinishBoot()
+	end
+end
+
+local function CheckSpecGroupTransition()
 	local curSpec = (ns.Constants and ns.Constants.GetActiveSpecGroupIndex and ns.Constants.GetActiveSpecGroupIndex()) or 1
-	if not forceTrigger and (lastActiveSpecGroup == nil or curSpec == lastActiveSpecGroup) then
+	if not isSpecTrackingReady or lastActiveSpecGroup == nil or curSpec == lastActiveSpecGroup then
 		lastActiveSpecGroup = curSpec
 		return false
 	end
@@ -44,8 +70,10 @@ local function CheckSpecGroupTransition(forceTrigger)
 	local function RunSpecUpdate()
 		pendingSpecChangeTimer = false
 		SpellRanks.InvalidateCache()
+		local latestSpec = (ns.Constants and ns.Constants.GetActiveSpecGroupIndex and ns.Constants.GetActiveSpecGroupIndex()) or curSpec
+		lastActiveSpecGroup = latestSpec
 		if ClickBindingUI and ClickBindingUI.OnActiveSpecGroupChanged then
-			ClickBindingUI.OnActiveSpecGroupChanged(curSpec)
+			ClickBindingUI.OnActiveSpecGroupChanged(latestSpec)
 		end
 		if SpellBookUI and SpellBookUI.RefreshBadges then
 			SpellBookUI.RefreshBadges()
@@ -59,7 +87,7 @@ local function CheckSpecGroupTransition(forceTrigger)
 	return true
 end
 
-loaderFrame:SetScript("OnEvent", function(self, event, arg1)
+loaderFrame:SetScript("OnEvent", function(self, event, arg1, arg2)
 	if event == "ADDON_LOADED" then
 		if arg1 == addonName or arg1 == "BetterClickCasting" or arg1 == "BetterClickCastings" then
 			Database.Init()
@@ -105,7 +133,12 @@ loaderFrame:SetScript("OnEvent", function(self, event, arg1)
 		end
 	elseif event == "PLAYER_ENTERING_WORLD" then
 		SpellRanks.InvalidateCache()
-		if ns.Constants and ns.Constants.GetActiveSpecGroupIndex then
+		-- Bei Login, /reload oder erstem Betreten der Welt das Spec-Tracking erst nach 1,5s scharfschalten,
+		-- damit späte Server-Talentdaten auf Spec 2 oder Blizzards Reload-Init-Events kein Fehl-Popup auslösen.
+		-- Muss vor dem Gamepad-Early-Return laufen, damit ein späterer Wechsel auf MKB sofort scharf ist.
+		if arg1 or arg2 or not isSpecTrackingReady then
+			ArmSpecTrackingAfterBoot()
+		elseif ns.Constants and ns.Constants.GetActiveSpecGroupIndex then
 			lastActiveSpecGroup = ns.Constants.GetActiveSpecGroupIndex()
 		end
 		if C_Timer and C_Timer.After and Database and Database.SaveCharacterSnapshot then
@@ -150,12 +183,12 @@ loaderFrame:SetScript("OnEvent", function(self, event, arg1)
 			end
 			ClickBindingUI.RefreshVisibleLines()
 			SpellBookUI.RefreshBadges()
-			if not CheckSpecGroupTransition(false) and ClickBindingUI and ClickBindingUI.ScheduleSmartRuleCheck then
+			if not CheckSpecGroupTransition() and ClickBindingUI and ClickBindingUI.ScheduleSmartRuleCheck then
 				ClickBindingUI.ScheduleSmartRuleCheck(0.8, false)
 			end
 		elseif event == "ACTIVE_TALENT_GROUP_CHANGED" or event == "PLAYER_TALENT_UPDATE" then
 			SpellRanks.InvalidateCache()
-			local specChanged = CheckSpecGroupTransition(event == "ACTIVE_TALENT_GROUP_CHANGED")
+			local specChanged = CheckSpecGroupTransition()
 			if not specChanged then
 				ClickBindingUI.RefreshVisibleLines()
 				if SpellBookUI and SpellBookUI.RefreshBadges then
