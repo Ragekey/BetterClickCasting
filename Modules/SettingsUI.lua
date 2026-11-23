@@ -182,7 +182,7 @@ end
 local function PopulatePresetContextMenu(rootDescription, isQuickLoad)
 	rootDescription:CreateTitle(L["PRESET_MENU_TITLE"])
 	local selectedPreset, presets = GetSelectedPreset()
-	local activeName = Database.GetActivePresetName()
+	local activeName = (ns.ClickBindingUI and ns.ClickBindingUI.GetEffectiveActivePresetName and ns.ClickBindingUI.GetEffectiveActivePresetName()) or Database.GetActivePresetName()
 
 	if #presets == 0 then
 		rootDescription:CreateTitle(L["PRESET_NO_PRESETS_SAVED"])
