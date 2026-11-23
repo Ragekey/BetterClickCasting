@@ -417,6 +417,15 @@ L["CHAT_PRESET_SPEC_LINKED_FORMAT"] = "|cff40ff59Better Click Casting:|r Preajus
 L["CHAT_PRESET_SPEC_UNLINKED_FORMAT"] = "|cff99ccffBetter Click Casting:|r Preajuste |cffffd100%s|r desvinculado de |cff55ccffSpec %d|r."
 L["CHAT_DUAL_SPEC_PRESET_READY_FORMAT"] = "|cff40ff59Better Click Casting:|r Cambiado a |cff55ccffSpec %d|r. El preajuste |cffffd100%s|r está vinculado a esta especialización (usa |cffffd100/bcc preset load %s|r o el menú de preajustes en /bcc para aplicarlo)."
 L["CHAT_DUAL_SPEC_RESTORED_FORMAT"] = "|cff40ff59Better Click Casting:|r Se conservaron %d asignación(es) de talentos en la lista tras cambiar de especialización."
+L["SAVE_COMBAT_LOCKED_HINT"] = "|cffff5555En combate: ¡Guarda al salir de combate!|r"
+L["SAVE_COMBAT_LOCKED_TOOLTIP"] = "Blizzard bloquea guardar perfiles de lanzamiento con clic (SetProfileByInfo) durante el combate. Espera a salir de combate y haz clic en Guardar."
+L["HEROCARD_SPEC_TITLE_FORMAT"] = "Cambio de especialización (Spec %d)"
+L["HEROCARD_SPEC_SUBTITLE_FORMAT"] = "El preajuste vinculado '%s' está listo:"
+L["HEROCARD_SPEC_ROW_FORMAT"] = "Preajuste: |cffffd100%s|r  |cff888888(%d asignaciones, pulsa Guardar en /bcc)|r"
+L["HEROCARD_SPEC_BTN_LOAD_FORMAT"] = "Cargar '%s'"
+L["HEROCARD_SPEC_BTN_LOAD_DESC"] = "Abre /bcc, carga el preajuste vinculado en la lista y resalta el botón Guardar de Blizzard para aplicarlo con un clic."
+L["HEROCARD_SPEC_BTN_DISMISS"] = "Ahora no"
+L["HEROCARD_SPEC_BTN_DISMISS_DESC"] = "Oculta este aviso sin cambiar tus asignaciones de clic actuales."
 
 if ns.ApplyLocale then
 	ns.ApplyLocale("auto")

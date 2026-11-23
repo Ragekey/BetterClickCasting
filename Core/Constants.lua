@@ -4,7 +4,7 @@ local Constants = {}
 ns.Constants = Constants
 
 Constants.ADDON_NAME = addonName or "BetterClickCasting"
-Constants.VERSION = "0.9.1"
+Constants.VERSION = "0.9.2"
 -- Nativer gemipmappter Blizzard-Atlas aus Blizzard_ClickBindingUI.lua
 Constants.ICON_ATLAS = "clickcast-icon-mouse"
 
@@ -397,4 +397,64 @@ function Constants.GetActiveSpecGroupIndex()
 		end
 	end
 	return 1
+end
+
+-- Ermittelt das Icon (und den Namen) des dominanten Talentbaums für Spec 1 oder Spec 2
+-- über WoW Forevers C_SpecializationInfo-/C_Traits-API. Bei 0 verteilten Talentpunkten
+-- oder nicht freigeschaltetem Dual Spec liefert die Funktion nil.
+function Constants.GetPrimaryTalentTreeIconForSpecGroup(specIndex)
+	local idx = (tonumber(specIndex) == 2) and 2 or 1
+	if not (C_SpecializationInfo
+		and C_SpecializationInfo.GetCombatConfigIDForSpecGroup
+		and C_Traits
+		and C_Traits.GetConfigInfo
+		and C_Traits.GetGroupDisplayInfoByTreeID
+		and C_Traits.GetGroupCurrencyInfo)
+	then
+		return nil, nil
+	end
+	local configID = C_SpecializationInfo.GetCombatConfigIDForSpecGroup(idx)
+	if not configID or configID <= 0 then
+		return nil, nil
+	end
+	local configInfo = C_Traits.GetConfigInfo(configID)
+	local treeID = configInfo and configInfo.treeIDs and configInfo.treeIDs[1]
+	if not treeID then
+		return nil, nil
+	end
+	local displayInfos = C_Traits.GetGroupDisplayInfoByTreeID(treeID)
+	if type(displayInfos) ~= "table" or #displayInfos == 0 then
+		return nil, nil
+	end
+	local groupIDs = {}
+	local displayByGroupID = {}
+	for _, info in ipairs(displayInfos) do
+		if info and info.groupID then
+			table.insert(groupIDs, info.groupID)
+			displayByGroupID[info.groupID] = info
+		end
+	end
+	if #groupIDs == 0 then
+		return nil, nil
+	end
+	local groupInfos = C_Traits.GetGroupCurrencyInfo(configID, groupIDs)
+	if type(groupInfos) ~= "table" then
+		return nil, nil
+	end
+	local bestIcon = nil
+	local bestName = nil
+	local bestSpent = 0
+	for _, gInfo in ipairs(groupInfos) do
+		local cInfo = gInfo and gInfo.currencyInfos and gInfo.currencyInfos[1]
+		local spent = (cInfo and tonumber(cInfo.spent)) or 0
+		if spent > bestSpent then
+			local disp = displayByGroupID[gInfo.traitNodeGroupID]
+			if disp and disp.icon and disp.icon > 0 then
+				bestSpent = spent
+				bestIcon = disp.icon
+				bestName = disp.displayName
+			end
+		end
+	end
+	return bestIcon, bestName
 end

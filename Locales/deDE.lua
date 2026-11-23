@@ -416,6 +416,15 @@ L["CHAT_PRESET_SPEC_LINKED_FORMAT"] = "|cff40ff59Better Click Casting:|r Preset 
 L["CHAT_PRESET_SPEC_UNLINKED_FORMAT"] = "|cff99ccffBetter Click Casting:|r Verknüpfung von Preset |cffffd100%s|r mit |cff55ccffSpec %d|r aufgehoben."
 L["CHAT_DUAL_SPEC_PRESET_READY_FORMAT"] = "|cff40ff59Better Click Casting:|r Zu |cff55ccffSpec %d|r gewechselt. Preset |cffffd100%s|r ist mit diesem Spec verknüpft (nutze |cffffd100/bcc preset load %s|r oder das Preset-Menü in /bcc zum Laden)."
 L["CHAT_DUAL_SPEC_RESTORED_FORMAT"] = "|cff40ff59Better Click Casting:|r %d Talent-Klickbelegung(en) beim Spec-Wechsel in der Liste geschützt."
+L["SAVE_COMBAT_LOCKED_HINT"] = "|cffff5555Im Kampf: Nach dem Kampf speichern!|r"
+L["SAVE_COMBAT_LOCKED_TOOLTIP"] = "Blizzard blockiert das Speichern von Klickbelegungen (SetProfileByInfo) während des Kampfes. Warte das Kampfende ab und klicke dann auf Speichern."
+L["HEROCARD_SPEC_TITLE_FORMAT"] = "Dual-Spec gewechselt (Spec %d)"
+L["HEROCARD_SPEC_SUBTITLE_FORMAT"] = "Verknüpftes Preset '%s' steht bereit:"
+L["HEROCARD_SPEC_ROW_FORMAT"] = "Preset: |cffffd100%s|r  |cff888888(%d Belegungen, Speichern in /bcc)|r"
+L["HEROCARD_SPEC_BTN_LOAD_FORMAT"] = "'%s' laden"
+L["HEROCARD_SPEC_BTN_LOAD_DESC"] = "Öffnet /bcc, lädt das verknüpfte Preset in die Liste und hebt Blizzards Speichern-Button hervor, damit du es mit einem Klick übernimmst."
+L["HEROCARD_SPEC_BTN_DISMISS"] = "Später"
+L["HEROCARD_SPEC_BTN_DISMISS_DESC"] = "Blendet diesen Hinweis aus, ohne deine aktuellen Klickbelegungen zu verändern."
 
 if ns.ApplyLocale then
 	ns.ApplyLocale("auto")

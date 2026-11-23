@@ -203,10 +203,27 @@ local function PopulatePresetContextMenu(rootDescription, isQuickLoad)
 		end
 
 		for _, preset in ipairs(presets) do
+			local pName = preset.name
 			local label = FormatPresetLabel(preset)
-			local radio = rootDescription:CreateRadio(label, IsSelected, SetSelected, preset.name)
+			local radio = rootDescription:CreateRadio(label, IsSelected, SetSelected, pName)
+			-- Bei Live-Änderungen im offenen Menü (z. B. Klick auf Spec-1/Spec-2-Checkbox) löst
+			-- Blizzards MenuResponse.Refresh ein ReinitializeAll() aus; der Initializer aktualisiert
+			-- die [Spec 1]/[Spec 2]-Tags aller Preset-Zeilen sofort ohne Schließen & Neuöffnen.
+			if radio.AddInitializer then
+				radio:AddInitializer(function(button)
+					if button and button.fontString then
+						local livePreset = (Database.FindPreset and Database.FindPreset(pName)) or preset
+						local liveLabel = FormatPresetLabel(livePreset)
+						if button.fontString.SetTextToFit then
+							button.fontString:SetTextToFit(liveLabel)
+						else
+							button.fontString:SetText(liveLabel)
+						end
+					end
+				end)
+			end
 			radio:SetTooltip(function(tooltip)
-				GameTooltip_SetTitle(tooltip, preset.name)
+				GameTooltip_SetTitle(tooltip, pName)
 				GameTooltip_AddNormalLine(tooltip, L["PRESET_BTN_LOAD_DESC"], true)
 			end)
 		end
@@ -236,6 +253,7 @@ local function PopulatePresetContextMenu(rootDescription, isQuickLoad)
 				function()
 					local newVal = not (targetForAction.spec1 and true or false)
 					Database.SetPresetSpecAssignment(targetForAction.name, 1, newVal)
+					SettingsUI.RefreshWindow()
 					if DEFAULT_CHAT_FRAME then
 						local fmt = newVal and L["CHAT_PRESET_SPEC_LINKED_FORMAT"] or L["CHAT_PRESET_SPEC_UNLINKED_FORMAT"]
 						DEFAULT_CHAT_FRAME:AddMessage(string.format(fmt, targetForAction.name, 1))
@@ -250,6 +268,7 @@ local function PopulatePresetContextMenu(rootDescription, isQuickLoad)
 				function()
 					local newVal = not (targetForAction.spec2 and true or false)
 					Database.SetPresetSpecAssignment(targetForAction.name, 2, newVal)
+					SettingsUI.RefreshWindow()
 					if DEFAULT_CHAT_FRAME then
 						local fmt = newVal and L["CHAT_PRESET_SPEC_LINKED_FORMAT"] or L["CHAT_PRESET_SPEC_UNLINKED_FORMAT"]
 						DEFAULT_CHAT_FRAME:AddMessage(string.format(fmt, targetForAction.name, 2))
