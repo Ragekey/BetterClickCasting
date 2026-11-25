@@ -534,7 +534,7 @@ SlashCmdList["BETTERCLICKCASTING"] = function(msg)
 		end
 		if not charQuery or charQuery == "" then
 			if ns.SettingsUI and ns.SettingsUI.OpenSettingsTab then
-				ns.SettingsUI.OpenSettingsTab(4)
+				ns.SettingsUI.OpenSettingsTab(6)
 			end
 		else
 			local prof = Database.FindCharProfile(charQuery)
@@ -546,7 +546,7 @@ SlashCmdList["BETTERCLICKCASTING"] = function(msg)
 		end
 	elseif cmd == "profile" or cmd == "profiles" then
 		if ns.SettingsUI and ns.SettingsUI.OpenSettingsTab then
-			ns.SettingsUI.OpenSettingsTab(4)
+			ns.SettingsUI.OpenSettingsTab(6)
 		end
 	elseif cmd == "preset" or cmd == "presets" or cmd == "loadout" or cmd == "loadouts" then
 		local subCmd, restRaw = string.match(rawArg, "^(%S+)%s*(.-)$")

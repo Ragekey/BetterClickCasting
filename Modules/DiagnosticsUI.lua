@@ -339,8 +339,17 @@ local function RunDeepStressSelfTest(findings, infoNotes)
 		ClickBindingUI.RebuildGroups()
 
 		if SettingsUI and SettingsUI.OpenSettingsTab then
-			for tabIdx = 1, 4 do
+			local maxTabs = SettingsUI.NAV_COUNT or 6
+			for tabIdx = 1, maxTabs do
 				SettingsUI.OpenSettingsTab(tabIdx)
+			end
+			if SettingsUI.SetSearchFilter and SettingsUI.GetSearchFilter then
+				SettingsUI.SetSearchFilter("mana")
+				if SettingsUI.GetSearchFilter() ~= "mana" then
+					table.insert(findings, "DeepTest SettingsSearch: failed to apply search query 'mana'")
+				end
+				SettingsUI.SetSearchFilter("__no_match_xyz__")
+				SettingsUI.SetSearchFilter("")
 			end
 		end
 		if SettingsUI and SettingsUI.ShowReorderWindow and SettingsUI.HideReorderWindow then
@@ -613,7 +622,7 @@ local function RunDeepStressSelfTest(findings, infoNotes)
 			table.insert(findings, "DeepTest SaveCombatShield: shield failed to hide when forceCombatState=false")
 		end
 		-- Modul-Architektur-Prüfung (BF-01: alle 5 Fachmodule + Fassade vorhanden)
-		for _, modName in ipairs({ "ClickBindingUI", "HeroCardUI", "FreeKeysMatrixUI", "PresetsAndImportUI", "DiagnosticsUI" }) do
+		for _, modName in ipairs({ "SettingsWidgets", "SettingsUI", "ClickBindingUI", "HeroCardUI", "FreeKeysMatrixUI", "PresetsAndImportUI", "DiagnosticsUI" }) do
 			if type(ns[modName]) ~= "table" then
 				table.insert(findings, "DeepTest Modules: missing ns." .. modName)
 			end

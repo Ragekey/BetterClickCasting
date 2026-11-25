@@ -3,6 +3,7 @@ local _, ns = ...
 local L = ns.L
 local Constants = ns.Constants
 local Database = ns.Database
+local Widgets = ns.SettingsWidgets
 
 local SettingsUI = {}
 ns.SettingsUI = SettingsUI
@@ -48,6 +49,12 @@ local LOCALE_OPTIONS = {
 	{ value = "esES", labelKey = "LOCALE_OPT_ESES", shortKey = "LOCALE_OPT_ESES_SHORT" },
 }
 
+local MATRIX_META_OPTIONS = {
+	{ value = "auto", labelKey = "UX_META_AUTO", shortKey = "UX_META_AUTO" },
+	{ value = "on",   labelKey = "UX_META_ON",   shortKey = "UX_META_ON" },
+	{ value = "off",  labelKey = "UX_META_OFF",  shortKey = "UX_META_OFF" },
+}
+
 SettingsUI.GROUP_MODES = GROUP_MODES
 SettingsUI.UNITHOVER_MODES = UNITHOVER_MODES
 SettingsUI.UNITHOVER_ANCHORS = UNITHOVER_ANCHORS
@@ -55,11 +62,32 @@ SettingsUI.TRAINER_BEHAVIOR_OPTIONS = TRAINER_BEHAVIOR_OPTIONS
 SettingsUI.SHARE_SCOPE_OPTIONS = SHARE_SCOPE_OPTIONS
 SettingsUI.LOCALE_OPTIONS = LOCALE_OPTIONS
 
+local NAV_SECTIONS = {
+	{ index = 1, labelKey = "UX_NAV_CLICKCAST", atlas = Constants.ICON_ATLAS },
+	{ index = 2, labelKey = "UX_NAV_SPELLBOOK", texture = 133741 },
+	{ index = 3, labelKey = "UX_NAV_MATRIX",    texture = 134414 },
+	{ index = 4, labelKey = "UX_NAV_HOVER",     atlas = "Raid-Icon-SummonPending" },
+	{ index = 5, labelKey = "UX_NAV_PRESETS",   texture = 134327 },
+	{ index = 6, labelKey = "UX_NAV_PROFILES",  atlas = "questlog-icon-setting" },
+}
+SettingsUI.NAV_COUNT = #NAV_SECTIONS
+
 local settingsWindow = nil
 local activeTabIndex = 1
 local selectedSourceCharKey = nil
 local selectedShareScope = "all"
 local selectedPresetName = nil
+local currentSearchQuery = ""
+local searchCatalog = {}
+local searchResultRows = {}
+local presetListRows = {}
+
+local REORDER_ROW_H = 24
+local REORDER_ROW_GAP = 2
+
+--------------------------------------------------------------------------------
+-- Hilfsfunktionen & Kontextmenüs (Abwärtskompatibel für externe Module)
+--------------------------------------------------------------------------------
 
 local function GetSelectedPreset()
 	local presets, activeName = Database.GetPresets()
@@ -151,23 +179,19 @@ local function GetShortLabelFromList(list, currentVal, fallbackKey)
 end
 
 function SettingsUI.GetCurrentGroupShortLabel()
-	local current = Database.Get("groupingMode") or "modifier"
-	return GetShortLabelFromList(GROUP_MODES, current, "GROUP_MODE_MODIFIER_SHORT")
+	return GetShortLabelFromList(GROUP_MODES, Database.Get("groupingMode") or "modifier", "GROUP_MODE_MODIFIER_SHORT")
 end
 
 function SettingsUI.GetCurrentUnitHoverModeShortLabel()
-	local current = Database.Get("unitHoverMode") or "off"
-	return GetShortLabelFromList(UNITHOVER_MODES, current, "UNITHOVER_MODE_OFF_SHORT")
+	return GetShortLabelFromList(UNITHOVER_MODES, Database.Get("unitHoverMode") or "off", "UNITHOVER_MODE_OFF_SHORT")
 end
 
 function SettingsUI.GetCurrentUnitHoverAnchorShortLabel()
-	local current = Database.Get("unitHoverAnchor") or "cursor"
-	return GetShortLabelFromList(UNITHOVER_ANCHORS, current, "UNITHOVER_ANCHOR_CURSOR_SHORT")
+	return GetShortLabelFromList(UNITHOVER_ANCHORS, Database.Get("unitHoverAnchor") or "cursor", "UNITHOVER_ANCHOR_CURSOR_SHORT")
 end
 
 function SettingsUI.GetCurrentTrainerBehaviorShortLabel()
-	local current = Database.Get("trainerUpgradeBehavior") or "card"
-	return GetShortLabelFromList(TRAINER_BEHAVIOR_OPTIONS, current, "TRAINER_BEHAVIOR_CARD_SHORT")
+	return GetShortLabelFromList(TRAINER_BEHAVIOR_OPTIONS, Database.Get("trainerUpgradeBehavior") or "card", "TRAINER_BEHAVIOR_CARD_SHORT")
 end
 
 function SettingsUI.GetCurrentShareScopeShortLabel()
@@ -175,8 +199,27 @@ function SettingsUI.GetCurrentShareScopeShortLabel()
 end
 
 function SettingsUI.GetCurrentLocaleShortLabel()
-	local current = Database.Get("addonLocale") or "auto"
-	return GetShortLabelFromList(LOCALE_OPTIONS, current, "LOCALE_OPT_AUTO_SHORT")
+	return GetShortLabelFromList(LOCALE_OPTIONS, Database.Get("addonLocale") or "auto", "LOCALE_OPT_AUTO_SHORT")
+end
+
+local function PopulateRadioMenu(rootDescription, titleKey, dbKey, defaultValue, list, descKey)
+	rootDescription:CreateTitle(L[titleKey])
+	local function IsSelected(val)
+		return (Database.Get(dbKey) or defaultValue) == val
+	end
+	local function SetSelected(val)
+		Database.Set(dbKey, val)
+	end
+	for _, entry in ipairs(list) do
+		local radio = rootDescription:CreateRadio(L[entry.labelKey], IsSelected, SetSelected, entry.value)
+		local itemDescKey = entry.descKey or descKey
+		if itemDescKey and L[itemDescKey] then
+			radio:SetTooltip(function(tooltip)
+				GameTooltip_SetTitle(tooltip, L[entry.labelKey])
+				GameTooltip_AddNormalLine(tooltip, L[itemDescKey], true)
+			end)
+		end
+	end
 end
 
 local function PopulatePresetContextMenu(rootDescription, isQuickLoad)
@@ -193,7 +236,6 @@ local function PopulatePresetContextMenu(rootDescription, isQuickLoad)
 			end
 			return selectedPreset and selectedPreset.name == presetName
 		end
-
 		local function SetSelected(presetName)
 			selectedPresetName = presetName
 			if isQuickLoad and ns.ClickBindingUI and ns.ClickBindingUI.LoadPreset then
@@ -204,11 +246,7 @@ local function PopulatePresetContextMenu(rootDescription, isQuickLoad)
 
 		for _, preset in ipairs(presets) do
 			local pName = preset.name
-			local label = FormatPresetLabel(preset)
-			local radio = rootDescription:CreateRadio(label, IsSelected, SetSelected, pName)
-			-- Bei Live-Änderungen im offenen Menü (z. B. Klick auf Spec-1/Spec-2-Checkbox) löst
-			-- Blizzards MenuResponse.Refresh ein ReinitializeAll() aus; der Initializer aktualisiert
-			-- die [Spec 1]/[Spec 2]-Tags aller Preset-Zeilen sofort ohne Schließen & Neuöffnen.
+			local radio = rootDescription:CreateRadio(FormatPresetLabel(preset), IsSelected, SetSelected, pName)
 			if radio.AddInitializer then
 				radio:AddInitializer(function(button)
 					if button and button.fontString then
@@ -230,7 +268,6 @@ local function PopulatePresetContextMenu(rootDescription, isQuickLoad)
 	end
 
 	rootDescription:CreateDivider()
-
 	rootDescription:CreateButton(L["PRESET_ACT_SAVE_NEW"], function()
 		if ns.ClickBindingUI and ns.ClickBindingUI.ShowNewPresetPopup then
 			ns.ClickBindingUI.ShowNewPresetPopup("", function(saved)
@@ -245,36 +282,23 @@ local function PopulatePresetContextMenu(rootDescription, isQuickLoad)
 	local targetForAction = isQuickLoad and (activeName and Database.FindPreset(activeName)) or selectedPreset
 	if targetForAction and targetForAction.name then
 		if rootDescription.CreateCheckbox and Database.SetPresetSpecAssignment then
-			rootDescription:CreateCheckbox(
-				string.format(L["PRESET_ACT_LINK_SPEC_1_FORMAT"], targetForAction.name),
-				function()
-					return targetForAction.spec1 and true or false
-				end,
-				function()
-					local newVal = not (targetForAction.spec1 and true or false)
-					Database.SetPresetSpecAssignment(targetForAction.name, 1, newVal)
-					SettingsUI.RefreshWindow()
-					if DEFAULT_CHAT_FRAME then
-						local fmt = newVal and L["CHAT_PRESET_SPEC_LINKED_FORMAT"] or L["CHAT_PRESET_SPEC_UNLINKED_FORMAT"]
-						DEFAULT_CHAT_FRAME:AddMessage(string.format(fmt, targetForAction.name, 1))
+			for sIdx = 1, 2 do
+				local fmtKey = (sIdx == 1) and "PRESET_ACT_LINK_SPEC_1_FORMAT" or "PRESET_ACT_LINK_SPEC_2_FORMAT"
+				local field = (sIdx == 1) and "spec1" or "spec2"
+				rootDescription:CreateCheckbox(
+					string.format(L[fmtKey], targetForAction.name),
+					function() return targetForAction[field] and true or false end,
+					function()
+						local newVal = not (targetForAction[field] and true or false)
+						Database.SetPresetSpecAssignment(targetForAction.name, sIdx, newVal)
+						SettingsUI.RefreshWindow()
+						if DEFAULT_CHAT_FRAME then
+							local fmt = newVal and L["CHAT_PRESET_SPEC_LINKED_FORMAT"] or L["CHAT_PRESET_SPEC_UNLINKED_FORMAT"]
+							DEFAULT_CHAT_FRAME:AddMessage(string.format(fmt, targetForAction.name, sIdx))
+						end
 					end
-				end
-			)
-			rootDescription:CreateCheckbox(
-				string.format(L["PRESET_ACT_LINK_SPEC_2_FORMAT"], targetForAction.name),
-				function()
-					return targetForAction.spec2 and true or false
-				end,
-				function()
-					local newVal = not (targetForAction.spec2 and true or false)
-					Database.SetPresetSpecAssignment(targetForAction.name, 2, newVal)
-					SettingsUI.RefreshWindow()
-					if DEFAULT_CHAT_FRAME then
-						local fmt = newVal and L["CHAT_PRESET_SPEC_LINKED_FORMAT"] or L["CHAT_PRESET_SPEC_UNLINKED_FORMAT"]
-						DEFAULT_CHAT_FRAME:AddMessage(string.format(fmt, targetForAction.name, 2))
-					end
-				end
-			)
+				)
+			end
 		end
 		rootDescription:CreateButton(string.format(L["PRESET_ACT_UPDATE_FORMAT"], targetForAction.name), function()
 			if ns.ClickBindingUI and ns.ClickBindingUI.SavePresetByName then
@@ -297,27 +321,25 @@ local function PopulatePresetContextMenu(rootDescription, isQuickLoad)
 	if isQuickLoad then
 		rootDescription:CreateDivider()
 		rootDescription:CreateButton(L["PRESET_ACT_OPEN_MANAGER"], function()
-			SettingsUI.OpenSettingsTab(4)
+			SettingsUI.OpenSettingsTab(5)
 		end)
 	end
 end
 
 function SettingsUI.OpenPresetMenu(ownerRegion)
-	if not MenuUtil or not MenuUtil.CreateContextMenu then
-		return
+	if MenuUtil and MenuUtil.CreateContextMenu then
+		MenuUtil.CreateContextMenu(ownerRegion, function(_, rootDescription)
+			PopulatePresetContextMenu(rootDescription, true)
+		end)
 	end
-	MenuUtil.CreateContextMenu(ownerRegion, function(_, rootDescription)
-		PopulatePresetContextMenu(rootDescription, true)
-	end)
 end
 
 function SettingsUI.OpenTab4PresetMenu(ownerRegion)
-	if not MenuUtil or not MenuUtil.CreateContextMenu then
-		return
+	if MenuUtil and MenuUtil.CreateContextMenu then
+		MenuUtil.CreateContextMenu(ownerRegion, function(_, rootDescription)
+			PopulatePresetContextMenu(rootDescription, false)
+		end)
 	end
-	MenuUtil.CreateContextMenu(ownerRegion, function(_, rootDescription)
-		PopulatePresetContextMenu(rootDescription, false)
-	end)
 end
 
 function SettingsUI.OpenSourceCharMenu(ownerRegion)
@@ -334,20 +356,16 @@ function SettingsUI.OpenSourceCharMenu(ownerRegion)
 			rootDescription:CreateTitle(L["PROFILE_NO_CHAR_SAVED"])
 			return
 		end
-
 		local function IsSelected(key)
 			local prof = GetSelectedCharProfile()
 			return prof and prof.key == key
 		end
-
 		local function SetSelected(key)
 			selectedSourceCharKey = key
 			SettingsUI.RefreshWindow()
 		end
-
 		for _, prof in ipairs(list) do
-			local label = FormatCharProfileLabel(prof, currentKey)
-			local radio = rootDescription:CreateRadio(label, IsSelected, SetSelected, prof.key)
+			local radio = rootDescription:CreateRadio(FormatCharProfileLabel(prof, currentKey), IsSelected, SetSelected, prof.key)
 			if prof.key ~= currentKey then
 				radio:CreateButton(L["PROFILE_DELETE_SNAPSHOT"], function()
 					Database.DeleteCharProfile(prof.key)
@@ -362,44 +380,18 @@ function SettingsUI.OpenSourceCharMenu(ownerRegion)
 end
 
 function SettingsUI.OpenShareScopeMenu(ownerRegion)
-	if not MenuUtil or not MenuUtil.CreateContextMenu then
-		return
-	end
-	MenuUtil.CreateContextMenu(ownerRegion, function(_, rootDescription)
-		rootDescription:CreateTitle(L["SHARE_SCOPE_MENU_TITLE"])
-		local function IsSelected(val)
-			return (selectedShareScope or "all") == val
-		end
-		local function SetSelected(val)
-			selectedShareScope = val
-			SettingsUI.RefreshWindow()
-		end
-		for _, entry in ipairs(SHARE_SCOPE_OPTIONS) do
-			rootDescription:CreateRadio(L[entry.labelKey], IsSelected, SetSelected, entry.value)
-		end
-	end)
-end
-
-local function PopulateRadioMenu(rootDescription, titleKey, dbKey, defaultValue, list, descKey)
-	rootDescription:CreateTitle(L[titleKey])
-
-	local function IsSelected(val)
-		return (Database.Get(dbKey) or defaultValue) == val
-	end
-
-	local function SetSelected(val)
-		Database.Set(dbKey, val)
-	end
-
-	for _, entry in ipairs(list) do
-		local radio = rootDescription:CreateRadio(L[entry.labelKey], IsSelected, SetSelected, entry.value)
-		local itemDescKey = entry.descKey or descKey
-		if itemDescKey and L[itemDescKey] then
-			radio:SetTooltip(function(tooltip)
-				GameTooltip_SetTitle(tooltip, L[entry.labelKey])
-				GameTooltip_AddNormalLine(tooltip, L[itemDescKey], true)
-			end)
-		end
+	if MenuUtil and MenuUtil.CreateContextMenu then
+		MenuUtil.CreateContextMenu(ownerRegion, function(_, rootDescription)
+			rootDescription:CreateTitle(L["SHARE_SCOPE_MENU_TITLE"])
+			for _, entry in ipairs(SHARE_SCOPE_OPTIONS) do
+				rootDescription:CreateRadio(
+					L[entry.labelKey],
+					function(v) return (selectedShareScope or "all") == v end,
+					function(v) selectedShareScope = v; SettingsUI.RefreshWindow() end,
+					entry.value
+				)
+			end
+		end)
 	end
 end
 
@@ -409,12 +401,8 @@ function SettingsUI.PopulateGroupingMenu(rootDescription)
 		rootDescription:CreateDivider()
 		local cb = rootDescription:CreateCheckbox(
 			L["SETTING_COMPACT_LIST_MODE"],
-			function()
-				return Database.Get("compactListMode") and true or false
-			end,
-			function()
-				Database.Toggle("compactListMode")
-			end
+			function() return Database.Get("compactListMode") and true or false end,
+			function() Database.Toggle("compactListMode") end
 		)
 		if cb and cb.SetTooltip then
 			cb:SetTooltip(function(tooltip)
@@ -433,317 +421,783 @@ function SettingsUI.PopulateGroupingMenu(rootDescription)
 end
 
 function SettingsUI.OpenGroupingMenu(ownerRegion)
-	if not MenuUtil or not MenuUtil.CreateContextMenu then
-		return
+	if MenuUtil and MenuUtil.CreateContextMenu then
+		MenuUtil.CreateContextMenu(ownerRegion, function(_, rootDescription)
+			SettingsUI.PopulateGroupingMenu(rootDescription)
+		end)
 	end
-	MenuUtil.CreateContextMenu(ownerRegion, function(_, rootDescription)
-		SettingsUI.PopulateGroupingMenu(rootDescription)
-	end)
 end
 
 function SettingsUI.OpenTrainerBehaviorMenu(ownerRegion)
-	if not MenuUtil or not MenuUtil.CreateContextMenu then
-		return
+	if MenuUtil and MenuUtil.CreateContextMenu then
+		MenuUtil.CreateContextMenu(ownerRegion, function(_, rootDescription)
+			PopulateRadioMenu(rootDescription, "TRAINER_BEHAVIOR_MENU_TITLE", "trainerUpgradeBehavior", "card", TRAINER_BEHAVIOR_OPTIONS, "TRAINER_BEHAVIOR_TOOLTIP_DESC")
+		end)
 	end
-	MenuUtil.CreateContextMenu(ownerRegion, function(_, rootDescription)
-		PopulateRadioMenu(rootDescription, "TRAINER_BEHAVIOR_MENU_TITLE", "trainerUpgradeBehavior", "card", TRAINER_BEHAVIOR_OPTIONS, "TRAINER_BEHAVIOR_TOOLTIP_DESC")
-	end)
 end
 
 function SettingsUI.OpenLocaleMenu(ownerRegion)
-	if not MenuUtil or not MenuUtil.CreateContextMenu then
-		return
+	if MenuUtil and MenuUtil.CreateContextMenu then
+		MenuUtil.CreateContextMenu(ownerRegion, function(_, rootDescription)
+			PopulateRadioMenu(rootDescription, "LOCALE_MENU_TITLE", "addonLocale", "auto", LOCALE_OPTIONS, "LOCALE_TOOLTIP_DESC")
+		end)
 	end
-	MenuUtil.CreateContextMenu(ownerRegion, function(_, rootDescription)
-		PopulateRadioMenu(rootDescription, "LOCALE_MENU_TITLE", "addonLocale", "auto", LOCALE_OPTIONS, "LOCALE_TOOLTIP_DESC")
-	end)
 end
 
 --------------------------------------------------------------------------------
--- UI-Bausteine für das eigene Einstellungs-Fenster (BCCSettingsWindow)
+-- Eingebetteter Drag-&-Drop Reorder-Editor (auf Seite 3: Matrix & Reihenfolge)
 --------------------------------------------------------------------------------
 
-local function CreateSectionHeader(parent, labelKey, yOffset)
-	local label = parent:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-	label:SetPoint("TOPLEFT", parent, "TOPLEFT", 18, yOffset)
-	label:SetText("|cffffd100" .. (L[labelKey] or labelKey) .. "|r")
-
-	local line = parent:CreateTexture(nil, "ARTWORK")
-	line:SetHeight(1)
-	line:SetPoint("TOPLEFT", parent, "TOPLEFT", 18, yOffset - 16)
-	line:SetPoint("TOPRIGHT", parent, "TOPRIGHT", -18, yOffset - 16)
-	line:SetColorTexture(0.65, 0.55, 0.30, 0.30)
-
-	label.RefreshValue = function(self)
-		self:SetText("|cffffd100" .. (L[labelKey] or labelKey) .. "|r")
-	end
-
-	return label, line
+local function GetMouseButtonDisplayLabel(buttonName)
+	local norm = Constants.NormalizeMouseButtonName(buttonName)
+	local short = Constants.GetShortButtonName(norm)
+	local full = (Constants.GetButtonDisplayName and Constants.GetButtonDisplayName(norm)) or short
+	return string.format("|cffffd100%s|r  |cffffffff%s|r", short, full)
 end
 
-local function CreateCheckboxControl(parent, yOffset, labelKey, descKey, getterFunc, setterFunc)
-	local cb = CreateFrame("CheckButton", nil, parent, "UICheckButtonTemplate")
-	cb:SetSize(24, 24)
-	cb:SetPoint("TOPLEFT", parent, "TOPLEFT", 16, yOffset)
+local function EnsureReorderListRow(scrollChild, rowsPool, idx, isButtonList, reorderStateOwner)
+	if rowsPool[idx] then
+		return rowsPool[idx]
+	end
+	local row = CreateFrame("Button", nil, scrollChild, "BackdropTemplate")
+	row:SetHeight(REORDER_ROW_H)
+	row:EnableMouse(true)
+	row:RegisterForClicks("LeftButtonUp")
+	Widgets.ApplyBoxBackdrop(row, { 0.11, 0.14, 0.20, 0.92 }, { 0.32, 0.42, 0.58, 0.85 }, false)
 
-	local label = cb.Text or cb.text or cb:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-	label:ClearAllPoints()
-	label:SetPoint("LEFT", cb, "RIGHT", 4, 0)
-	label:SetJustifyH("LEFT")
-	label:SetText(L[labelKey])
-	cb.Label = label
+	local handleText = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+	handleText:SetPoint("LEFT", row, "LEFT", 5, 0)
+	handleText:SetText("|cff8899bb::|r")
 
-	cb:SetHitRectInsets(0, -320, 0, 0)
-
-	cb:SetScript("OnClick", function(self)
-		PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
-		setterFunc(self:GetChecked() and true or false)
-	end)
-
-	if descKey and L[descKey] then
+	local labelOffsetLeft = 20
+	if isButtonList then
+		local cb = CreateFrame("CheckButton", nil, row, "UICheckButtonTemplate")
+		cb:SetSize(18, 18)
+		cb:SetPoint("LEFT", row, "LEFT", 16, 0)
+		cb:SetScript("OnClick", function(self)
+			PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
+			if row.itemKey and Database.SetMatrixButtonColumnVisible then
+				Database.SetMatrixButtonColumnVisible(row.itemKey, self:GetChecked() and true or false)
+				SettingsUI.RefreshReorderWindow()
+			end
+		end)
 		cb:SetScript("OnEnter", function(self)
 			GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-			GameTooltip_SetTitle(GameTooltip, L[labelKey])
-			GameTooltip_AddNormalLine(GameTooltip, L[descKey], true)
+			GameTooltip_SetTitle(GameTooltip, L["MATRIX_PIN_COL_HEADER"] or "Matrix")
+			GameTooltip_AddNormalLine(GameTooltip, L["REORDER_COL_CHECK_TOOLTIP"], true)
 			GameTooltip:Show()
 		end)
-		cb:SetScript("OnLeave", function()
-			GameTooltip:Hide()
-		end)
+		cb:SetScript("OnLeave", function() GameTooltip:Hide() end)
+		row.ColCheckbox = cb
+		labelOffsetLeft = 36
 	end
 
-	cb.RefreshValue = function(self)
-		local checked = getterFunc() and true or false
-		self:SetChecked(checked)
-		if self.Label then
-			self.Label:SetText(L[labelKey])
-			if checked then
-				self.Label:SetTextColor(1.0, 0.96, 0.85)
-			else
-				self.Label:SetTextColor(0.80, 0.80, 0.80)
+	local downBtn = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
+	downBtn:SetSize(18, 18)
+	downBtn:SetPoint("RIGHT", row, "RIGHT", -3, 0)
+	downBtn:SetText("v")
+	downBtn:SetScript("OnClick", function()
+		PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
+		if row.onMoveDelta then row.onMoveDelta(1) end
+	end)
+	row.DownBtn = downBtn
+
+	local upBtn = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
+	upBtn:SetSize(18, 18)
+	upBtn:SetPoint("RIGHT", downBtn, "LEFT", -2, 0)
+	upBtn:SetText("^")
+	upBtn:SetScript("OnClick", function()
+		PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
+		if row.onMoveDelta then row.onMoveDelta(-1) end
+	end)
+	row.UpBtn = upBtn
+
+	local label = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+	label:SetPoint("LEFT", row, "LEFT", labelOffsetLeft, 0)
+	label:SetPoint("RIGHT", upBtn, "LEFT", -4, 0)
+	label:SetJustifyH("LEFT")
+	label:SetWordWrap(false)
+	row.Label = label
+
+	row:SetScript("OnEnter", function(self)
+		if not reorderStateOwner.dragState then
+			if self.SetBackdropBorderColor then
+				self:SetBackdropBorderColor(0.75, 0.85, 1.0, 1.0)
+			end
+			GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+			GameTooltip_SetTitle(GameTooltip, L["REORDER_WINDOW_TITLE"])
+			GameTooltip_AddNormalLine(GameTooltip, L["REORDER_DRAG_HINT_TOOLTIP"], true)
+			GameTooltip:Show()
+		end
+	end)
+	row:SetScript("OnLeave", function(self)
+		GameTooltip:Hide()
+		if not (reorderStateOwner.dragState and reorderStateOwner.dragState.itemKey == self.itemKey) then
+			if self.SetBackdropBorderColor then
+				self:SetBackdropBorderColor(0.32, 0.42, 0.58, 0.85)
 			end
 		end
-	end
-
-	return cb
-end
-
-local function CreateDBCheckbox(parent, yOffset, dbKey, labelKey, descKey)
-	return CreateCheckboxControl(
-		parent,
-		yOffset,
-		labelKey,
-		descKey,
-		function()
-			return Database.Get(dbKey)
-		end,
-		function(val)
-			Database.Set(dbKey, val)
+	end)
+	row:SetScript("OnMouseDown", function(self, button)
+		if button == "LeftButton" and self.itemKey then
+			GameTooltip:Hide()
+			reorderStateOwner.dragState = {
+				listType = isButtonList and "button" or "modifier",
+				itemKey = self.itemKey,
+				scrollChild = scrollChild,
+			}
+			SettingsUI.RefreshReorderWindow()
 		end
-	)
-end
-
-local function CreatePillSelectorButton(parent, yOffset, width, getTextFunc, openMenuFunc, tooltipTitleKey, tooltipDescKey)
-	local btn = CreateFrame("Button", nil, parent)
-	btn:SetSize(width or 390, 26)
-	btn:SetPoint("TOPLEFT", parent, "TOPLEFT", 18, yOffset)
-	btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
-
-	local bg = btn:CreateTexture(nil, "BACKGROUND")
-	bg:SetAllPoints()
-	bg:SetAtlas("common-dropdown-c-button")
-	bg:SetVertexColor(0.88, 0.88, 0.88, 0.96)
-	btn.Bg = bg
-
-	local border = btn:CreateTexture(nil, "BORDER")
-	border:SetAllPoints()
-	border:SetAtlas("common-dropdown-c-button-hover")
-	border:SetAlpha(0.35)
-	btn.Border = border
-
-	local highlight = btn:CreateTexture(nil, "HIGHLIGHT")
-	highlight:SetAllPoints()
-	highlight:SetAtlas("common-dropdown-c-button-hover")
-	highlight:SetBlendMode("ADD")
-	highlight:SetAlpha(0.55)
-
-	local arrow = btn:CreateTexture(nil, "ARTWORK")
-	arrow:SetSize(11, 7)
-	arrow:SetPoint("RIGHT", btn, "RIGHT", -12, -1)
-	arrow:SetAtlas("common-dropdown-a-button-open")
-	btn.Arrow = arrow
-
-	local text = btn:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-	text:SetPoint("LEFT", btn, "LEFT", 12, 0)
-	text:SetPoint("RIGHT", arrow, "LEFT", -6, 0)
-	text:SetJustifyH("LEFT")
-	btn.Text = text
-
-	btn:SetScript("OnClick", function(self)
-		PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
-		openMenuFunc(self)
+	end)
+	row:SetScript("OnMouseUp", function(_, button)
+		if button == "LeftButton" and reorderStateOwner.dragState then
+			reorderStateOwner.dragState = nil
+			PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
+			SettingsUI.RefreshReorderWindow()
+		end
 	end)
 
-	if tooltipTitleKey and tooltipDescKey then
-		btn:SetScript("OnEnter", function(self)
-			GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-			GameTooltip_SetTitle(GameTooltip, L[tooltipTitleKey])
-			GameTooltip_AddNormalLine(GameTooltip, L[tooltipDescKey], true)
-			GameTooltip:Show()
-		end)
-		btn:SetScript("OnLeave", function()
-			GameTooltip:Hide()
-		end)
-	end
-
-	btn.RefreshValue = function(self)
-		self.Text:SetText(getTextFunc())
-	end
-
-	return btn
+	rowsPool[idx] = row
+	return row
 end
 
-local function CreateActionButton(parent, yOffset, width, getTextFunc, onClickFunc, tooltipDescKey)
-	local btn = CreateFrame("Button", nil, parent)
-	btn:SetSize(width or 390, 26)
-	btn:SetPoint("TOPLEFT", parent, "TOPLEFT", 18, yOffset)
-	btn:RegisterForClicks("LeftButtonUp")
+local function BuildEmbeddedReorderCard(page, topY)
+	local card = Widgets.CreateCard(page, "REORDER_WINDOW_TITLE", topY)
 
-	local bg = btn:CreateTexture(nil, "BACKGROUND")
-	bg:SetAllPoints()
-	bg:SetAtlas("common-dropdown-c-button")
-	bg:SetVertexColor(0.95, 0.90, 0.78, 0.98)
-	btn.Bg = bg
+	local subY = card:Advance(28, 4)
+	local subtitle = card:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+	subtitle:SetPoint("TOPLEFT", card, "TOPLEFT", 14, subY)
+	subtitle:SetPoint("TOPRIGHT", card, "TOPRIGHT", -14, subY)
+	subtitle:SetJustifyH("LEFT")
+	subtitle:SetWordWrap(true)
+	card.Subtitle = subtitle
 
-	local border = btn:CreateTexture(nil, "BORDER")
-	border:SetAllPoints()
-	border:SetAtlas("common-dropdown-c-button-hover")
-	border:SetAlpha(0.45)
-	btn.Border = border
+	local hdrY = card:Advance(18, 2)
+	local colW = 222
+	local leftHeader = card:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+	leftHeader:SetPoint("TOPLEFT", card, "TOPLEFT", 14, hdrY)
+	card.LeftHeader = leftHeader
 
-	local highlight = btn:CreateTexture(nil, "HIGHLIGHT")
-	highlight:SetAllPoints()
-	highlight:SetAtlas("common-dropdown-c-button-hover")
-	highlight:SetBlendMode("ADD")
-	highlight:SetAlpha(0.60)
+	local rightHeader = card:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+	rightHeader:SetPoint("TOPLEFT", card, "TOPLEFT", 14 + colW + 14, hdrY)
+	card.RightHeader = rightHeader
 
-	local text = btn:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-	text:SetPoint("CENTER", btn, "CENTER", 0, 0)
-	btn.Text = text
+	local function CreateListBox(xOff, height)
+		local box = CreateFrame("Frame", nil, card, "BackdropTemplate")
+		box:SetSize(colW, height)
+		Widgets.ApplyBoxBackdrop(box, { 0.04, 0.05, 0.08, 0.94 }, { 0.34, 0.40, 0.52, 0.85 }, false)
 
-	btn:SetScript("OnClick", function(self)
-		PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
-		onClickFunc(self)
-	end)
+		local sf = CreateFrame("ScrollFrame", nil, box, "UIPanelScrollFrameTemplate")
+		sf:SetPoint("TOPLEFT", box, "TOPLEFT", 5, -5)
+		sf:SetPoint("BOTTOMRIGHT", box, "BOTTOMRIGHT", -25, 5)
 
-	if tooltipDescKey and L[tooltipDescKey] then
-		btn:SetScript("OnEnter", function(self)
-			GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-			GameTooltip_SetTitle(GameTooltip, getTextFunc())
-			GameTooltip_AddNormalLine(GameTooltip, L[tooltipDescKey], true)
-			GameTooltip:Show()
-		end)
-		btn:SetScript("OnLeave", function()
-			GameTooltip:Hide()
-		end)
+		local sc = CreateFrame("Frame", nil, sf)
+		sc:SetSize(colW - 32, 1)
+		sf:SetScrollChild(sc)
+
+		box.ScrollFrame = sf
+		box.ScrollChild = sc
+		box.Rows = {}
+		box:SetPoint("TOPLEFT", card, "TOPLEFT", xOff, card.cursorY)
+		return box
 	end
 
-	btn.RefreshValue = function(self)
-		self.Text:SetFontObject("GameFontNormal")
-		self.Text:SetText(getTextFunc())
-		local maxTextWidth = (self:GetWidth() or 200) - 18
-		if self.Text.GetUnboundedStringWidth and self.Text:GetUnboundedStringWidth() > maxTextWidth then
-			self.Text:SetFontObject("GameFontNormalSmall")
+	card.LeftBox = CreateListBox(14, 210)
+	card.RightBox = CreateListBox(14 + colW + 14, 240)
+	card:Advance(242, 8)
+
+	local addMmoBtn = Widgets.CreateStyledButton(card, colW, 22, function() return L["REORDER_ADD_MMO_BTN"] end, function(self)
+		if MenuUtil and MenuUtil.CreateContextMenu then
+			MenuUtil.CreateContextMenu(self, function(_, rootDescription)
+				rootDescription:CreateTitle(L["REORDER_ADD_MMO_MENU_TITLE"])
+				rootDescription:SetScrollMode(280)
+				for n = 6, 31 do
+					local btnKey = "Button" .. tostring(n)
+					local short = "MB" .. tostring(n)
+					local full = (Constants.GetButtonDisplayName and Constants.GetButtonDisplayName(btnKey)) or ("Mouse Button " .. tostring(n))
+					local isVis = Database.IsMatrixButtonColumnVisible and Database.IsMatrixButtonColumnVisible(btnKey)
+					local label = isVis and string.format("|cff40ff59%s|r (%s)", short, full) or string.format("|cffffd100%s|r (%s)", short, full)
+					rootDescription:CreateButton(label, function()
+						if Database.AddMouseButtonToOrder then
+							Database.AddMouseButtonToOrder(btnKey, true)
+						end
+						SettingsUI.RefreshReorderWindow()
+					end)
+				end
+			end)
+		end
+	end, "secondary")
+	addMmoBtn:SetPoint("TOPLEFT", card.LeftBox, "BOTTOMLEFT", 0, -6)
+	card.AddMmoBtn = addMmoBtn
+
+	local btnRowY = card:Advance(24, 4)
+	local mmbBtn = Widgets.CreateStyledButton(card, colW, 24, function() return L["REORDER_PRESET_MMB_CENTER_BTN"] end, function()
+		if Database.ApplyMiddleMouseCenterOrder then
+			Database.ApplyMiddleMouseCenterOrder()
+		end
+		SettingsUI.RefreshReorderWindow()
+		if DEFAULT_CHAT_FRAME then
+			DEFAULT_CHAT_FRAME:AddMessage(L["CHAT_ORDER_MMB_CENTER"])
+		end
+	end, "secondary")
+	mmbBtn:SetPoint("TOPLEFT", card, "TOPLEFT", 14, btnRowY)
+	card.PresetMmbBtn = mmbBtn
+
+	local rstBtn = Widgets.CreateStyledButton(card, colW, 24, function() return L["REORDER_RESET_BTN"] end, function()
+		if Database.ResetButtonAndModifierOrder then
+			Database.ResetButtonAndModifierOrder()
+		end
+		SettingsUI.RefreshReorderWindow()
+		if DEFAULT_CHAT_FRAME then
+			DEFAULT_CHAT_FRAME:AddMessage(L["CHAT_ORDER_RESET"])
+		end
+	end, "secondary")
+	rstBtn:SetPoint("TOPLEFT", card, "TOPLEFT", 14 + colW + 14, btnRowY)
+	card.ResetOrderBtn = rstBtn
+
+	card:SetScript("OnUpdate", function(self)
+		local ds = self.dragState
+		if not ds then return end
+		if not IsMouseButtonDown("LeftButton") then
+			self.dragState = nil
+			SettingsUI.RefreshReorderWindow()
+			return
+		end
+		local sc = ds.scrollChild
+		if not sc or not sc:GetTop() then return end
+		local _, cursorY = GetCursorPosition()
+		cursorY = cursorY / (sc:GetEffectiveScale() or 1)
+		local rowPitch = REORDER_ROW_H + REORDER_ROW_GAP
+		local targetIdx = math.floor((sc:GetTop() - cursorY) / rowPitch) + 1
+		if ds.listType == "button" then
+			local list = Database.GetOrderedMouseButtons and Database.GetOrderedMouseButtons(true) or {}
+			if #list > 0 then
+				targetIdx = math.max(1, math.min(#list, targetIdx))
+				local curIdx = Database.GetButtonOrderIndex and Database.GetButtonOrderIndex(ds.itemKey) or targetIdx
+				if targetIdx ~= curIdx and Database.MoveMouseButtonInOrder then
+					Database.MoveMouseButtonInOrder(ds.itemKey, targetIdx)
+					SettingsUI.RefreshReorderWindow()
+				end
+			end
+		elseif ds.listType == "modifier" then
+			local visibleMods = self.visibleModOrders or {}
+			if #visibleMods > 0 then
+				targetIdx = math.max(1, math.min(#visibleMods, targetIdx))
+				local curVisualIdx = nil
+				for i, mId in ipairs(visibleMods) do
+					if mId == ds.itemKey then curVisualIdx = i; break end
+				end
+				if curVisualIdx and targetIdx ~= curVisualIdx then
+					local targetModOrder = visibleMods[targetIdx]
+					local fullOrder = Database.GetOrderedModifierIDs and Database.GetOrderedModifierIDs() or {}
+					for i, id in ipairs(fullOrder) do
+						if id == targetModOrder and Database.MoveModifierInOrder then
+							Database.MoveModifierInOrder(ds.itemKey, i)
+							SettingsUI.RefreshReorderWindow()
+							break
+						end
+					end
+				end
+			end
+		end
+	end)
+	card:SetScript("OnHide", function(self)
+		self.dragState = nil
+	end)
+
+	local nextY = card:Finalize(10)
+	return card, nextY
+end
+
+function SettingsUI.RefreshReorderWindow()
+	if not settingsWindow or not settingsWindow.ReorderCard or not settingsWindow:IsShown() then
+		return
+	end
+	local f = settingsWindow.ReorderCard
+	f.HeaderText:SetText("|cffffd100" .. L["REORDER_WINDOW_TITLE"] .. "|r")
+	f.Subtitle:SetText(L["REORDER_WINDOW_SUBTITLE"])
+	f.LeftHeader:SetText("|cffffd100" .. L["REORDER_HDR_MOUSE_BUTTONS"] .. "|r")
+	f.RightHeader:SetText("|cff99ccff" .. L["REORDER_HDR_MODIFIERS"] .. "|r")
+	f.AddMmoBtn:RefreshValue()
+	f.PresetMmbBtn:RefreshValue()
+	f.ResetOrderBtn:RefreshValue()
+
+	local rowPitch = REORDER_ROW_H + REORDER_ROW_GAP
+
+	local buttons = Database.GetOrderedMouseButtons and Database.GetOrderedMouseButtons(true) or {}
+	local leftChild = f.LeftBox.ScrollChild
+	local leftWidth = leftChild:GetWidth()
+	for idx, btnName in ipairs(buttons) do
+		local row = EnsureReorderListRow(leftChild, f.LeftBox.Rows, idx, true, f)
+		row:ClearAllPoints()
+		row:SetPoint("TOPLEFT", leftChild, "TOPLEFT", 0, -((idx - 1) * rowPitch))
+		row:SetWidth(leftWidth)
+		row.itemKey = btnName
+		row.Label:SetText(string.format("|cff888888%d.|r %s", idx, GetMouseButtonDisplayLabel(btnName)))
+		if row.ColCheckbox then
+			local isVis = Database.IsMatrixButtonColumnVisible and Database.IsMatrixButtonColumnVisible(btnName)
+			row.ColCheckbox:SetChecked(isVis and true or false)
+		end
+		row.UpBtn:SetEnabled(idx > 1)
+		row.DownBtn:SetEnabled(idx < #buttons)
+		row.onMoveDelta = function(delta)
+			if Database.MoveMouseButtonInOrder then
+				Database.MoveMouseButtonInOrder(btnName, idx + delta)
+				SettingsUI.RefreshReorderWindow()
+			end
+		end
+		local isDrag = f.dragState and f.dragState.listType == "button" and f.dragState.itemKey == btnName
+		if row.SetBackdropColor then
+			if isDrag then
+				row:SetBackdropColor(0.26, 0.22, 0.08, 0.96)
+				row:SetBackdropBorderColor(1.0, 0.82, 0.25, 1.0)
+			else
+				row:SetBackdropColor(0.11, 0.14, 0.20, 0.92)
+				row:SetBackdropBorderColor(0.32, 0.42, 0.58, 0.85)
+			end
+		end
+		row:Show()
+	end
+	for idx = #buttons + 1, #f.LeftBox.Rows do
+		f.LeftBox.Rows[idx]:Hide()
+	end
+	leftChild:SetHeight(math.max(1, #buttons * rowPitch))
+
+	local orderedMods = (ns.ClickBindingUI and ns.ClickBindingUI.GetOrderedMatrixModRows and ns.ClickBindingUI.GetOrderedMatrixModRows()) or {}
+	local showMeta = (ns.ClickBindingUI and ns.ClickBindingUI.IsMatrixMetaActive and ns.ClickBindingUI.IsMatrixMetaActive()) or false
+	local visibleMods = {}
+	f.visibleModOrders = {}
+	for _, item in ipairs(orderedMods) do
+		if showMeta or not item.row.isMeta then
+			table.insert(visibleMods, item.row)
+			table.insert(f.visibleModOrders, item.row.modOrder)
 		end
 	end
 
-	return btn
+	local rightChild = f.RightBox.ScrollChild
+	local rightWidth = rightChild:GetWidth()
+	for idx, modRow in ipairs(visibleMods) do
+		local row = EnsureReorderListRow(rightChild, f.RightBox.Rows, idx, false, f)
+		row:ClearAllPoints()
+		row:SetPoint("TOPLEFT", rightChild, "TOPLEFT", 0, -((idx - 1) * rowPitch))
+		row:SetWidth(rightWidth)
+		row.itemKey = modRow.modOrder
+		row.Label:SetText(string.format("|cff888888%d.|r |cffb8d8ff%s|r", idx, L[modRow.labelKey] or modRow.fallback))
+		row.UpBtn:SetEnabled(idx > 1)
+		row.DownBtn:SetEnabled(idx < #visibleMods)
+		row.onMoveDelta = function(delta)
+			local targetVisual = visibleMods[idx + delta]
+			if targetVisual and Database.GetOrderedModifierIDs and Database.MoveModifierInOrder then
+				for fullIdx, id in ipairs(Database.GetOrderedModifierIDs()) do
+					if id == targetVisual.modOrder then
+						Database.MoveModifierInOrder(modRow.modOrder, fullIdx)
+						SettingsUI.RefreshReorderWindow()
+						break
+					end
+				end
+			end
+		end
+		local isDrag = f.dragState and f.dragState.listType == "modifier" and f.dragState.itemKey == modRow.modOrder
+		if row.SetBackdropColor then
+			if isDrag then
+				row:SetBackdropColor(0.26, 0.22, 0.08, 0.96)
+				row:SetBackdropBorderColor(1.0, 0.82, 0.25, 1.0)
+			else
+				row:SetBackdropColor(0.11, 0.14, 0.20, 0.92)
+				row:SetBackdropBorderColor(0.32, 0.42, 0.58, 0.85)
+			end
+		end
+		row:Show()
+	end
+	for idx = #visibleMods + 1, #f.RightBox.Rows do
+		f.RightBox.Rows[idx]:Hide()
+	end
+	rightChild:SetHeight(math.max(1, #visibleMods * rowPitch))
 end
 
-local function CreateSliderControl(parent, yOffset, dbKey, minVal, maxVal, stepVal, formatKey)
-	local container = CreateFrame("Frame", nil, parent)
-	container:SetSize(492, 42)
-	container:SetPoint("TOPLEFT", parent, "TOPLEFT", 18, yOffset)
+function SettingsUI.ShowReorderWindow()
+	SettingsUI.OpenSettingsTab(3)
+end
 
-	local title = container:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-	title:SetPoint("TOPLEFT", container, "TOPLEFT", 2, 0)
+function SettingsUI.HideReorderWindow()
+	-- Integriert in Seite 3 des Command-Centers; separater Schließ-Aufruf ist ein sicherer No-Op.
+end
+
+function SettingsUI.ToggleReorderWindow()
+	if settingsWindow and settingsWindow:IsShown() and activeTabIndex == 3 and currentSearchQuery == "" then
+		settingsWindow:Hide()
+		return
+	end
+	SettingsUI.OpenSettingsTab(3)
+end
+
+--------------------------------------------------------------------------------
+-- Inline-Preset-Liste auf Seite 5 (Presets & Dual-Spec)
+--------------------------------------------------------------------------------
+
+local function EnsurePresetListRow(card, idx)
+	if presetListRows[idx] then
+		return presetListRows[idx]
+	end
+	local row = CreateFrame("Frame", nil, card, "BackdropTemplate")
+	row:SetSize(card.innerWidth, 34)
+	Widgets.ApplyBoxBackdrop(row, { 0.06, 0.08, 0.12, 0.95 }, { 0.26, 0.32, 0.44, 0.85 }, false)
+
+	local nameFs = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+	nameFs:SetPoint("LEFT", row, "LEFT", 10, 0)
+	nameFs:SetWidth(155)
+	nameFs:SetJustifyH("LEFT")
+	nameFs:SetWordWrap(false)
+	row.NameText = nameFs
+
+	local delBtn = Widgets.CreateStyledButton(row, 26, 22, function() return "X" end, function()
+		if row.presetName and ns.ClickBindingUI and ns.ClickBindingUI.DeletePresetByName then
+			ns.ClickBindingUI.DeletePresetByName(row.presetName)
+			SettingsUI.RefreshWindow()
+		end
+	end, "danger", "PRESET_BTN_DELETE_DESC")
+	delBtn:SetPoint("RIGHT", row, "RIGHT", -6, 0)
+	row.DelBtn = delBtn
+
+	local saveBtn = Widgets.CreateStyledButton(row, 74, 22, function() return L["PRESET_BTN_OVERWRITE"] end, function()
+		if row.presetName and ns.ClickBindingUI and ns.ClickBindingUI.SavePresetByName then
+			ns.ClickBindingUI.SavePresetByName(row.presetName)
+			SettingsUI.RefreshWindow()
+		end
+	end, "secondary", "PRESET_BTN_OVERWRITE_DESC")
+	saveBtn:SetPoint("RIGHT", delBtn, "LEFT", -4, 0)
+	row.SaveBtn = saveBtn
+
+	local loadBtn = Widgets.CreateStyledButton(row, 62, 22, function() return L["PRESET_BTN_LOAD"] end, function()
+		if row.presetData and ns.ClickBindingUI and ns.ClickBindingUI.LoadPreset then
+			ns.ClickBindingUI.LoadPreset(row.presetData)
+			SettingsUI.RefreshWindow()
+		end
+	end, "primary", "PRESET_BTN_LOAD_DESC")
+	loadBtn:SetPoint("RIGHT", saveBtn, "LEFT", -4, 0)
+	row.LoadBtn = loadBtn
+
+	local function MakeSpecBtn(specIdx)
+		local b = CreateFrame("Button", nil, row, "BackdropTemplate")
+		b:SetSize(60, 22)
+		b:RegisterForClicks("LeftButtonUp")
+		Widgets.ApplyBoxBackdrop(b, Widgets.THEME.segBgIdle, Widgets.THEME.segBrdIdle, false)
+
+		local ic = b:CreateTexture(nil, "ARTWORK")
+		ic:SetSize(14, 14)
+		ic:SetPoint("LEFT", b, "LEFT", 4, 0)
+		ic:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+		b.Icon = ic
+
+		local fs = b:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+		fs:SetPoint("LEFT", ic, "RIGHT", 3, 0)
+		fs:SetPoint("RIGHT", b, "RIGHT", -2, 0)
+		fs:SetJustifyH("CENTER")
+		b.Text = fs
+
+		b:SetScript("OnClick", function()
+			if not row.presetData or not Database.SetPresetSpecAssignment then
+				return
+			end
+			PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
+			local cur = (specIdx == 1) and row.presetData.spec1 or row.presetData.spec2
+			local nextVal = not (cur and true or false)
+			Database.SetPresetSpecAssignment(row.presetData.name, specIdx, nextVal)
+			SettingsUI.RefreshWindow()
+			if DEFAULT_CHAT_FRAME then
+				local fmt = nextVal and L["CHAT_PRESET_SPEC_LINKED_FORMAT"] or L["CHAT_PRESET_SPEC_UNLINKED_FORMAT"]
+				DEFAULT_CHAT_FRAME:AddMessage(string.format(fmt, row.presetData.name, specIdx))
+			end
+		end)
+		b:SetScript("OnEnter", function(self)
+			if row.presetData then
+				GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+				local fmt = (specIdx == 1) and L["PRESET_ACT_LINK_SPEC_1_FORMAT"] or L["PRESET_ACT_LINK_SPEC_2_FORMAT"]
+				GameTooltip_SetTitle(GameTooltip, string.format(fmt, row.presetData.name))
+				GameTooltip:Show()
+			end
+		end)
+		b:SetScript("OnLeave", function() GameTooltip:Hide() end)
+		return b
+	end
+
+	local spec2Btn = MakeSpecBtn(2)
+	spec2Btn:SetPoint("RIGHT", loadBtn, "LEFT", -6, 0)
+	row.Spec2Btn = spec2Btn
+
+	local spec1Btn = MakeSpecBtn(1)
+	spec1Btn:SetPoint("RIGHT", spec2Btn, "LEFT", -4, 0)
+	row.Spec1Btn = spec1Btn
+
+	presetListRows[idx] = row
+	return row
+end
+
+local function RefreshPresetManagerCard()
+	if not settingsWindow or not settingsWindow.PresetCard then
+		return
+	end
+	local card = settingsWindow.PresetCard
+	card.HeaderText:SetText("|cffffd100" .. L["SETTINGS_HEADER_PRESETS"] .. "|r")
+	if card.NewBtn then
+		card.NewBtn:RefreshValue()
+	end
+
+	local _, presets = GetSelectedPreset()
+	local activeName = (ns.ClickBindingUI and ns.ClickBindingUI.GetEffectiveActivePresetName and ns.ClickBindingUI.GetEffectiveActivePresetName()) or Database.GetActivePresetName()
+	local spec1Icon = Constants.GetPrimaryTalentTreeIconForSpecGroup and Constants.GetPrimaryTalentTreeIconForSpecGroup(1)
+	local spec2Icon = Constants.GetPrimaryTalentTreeIconForSpecGroup and Constants.GetPrimaryTalentTreeIconForSpecGroup(2)
+
+	if #presets == 0 then
+		for _, r in ipairs(presetListRows) do
+			r:Hide()
+		end
+		card.EmptyHint:SetText(L["UX_PRESET_EMPTY_HINT"])
+		card.EmptyHint:Show()
+		card.EmptyCreateBtn:RefreshValue()
+		card.EmptyCreateBtn:Show()
+		card:SetHeight(140)
+		if settingsWindow.Pages[5] then
+			settingsWindow.Pages[5].contentHeight = 160
+		end
+		return
+	end
+
+	card.EmptyHint:Hide()
+	card.EmptyCreateBtn:Hide()
+
+	local y = -42
+	for idx, preset in ipairs(presets) do
+		local row = EnsurePresetListRow(card, idx)
+		row:ClearAllPoints()
+		row:SetPoint("TOPLEFT", card, "TOPLEFT", 14, y)
+		row.presetName = preset.name
+		row.presetData = preset
+
+		local bCount = (type(preset.bindings) == "table") and #preset.bindings or 0
+		local isAct = (activeName == preset.name)
+		local actBadge = isAct and (" " .. L["UX_PRESET_ACTIVE_BADGE"]) or ""
+		row.NameText:SetText(string.format("|cffffffff%s|r  |cff888888(%d)|r%s", preset.name or "?", bCount, actBadge))
+		if isAct then
+			Widgets.ApplyBoxBackdrop(row, { 0.09, 0.16, 0.11, 0.96 }, { 0.35, 0.80, 0.45, 0.95 }, false)
+		else
+			Widgets.ApplyBoxBackdrop(row, { 0.06, 0.08, 0.12, 0.95 }, { 0.26, 0.32, 0.44, 0.85 }, false)
+		end
+
+		local function StyleSpecBtn(b, linked, iconID, labelStr)
+			b.Icon:SetTexture(iconID or 134400)
+			b.Text:SetText(labelStr)
+			if linked then
+				Widgets.ApplyBoxBackdrop(b, { 0.10, 0.24, 0.36, 0.98 }, { 0.38, 0.80, 1.0, 1.0 }, false)
+				b.Text:SetTextColor(0.45, 0.88, 1.0)
+			else
+				Widgets.ApplyBoxBackdrop(b, Widgets.THEME.segBgIdle, Widgets.THEME.segBrdIdle, false)
+				b.Text:SetTextColor(0.68, 0.72, 0.80)
+			end
+		end
+		StyleSpecBtn(row.Spec1Btn, preset.spec1, spec1Icon, L["UX_PRESET_SPEC1_SHORT"])
+		StyleSpecBtn(row.Spec2Btn, preset.spec2, spec2Icon, L["UX_PRESET_SPEC2_SHORT"])
+
+		row.LoadBtn:RefreshValue()
+		row.SaveBtn:RefreshValue()
+		row.DelBtn:RefreshValue()
+		row:Show()
+		y = y - 38
+	end
+
+	for idx = #presets + 1, #presetListRows do
+		presetListRows[idx]:Hide()
+	end
+
+	local totalH = math.abs(y) + 10
+	card:SetHeight(totalH)
+	if settingsWindow.Pages[5] then
+		settingsWindow.Pages[5].contentHeight = totalH + 20
+	end
+end
+
+--------------------------------------------------------------------------------
+-- Globale Live-Suche über alle 6 Kategorien (Ebene 1)
+--------------------------------------------------------------------------------
+
+local function RegisterSearchEntry(entry)
+	table.insert(searchCatalog, entry)
+end
+
+local function MatchesSearchEntry(entry, needle)
+	local enTbl = ns.Locales and ns.Locales["enUS"] or {}
+	local hayParts = {
+		L[entry.labelKey] or "",
+		entry.descKey and L[entry.descKey] or "",
+		L[entry.navKey] or "",
+		enTbl[entry.labelKey] or "",
+		entry.descKey and enTbl[entry.descKey] or "",
+		entry.keywords or "",
+	}
+	local haystack = string.lower(Widgets.StripColorCodes(table.concat(hayParts, " ")))
+	return string.find(haystack, needle, 1, true) ~= nil
+end
+
+local function EnsureSearchResultRow(parent, idx)
+	if searchResultRows[idx] then
+		return searchResultRows[idx]
+	end
+	local row = CreateFrame("Frame", nil, parent, "BackdropTemplate")
+	row:SetSize(486, 52)
+	Widgets.ApplyBoxBackdrop(row, Widgets.THEME.cardBg, Widgets.THEME.cardBorder, false)
+
+	local catBadge = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+	catBadge:SetPoint("TOPLEFT", row, "TOPLEFT", 12, -7)
+	catBadge:SetJustifyH("LEFT")
+	row.CatBadge = catBadge
+
+	local title = row:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+	title:SetPoint("TOPLEFT", catBadge, "BOTTOMLEFT", 0, -3)
+	title:SetWidth(290)
 	title:SetJustifyH("LEFT")
-	container.Title = title
+	title:SetWordWrap(false)
+	row.Title = title
 
-	local minLabel = container:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-	minLabel:SetPoint("BOTTOMLEFT", container, "BOTTOMLEFT", 2, 0)
-	minLabel:SetText(tostring(minVal) .. "%")
-
-	local maxLabel = container:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-	maxLabel:SetPoint("BOTTOMRIGHT", container, "BOTTOMRIGHT", -2, 0)
-	maxLabel:SetText(tostring(maxVal) .. "%")
-
-	local slider = CreateFrame("Slider", nil, container, "BackdropTemplate")
-	slider:SetOrientation("HORIZONTAL")
-	slider:SetSize(488, 12)
-	slider:SetPoint("TOPLEFT", container, "TOPLEFT", 2, -16)
-	slider:SetMinMaxValues(minVal, maxVal)
-	slider:SetValueStep(stepVal)
-	slider:SetObeyStepOnDrag(true)
-
-	if slider.SetBackdrop then
-		slider:SetBackdrop({
-			bgFile = "Interface\\Buttons\\WHITE8x8",
-			edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-			tile = true,
-			tileSize = 8,
-			edgeSize = 8,
-			insets = { left = 2, right = 2, top = 2, bottom = 2 },
-		})
-		slider:SetBackdropColor(0.08, 0.10, 0.14, 0.95)
-		slider:SetBackdropBorderColor(0.55, 0.48, 0.28, 0.85)
-	end
-
-	local thumb = slider:CreateTexture(nil, "OVERLAY")
-	thumb:SetSize(16, 20)
-	thumb:SetTexture("Interface\\Buttons\\UI-SliderBar-Button-Horizontal")
-	slider:SetThumbTexture(thumb)
-
-	local isUpdatingSlider = false
-	slider:SetScript("OnValueChanged", function(_, value)
-		local rounded = math.floor((value / stepVal) + 0.5) * stepVal
-		title:SetText(string.format(L[formatKey], rounded))
-		if not isUpdatingSlider then
-			Database.Set(dbKey, rounded)
+	local jumpBtn = Widgets.CreateStyledButton(row, 86, 22, function() return L["UX_SEARCH_JUMP_BTN"] end, function()
+		if row.targetTab then
+			SettingsUI.SetSearchFilter("")
+			SettingsUI.OpenSettingsTab(row.targetTab)
 		end
-	end)
+	end, "secondary")
+	jumpBtn:SetPoint("RIGHT", row, "RIGHT", -10, 0)
+	row.JumpBtn = jumpBtn
 
-	container.RefreshValue = function()
-		isUpdatingSlider = true
-		local val = tonumber(Database.Get(dbKey)) or minVal
-		val = math.max(minVal, math.min(maxVal, val))
-		slider:SetValue(val)
-		title:SetText(string.format(L[formatKey], val))
-		isUpdatingSlider = false
+	local actionBtn = Widgets.CreateStyledButton(row, 96, 22, function()
+		return row.getQuickValueText and row.getQuickValueText() or ""
+	end, function()
+		if row.onQuickToggle then
+			row.onQuickToggle()
+			SettingsUI.RefreshWindow()
+		end
+	end, "primary")
+	actionBtn:SetPoint("RIGHT", jumpBtn, "LEFT", -6, 0)
+	row.ActionBtn = actionBtn
+
+	searchResultRows[idx] = row
+	return row
+end
+
+local function RenderSearchResults()
+	if not settingsWindow or not settingsWindow.SearchPage then
+		return
+	end
+	local sPage = settingsWindow.SearchPage
+	local needle = string.lower(strtrim(currentSearchQuery or ""))
+	if needle == "" then
+		sPage:Hide()
+		return
 	end
 
-	return container
+	local matches = {}
+	for _, entry in ipairs(searchCatalog) do
+		if MatchesSearchEntry(entry, needle) then
+			table.insert(matches, entry)
+		end
+	end
+
+	sPage.Header:SetText("|cffffd100" .. string.format(L["UX_SEARCH_RESULTS_FORMAT"], #matches) .. "|r")
+	if #matches == 0 then
+		for _, r in ipairs(searchResultRows) do r:Hide() end
+		sPage.EmptyText:SetText(string.format(L["UX_SEARCH_NO_RESULTS_FORMAT"], currentSearchQuery))
+		sPage.EmptyText:Show()
+		sPage.contentHeight = 120
+		return
+	end
+	sPage.EmptyText:Hide()
+
+	local y = -34
+	for idx, entry in ipairs(matches) do
+		local row = EnsureSearchResultRow(sPage, idx)
+		row:ClearAllPoints()
+		row:SetPoint("TOPLEFT", sPage, "TOPLEFT", 10, y)
+		row.targetTab = entry.tabIndex
+		row.CatBadge:SetText("|cff66bbff" .. (L[entry.navKey] or "") .. "|r")
+		row.Title:SetText(L[entry.labelKey] or entry.labelKey)
+		row.JumpBtn:RefreshValue()
+
+		if entry.kind == "toggle" then
+			row.getQuickValueText = function()
+				local v = entry.getter and entry.getter() or Database.Get(entry.dbKey)
+				return v and L["CHAT_STATE_ON"] or L["CHAT_STATE_OFF"]
+			end
+			row.onQuickToggle = function()
+				local v = entry.getter and entry.getter() or Database.Get(entry.dbKey)
+				if entry.setter then entry.setter(not v) else Database.Set(entry.dbKey, not v) end
+			end
+			row.ActionBtn:Show()
+			row.ActionBtn:RefreshValue()
+		elseif entry.kind == "segmented" and entry.options then
+			row.getQuickValueText = function()
+				local cur = entry.getter and entry.getter() or Database.Get(entry.dbKey) or entry.defaultValue
+				for _, o in ipairs(entry.options) do
+					if o.value == cur then
+						return L[o.shortKey or o.labelKey] or tostring(cur)
+					end
+				end
+				return tostring(cur)
+			end
+			row.onQuickToggle = function()
+				local cur = entry.getter and entry.getter() or Database.Get(entry.dbKey) or entry.defaultValue
+				local nextIdx = 1
+				for i, o in ipairs(entry.options) do
+					if o.value == cur then nextIdx = (i % #entry.options) + 1; break end
+				end
+				local nextVal = entry.options[nextIdx].value
+				if entry.setter then entry.setter(nextVal) else Database.Set(entry.dbKey, nextVal) end
+			end
+			row.ActionBtn:Show()
+			row.ActionBtn:RefreshValue()
+		else
+			row.ActionBtn:Hide()
+		end
+
+		row:Show()
+		y = y - 58
+	end
+
+	for idx = #matches + 1, #searchResultRows do
+		searchResultRows[idx]:Hide()
+	end
+	sPage.contentHeight = math.abs(y) + 16
+end
+
+function SettingsUI.SetSearchFilter(queryText)
+	currentSearchQuery = strtrim(queryText or "")
+	if settingsWindow and settingsWindow.SearchBox and settingsWindow.SearchBox:GetText() ~= currentSearchQuery then
+		settingsWindow.SearchBox:SetText(currentSearchQuery)
+	end
+	SettingsUI.RefreshWindow()
+end
+
+function SettingsUI.GetSearchFilter()
+	return currentSearchQuery
+end
+
+--------------------------------------------------------------------------------
+-- Hauptfenster: Sidebar Command Center (BetterClickCastingSettingsFrame)
+--------------------------------------------------------------------------------
+
+local function UpdateScrollChildHeight()
+	if not settingsWindow or not settingsWindow.ScrollChild then
+		return
+	end
+	local activePage = (currentSearchQuery ~= "") and settingsWindow.SearchPage or settingsWindow.Pages[activeTabIndex]
+	local h = (activePage and activePage.contentHeight) or 460
+	settingsWindow.ScrollChild:SetHeight(math.max(460, h))
 end
 
 local function SelectTab(tabIndex)
 	if not settingsWindow then
 		return
 	end
-	activeTabIndex = tabIndex
-	for i, tabBtn in ipairs(settingsWindow.TabButtons) do
-		local isSelected = (i == tabIndex)
-		if isSelected then
-			tabBtn.Bg:SetVertexColor(1.0, 0.92, 0.72, 1.0)
-			tabBtn.Border:SetAlpha(0.85)
-			tabBtn.Text:SetTextColor(1.0, 0.82, 0.0)
-		else
-			tabBtn.Bg:SetVertexColor(0.65, 0.65, 0.65, 0.85)
-			tabBtn.Border:SetAlpha(0.20)
-			tabBtn.Text:SetTextColor(0.82, 0.82, 0.82)
-		end
-	end
-	for i, page in ipairs(settingsWindow.Pages) do
-		page:SetShown(i == tabIndex)
+	activeTabIndex = math.max(1, math.min(#NAV_SECTIONS, tonumber(tabIndex) or 1))
+	if settingsWindow.ScrollFrame and settingsWindow.ScrollFrame.SetVerticalScroll then
+		settingsWindow.ScrollFrame:SetVerticalScroll(0)
 	end
 	SettingsUI.RefreshWindow()
 end
@@ -768,7 +1222,7 @@ local function PositionSettingsWindow(frame)
 	elseif ClickBindingFrame and ClickBindingFrame:IsShown() then
 		frame:SetPoint("TOPLEFT", ClickBindingFrame, "TOPRIGHT", 12, 0)
 	else
-		frame:SetPoint("CENTER", UIParent, "CENTER", 0, 40)
+		frame:SetPoint("CENTER", UIParent, "CENTER", 0, 30)
 	end
 end
 
@@ -776,9 +1230,10 @@ local function EnsureSettingsWindow()
 	if settingsWindow then
 		return settingsWindow
 	end
+	searchCatalog = {}
 
 	local win = CreateFrame("Frame", "BetterClickCastingSettingsFrame", UIParent, "BackdropTemplate")
-	win:SetSize(528, 494)
+	win:SetSize(716, 556)
 	win:SetFrameStrata("MEDIUM")
 	win:SetToplevel(true)
 	win:SetFrameLevel(20)
@@ -786,21 +1241,9 @@ local function EnsureSettingsWindow()
 	win:SetMovable(true)
 	win:EnableMouse(true)
 	win:RegisterForDrag("LeftButton")
-	win:SetScript("OnMouseDown", function(self)
-		if self.Raise then
-			self:Raise()
-		end
-	end)
-	win:SetScript("OnDragStart", function(self)
-		if self.Raise then
-			self:Raise()
-		end
-		self:StartMoving()
-	end)
-	win:SetScript("OnDragStop", function(self)
-		self:StopMovingOrSizing()
-		SaveWindowPosition(self)
-	end)
+	win:SetScript("OnMouseDown", function(self) if self.Raise then self:Raise() end end)
+	win:SetScript("OnDragStart", function(self) if self.Raise then self:Raise() end; self:StartMoving() end)
+	win:SetScript("OnDragStop", function(self) self:StopMovingOrSizing(); SaveWindowPosition(self) end)
 
 	if UISpecialFrames then
 		table.insert(UISpecialFrames, "BetterClickCastingSettingsFrame")
@@ -815,142 +1258,315 @@ local function EnsureSettingsWindow()
 			edgeSize = 24,
 			insets = { left = 6, right = 6, top = 6, bottom = 6 },
 		})
-		win:SetBackdropColor(0.06, 0.07, 0.10, 0.96)
+		win:SetBackdropColor(0.045, 0.055, 0.085, 0.97)
 		win:SetBackdropBorderColor(0.85, 0.72, 0.40, 1.0)
 	end
 
-	-- Kopfzeile mit Maus-Atlas, Titel und Versionsnummer
+	-- Kopfzeile + Globale Suchbox
+	local headerBg = win:CreateTexture(nil, "BACKGROUND", nil, 1)
+	headerBg:SetPoint("TOPLEFT", win, "TOPLEFT", 7, -7)
+	headerBg:SetPoint("TOPRIGHT", win, "TOPRIGHT", -7, -7)
+	headerBg:SetHeight(40)
+	headerBg:SetColorTexture(0.07, 0.09, 0.14, 0.95)
+
+	local headerLine = win:CreateTexture(nil, "ARTWORK")
+	headerLine:SetHeight(1)
+	headerLine:SetPoint("TOPLEFT", win, "TOPLEFT", 7, -47)
+	headerLine:SetPoint("TOPRIGHT", win, "TOPRIGHT", -7, -47)
+	headerLine:SetColorTexture(0.65, 0.55, 0.30, 0.45)
+
 	local icon = win:CreateTexture(nil, "ARTWORK")
 	icon:SetSize(22, 22)
-	icon:SetPoint("TOPLEFT", win, "TOPLEFT", 16, -14)
+	icon:SetPoint("TOPLEFT", win, "TOPLEFT", 16, -16)
 	icon:SetAtlas(Constants.ICON_ATLAS)
 
 	local title = win:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
 	title:SetPoint("LEFT", icon, "RIGHT", 8, 0)
-	title:SetText(string.format("%s  |cff888888v%s|r", L["SETTINGS_MENU_TITLE"], Constants.VERSION))
 	win.TitleText = title
 
 	local closeBtn = CreateFrame("Button", nil, win, "UIPanelCloseButton")
 	closeBtn:SetPoint("TOPRIGHT", win, "TOPRIGHT", -4, -4)
-	-- Eigenes OnClick-Skript statt UIPanelCloseButton_OnClick (HideUIPanel), damit das Fenster auch im Kampf schließt
 	closeBtn:SetScript("OnClick", function()
 		PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF)
 		win:Hide()
 	end)
 
-	-- 4 Reiter-Buttons oben
-	local tabLabelKeys = {
-		"SETTINGS_TAB_CLICKCAST",
-		"SETTINGS_TAB_SPELLBOOK",
-		"SETTINGS_TAB_UNITHOVER",
-		"SETTINGS_TAB_PROFILES",
-	}
+	-- Globales Live-Suchfeld oben rechts
+	local searchWrap = CreateFrame("Frame", nil, win, "BackdropTemplate")
+	searchWrap:SetSize(244, 24)
+	searchWrap:SetPoint("RIGHT", closeBtn, "LEFT", -8, -1)
+	Widgets.ApplyBoxBackdrop(searchWrap, { 0.03, 0.04, 0.06, 0.96 }, { 0.34, 0.42, 0.58, 0.90 }, false)
+
+	local searchIcon = searchWrap:CreateTexture(nil, "ARTWORK")
+	searchIcon:SetSize(13, 13)
+	searchIcon:SetPoint("LEFT", searchWrap, "LEFT", 7, 0)
+	searchIcon:SetAtlas("common-search-magnifyingglass")
+
+	local clearSearchBtn = CreateFrame("Button", nil, searchWrap)
+	clearSearchBtn:SetSize(16, 16)
+	clearSearchBtn:SetPoint("RIGHT", searchWrap, "RIGHT", -5, 0)
+	local clearFs = clearSearchBtn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+	clearFs:SetPoint("CENTER", 0, 0)
+	clearFs:SetText("|cffaaaaaaX|r")
+	clearSearchBtn:Hide()
+
+	local searchBox = CreateFrame("EditBox", nil, searchWrap)
+	searchBox:SetAutoFocus(false)
+	searchBox:SetFontObject("ChatFontNormal")
+	searchBox:SetPoint("LEFT", searchIcon, "RIGHT", 6, 0)
+	searchBox:SetPoint("RIGHT", clearSearchBtn, "LEFT", -2, 0)
+	searchBox:SetHeight(20)
+
+	local searchPlaceholder = searchWrap:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+	searchPlaceholder:SetPoint("LEFT", searchIcon, "RIGHT", 6, 0)
+	searchPlaceholder:SetJustifyH("LEFT")
+	win.SearchPlaceholder = searchPlaceholder
+
+	clearSearchBtn:SetScript("OnClick", function()
+		PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF)
+		searchBox:SetText("")
+		searchBox:ClearFocus()
+	end)
+
+	searchBox:SetScript("OnEditFocusGained", function()
+		searchWrap:SetBackdropBorderColor(0.95, 0.78, 0.25, 1.0)
+	end)
+	searchBox:SetScript("OnEditFocusLost", function()
+		searchWrap:SetBackdropBorderColor(0.34, 0.42, 0.58, 0.90)
+	end)
+	searchBox:SetScript("OnEscapePressed", function(self)
+		if self:GetText() ~= "" then
+			self:SetText("")
+		end
+		self:ClearFocus()
+	end)
+	searchBox:SetScript("OnEnterPressed", function(self)
+		self:ClearFocus()
+	end)
+	searchBox:SetScript("OnTextChanged", function(self)
+		local txt = self:GetText() or ""
+		currentSearchQuery = strtrim(txt)
+		clearSearchBtn:SetShown(currentSearchQuery ~= "")
+		searchPlaceholder:SetShown(currentSearchQuery == "")
+		if win.ScrollFrame and win.ScrollFrame.SetVerticalScroll then
+			win.ScrollFrame:SetVerticalScroll(0)
+		end
+		SettingsUI.RefreshWindow()
+	end)
+	win.SearchBox = searchBox
+
+	-- Linke Navigations-Sidebar (6 Kategorien + feste Schnell-Toolbar unten)
+	local sidebar = CreateFrame("Frame", nil, win)
+	sidebar:SetWidth(182)
+	sidebar:SetPoint("TOPLEFT", win, "TOPLEFT", 7, -48)
+	sidebar:SetPoint("BOTTOMLEFT", win, "BOTTOMLEFT", 7, 7)
+
+	local sideBg = sidebar:CreateTexture(nil, "BACKGROUND")
+	sideBg:SetAllPoints()
+	sideBg:SetColorTexture(0.032, 0.040, 0.064, 0.96)
+
+	local sideBorder = sidebar:CreateTexture(nil, "ARTWORK")
+	sideBorder:SetWidth(1)
+	sideBorder:SetPoint("TOPRIGHT", sidebar, "TOPRIGHT", 0, 0)
+	sideBorder:SetPoint("BOTTOMRIGHT", sidebar, "BOTTOMRIGHT", 0, 0)
+	sideBorder:SetColorTexture(0.32, 0.38, 0.50, 0.45)
+
 	win.TabButtons = {}
-	win.Pages = {}
-	win.Controls = {}
+	for i, nav in ipairs(NAV_SECTIONS) do
+		local b = CreateFrame("Button", nil, sidebar)
+		b:SetSize(168, 32)
+		b:SetPoint("TOPLEFT", sidebar, "TOPLEFT", 7, -10 - ((i - 1) * 35))
+		b:RegisterForClicks("LeftButtonUp")
+		b.labelKey = nav.labelKey
 
-	local tabWidth = 120
-	for i, tabKey in ipairs(tabLabelKeys) do
-		local tabBtn = CreateFrame("Button", nil, win)
-		tabBtn:SetSize(tabWidth, 26)
-		tabBtn:SetPoint("TOPLEFT", win, "TOPLEFT", 15 + ((i - 1) * (tabWidth + 6)), -44)
-		tabBtn:RegisterForClicks("LeftButtonUp")
-		tabBtn.labelKey = tabKey
-
-		local bg = tabBtn:CreateTexture(nil, "BACKGROUND")
+		local bg = b:CreateTexture(nil, "BACKGROUND")
 		bg:SetAllPoints()
-		bg:SetAtlas("common-dropdown-c-button")
-		tabBtn.Bg = bg
+		b.Bg = bg
 
-		local border = tabBtn:CreateTexture(nil, "BORDER")
-		border:SetAllPoints()
-		border:SetAtlas("common-dropdown-c-button-hover")
-		tabBtn.Border = border
+		local bar = b:CreateTexture(nil, "ARTWORK")
+		bar:SetSize(3, 22)
+		bar:SetPoint("LEFT", b, "LEFT", 2, 0)
+		bar:SetColorTexture(1.0, 0.82, 0.18, 1.0)
+		b.ActiveBar = bar
 
-		local highlight = tabBtn:CreateTexture(nil, "HIGHLIGHT")
-		highlight:SetAllPoints()
-		highlight:SetAtlas("common-dropdown-c-button-hover")
-		highlight:SetBlendMode("ADD")
-		highlight:SetAlpha(0.45)
+		local hl = b:CreateTexture(nil, "HIGHLIGHT")
+		hl:SetAllPoints()
+		hl:SetColorTexture(1, 1, 1, 0.06)
 
-		local text = tabBtn:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-		text:SetPoint("CENTER", tabBtn, "CENTER", 0, 0)
-		text:SetText(L[tabKey])
-		tabBtn.Text = text
+		local ic = b:CreateTexture(nil, "ARTWORK")
+		ic:SetSize(16, 16)
+		ic:SetPoint("LEFT", b, "LEFT", 11, 0)
+		if nav.atlas then
+			ic:SetAtlas(nav.atlas)
+		elseif nav.texture then
+			ic:SetTexture(nav.texture)
+			ic:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+		end
 
-		tabBtn:SetScript("OnClick", function()
+		local fs = b:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+		fs:SetPoint("LEFT", ic, "RIGHT", 8, 0)
+		fs:SetPoint("RIGHT", b, "RIGHT", -4, 0)
+		fs:SetJustifyH("LEFT")
+		fs:SetWordWrap(false)
+		b.Text = fs
+
+		b:SetScript("OnClick", function()
 			PlaySound(SOUNDKIT.IG_CHARACTER_INFO_TAB)
+			if currentSearchQuery ~= "" then
+				searchBox:SetText("")
+				searchBox:ClearFocus()
+			end
 			SelectTab(i)
 		end)
-
-		win.TabButtons[i] = tabBtn
-
-		local page = CreateFrame("Frame", nil, win)
-		page:SetPoint("TOPLEFT", win, "TOPLEFT", 0, -76)
-		page:SetPoint("BOTTOMRIGHT", win, "BOTTOMRIGHT", 0, 10)
-		page:Hide()
-		win.Pages[i] = page
+		win.TabButtons[i] = b
 	end
 
-	local function RegisterControl(ctrl)
+	-- Feste Schnell-Werkzeuge unten in der Sidebar (0 Duplikate auf den Seiten)
+	local quickLine = sidebar:CreateTexture(nil, "ARTWORK")
+	quickLine:SetHeight(1)
+	quickLine:SetPoint("BOTTOMLEFT", sidebar, "BOTTOMLEFT", 10, 108)
+	quickLine:SetPoint("BOTTOMRIGHT", sidebar, "BOTTOMRIGHT", -10, 108)
+	quickLine:SetColorTexture(0.35, 0.42, 0.56, 0.35)
+
+	local quickHdr = sidebar:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+	quickHdr:SetPoint("BOTTOMLEFT", sidebar, "BOTTOMLEFT", 12, 92)
+	win.QuickHeader = quickHdr
+
+	local qClickBtn = Widgets.CreateStyledButton(sidebar, 164, 24, function() return L["UX_QUICK_CLICKCAST"] end, function()
+		if ns.MinimapButton and ns.MinimapButton.ToggleClickCastingWindow then
+			ns.MinimapButton.ToggleClickCastingWindow()
+		end
+	end, "secondary")
+	qClickBtn:SetPoint("BOTTOMLEFT", sidebar, "BOTTOMLEFT", 9, 64)
+
+	local qMatrixBtn = Widgets.CreateStyledButton(sidebar, 164, 24, function() return L["UX_QUICK_MATRIX"] end, function()
+		if ns.ClickBindingUI and ns.ClickBindingUI.ToggleFreeKeysMatrix then
+			ns.ClickBindingUI.ToggleFreeKeysMatrix()
+		end
+	end, "secondary", "SETTINGS_FREE_KEYS_MATRIX_DESC")
+	qMatrixBtn:SetPoint("BOTTOMLEFT", sidebar, "BOTTOMLEFT", 9, 36)
+
+	local qMoveBtn = Widgets.CreateStyledButton(sidebar, 164, 24, function()
+		return SettingsUI.IsOverlaysUnlocked() and L["UX_QUICK_MOVE_ACTIVE"] or L["UX_QUICK_MOVE"]
+	end, function()
+		SettingsUI.ToggleOverlaysUnlocked()
+	end, "primary", "SETTING_UNITHOVER_UNLOCK_MOVE_DESC")
+	qMoveBtn:SetPoint("BOTTOMLEFT", sidebar, "BOTTOMLEFT", 9, 8)
+	win.QuickButtons = { qClickBtn, qMatrixBtn, qMoveBtn }
+
+	-- Rechter Scroll-Bereich für die 6 Kategorie-Seiten + globale Suchseite
+	local scrollFrame = CreateFrame("ScrollFrame", nil, win, "UIPanelScrollFrameTemplate")
+	scrollFrame:SetPoint("TOPLEFT", sidebar, "TOPRIGHT", 2, -6)
+	scrollFrame:SetPoint("BOTTOMRIGHT", win, "BOTTOMRIGHT", -28, 10)
+	win.ScrollFrame = scrollFrame
+
+	local scrollChild = CreateFrame("Frame", nil, scrollFrame)
+	scrollChild:SetSize(502, 460)
+	scrollFrame:SetScrollChild(scrollChild)
+	win.ScrollChild = scrollChild
+
+	win.Pages = {}
+	win.Controls = {}
+	local function Reg(ctrl)
 		table.insert(win.Controls, ctrl)
 		return ctrl
 	end
 
+	for i = 1, #NAV_SECTIONS do
+		local p = CreateFrame("Frame", nil, scrollChild)
+		p:SetAllPoints(scrollChild)
+		p:Hide()
+		win.Pages[i] = p
+	end
+
+	local searchPage = CreateFrame("Frame", nil, scrollChild)
+	searchPage:SetAllPoints(scrollChild)
+	searchPage.Header = searchPage:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+	searchPage.Header:SetPoint("TOPLEFT", searchPage, "TOPLEFT", 12, -8)
+	searchPage.EmptyText = searchPage:CreateFontString(nil, "OVERLAY", "GameFontDisable")
+	searchPage.EmptyText:SetPoint("TOPLEFT", searchPage, "TOPLEFT", 12, -44)
+	searchPage:Hide()
+	win.SearchPage = searchPage
+
+	local function AddIndexedToggle(card, tabIdx, spec, keywords)
+		RegisterSearchEntry({
+			tabIndex = tabIdx,
+			navKey = NAV_SECTIONS[tabIdx].labelKey,
+			labelKey = spec.labelKey,
+			descKey = spec.descKey,
+			keywords = keywords,
+			kind = "toggle",
+			dbKey = spec.dbKey,
+			getter = spec.getter,
+			setter = spec.setter,
+		})
+		return Reg(Widgets.CreateToggleRow(card, spec))
+	end
+
+	local function AddIndexedSegmented(card, tabIdx, spec, keywords)
+		RegisterSearchEntry({
+			tabIndex = tabIdx,
+			navKey = NAV_SECTIONS[tabIdx].labelKey,
+			labelKey = spec.labelKey,
+			descKey = spec.descKey,
+			keywords = keywords,
+			kind = "segmented",
+			dbKey = spec.dbKey,
+			defaultValue = spec.defaultValue,
+			options = spec.options,
+			getter = spec.getter,
+			setter = spec.setter,
+		})
+		return Reg(Widgets.CreateSegmentedRow(card, spec))
+	end
+
 	----------------------------------------------------------------------------
-	-- TAB 1: Klickbelegung & Ränge
+	-- SEITE 1: Klickbelegung & Ränge (Live-Zeilen-Vorschau + 2 Themen-Karten)
 	----------------------------------------------------------------------------
-	local page1 = win.Pages[1]
-	RegisterControl(CreateSectionHeader(page1, "SETTINGS_HEADER_CLICKCAST", -6))
+	local p1 = win.Pages[1]
+	local y1 = -6
 
-	RegisterControl(CreatePillSelectorButton(
-		page1,
-		-30,
-		240,
-		function()
-			return string.format(L["GROUP_BUTTON_FORMAT"], SettingsUI.GetCurrentGroupShortLabel())
-		end,
-		function(owner)
-			SettingsUI.OpenGroupingMenu(owner)
-		end,
-		"GROUP_TOOLTIP_TITLE",
-		"GROUP_TOOLTIP_DESC"
-	))
+	local c1Prev = Reg(Widgets.CreateCard(p1, "UX_CARD_PREVIEW", y1))
+	Reg(Widgets.CreateLineLivePreview(c1Prev))
+	y1 = c1Prev:Finalize(8)
 
-	local trainerBtn = RegisterControl(CreatePillSelectorButton(
-		page1,
-		-30,
-		240,
-		function()
-			return string.format(L["TRAINER_BEHAVIOR_BUTTON_FORMAT"], SettingsUI.GetCurrentTrainerBehaviorShortLabel())
-		end,
-		function(owner)
-			SettingsUI.OpenTrainerBehaviorMenu(owner)
-		end,
-		"TRAINER_BEHAVIOR_MENU_TITLE",
-		"TRAINER_BEHAVIOR_TOOLTIP_DESC"
-	))
-	trainerBtn:ClearAllPoints()
-	trainerBtn:SetPoint("TOPLEFT", page1, "TOPLEFT", 270, -30)
+	local c1Layout = Reg(Widgets.CreateCard(p1, "UX_CARD_LIST_LAYOUT", y1))
+	AddIndexedSegmented(c1Layout, 1, {
+		dbKey = "groupingMode",
+		defaultValue = "modifier",
+		labelKey = "GROUP_MENU_TITLE",
+		descKey = "GROUP_TOOLTIP_DESC",
+		options = GROUP_MODES,
+	}, "group sort modifier button type")
+	AddIndexedToggle(c1Layout, 1, { dbKey = "compactListMode", labelKey = "SETTING_COMPACT_LIST_MODE", descKey = "SETTING_COMPACT_LIST_MODE_DESC" }, "compact row height small")
+	AddIndexedToggle(c1Layout, 1, { dbKey = "moveInteractionsToBottom", labelKey = "SETTING_MOVE_INTERACTIONS_BOTTOM", descKey = "SETTING_MOVE_INTERACTIONS_BOTTOM_DESC" }, "target menu interaction bottom")
+	AddIndexedToggle(c1Layout, 1, { dbKey = "showLineTooltips", labelKey = "SETTING_SHOW_LINE_TOOLTIPS", descKey = "SETTING_SHOW_LINE_TOOLTIPS_DESC" }, "tooltip spell")
+	y1 = c1Layout:Finalize(8)
 
-	RegisterControl(CreateDBCheckbox(page1, -64, "showRankInName", "SETTING_SHOW_RANK_IN_NAME", "SETTING_SHOW_RANK_IN_NAME_DESC"))
-	RegisterControl(CreateDBCheckbox(page1, -92, "highlightDownranks", "SETTING_HIGHLIGHT_DOWNRANKS", "SETTING_HIGHLIGHT_DOWNRANKS_DESC"))
-	RegisterControl(CreateDBCheckbox(page1, -120, "showRankSwitcher", "SETTING_SHOW_RANK_SWITCHER", "SETTING_SHOW_RANK_SWITCHER_DESC"))
-	RegisterControl(CreateDBCheckbox(page1, -148, "showLineManaCost", "SETTING_SHOW_LINE_MANA_COST", "SETTING_SHOW_LINE_MANA_COST_DESC"))
-	RegisterControl(CreateDBCheckbox(page1, -176, "moveInteractionsToBottom", "SETTING_MOVE_INTERACTIONS_BOTTOM", "SETTING_MOVE_INTERACTIONS_BOTTOM_DESC"))
-	RegisterControl(CreateDBCheckbox(page1, -204, "enableSmartRankRules", "SETTING_ENABLE_SMART_RULES", "SETTING_ENABLE_SMART_RULES_DESC"))
-	RegisterControl(CreateDBCheckbox(page1, -232, "showLineTooltips", "SETTING_SHOW_LINE_TOOLTIPS", "SETTING_SHOW_LINE_TOOLTIPS_DESC"))
-	RegisterControl(CreateDBCheckbox(page1, -260, "compactListMode", "SETTING_COMPACT_LIST_MODE", "SETTING_COMPACT_LIST_MODE_DESC"))
+	local c1Ranks = Reg(Widgets.CreateCard(p1, "UX_CARD_RANKS_RULES", y1))
+	AddIndexedSegmented(c1Ranks, 1, {
+		dbKey = "trainerUpgradeBehavior",
+		defaultValue = "card",
+		labelKey = "TRAINER_BEHAVIOR_MENU_TITLE",
+		descKey = "TRAINER_BEHAVIOR_TOOLTIP_DESC",
+		options = TRAINER_BEHAVIOR_OPTIONS,
+	}, "trainer upgrade hero card learn")
+	AddIndexedToggle(c1Ranks, 1, { dbKey = "showRankInName", labelKey = "SETTING_SHOW_RANK_IN_NAME", descKey = "SETTING_SHOW_RANK_IN_NAME_DESC" }, "rank name")
+	AddIndexedToggle(c1Ranks, 1, { dbKey = "highlightDownranks", labelKey = "SETTING_HIGHLIGHT_DOWNRANKS", descKey = "SETTING_HIGHLIGHT_DOWNRANKS_DESC" }, "downrank highlight color")
+	AddIndexedToggle(c1Ranks, 1, { dbKey = "showRankSwitcher", labelKey = "SETTING_SHOW_RANK_SWITCHER", descKey = "SETTING_SHOW_RANK_SWITCHER_DESC" }, "switcher dropdown inline")
+	AddIndexedToggle(c1Ranks, 1, { dbKey = "showLineManaCost", labelKey = "SETTING_SHOW_LINE_MANA_COST", descKey = "SETTING_SHOW_LINE_MANA_COST_DESC" }, "mana cost power")
+	AddIndexedToggle(c1Ranks, 1, { dbKey = "enableSmartRankRules", labelKey = "SETTING_ENABLE_SMART_RULES", descKey = "SETTING_ENABLE_SMART_RULES_DESC" }, "smart rules max fixed")
 
-	local upgradeBtn = RegisterControl(CreateActionButton(
-		page1,
-		-296,
-		492,
+	local upgY = c1Ranks:Advance(28, 4)
+	local upgradeBtn = Reg(Widgets.CreateStyledButton(
+		c1Ranks,
+		c1Ranks.innerWidth,
+		26,
 		function()
 			if ClickBindingFrame and ClickBindingFrame:IsShown() and ns.ClickBindingUI and ns.ClickBindingUI.CountUpgradeableBindings then
-				local count = ns.ClickBindingUI.CountUpgradeableBindings()
-				if count > 0 then
-					return string.format(L["ACTION_UPGRADE_ALL_MAX_FORMAT"], count)
+				local cnt = ns.ClickBindingUI.CountUpgradeableBindings()
+				if cnt > 0 then
+					return string.format(L["ACTION_UPGRADE_ALL_MAX_FORMAT"], cnt)
 				end
 			end
 			return L["ACTION_UPGRADE_ALL_MAX_NONE"]
@@ -964,493 +1580,241 @@ local function EnsureSettingsWindow()
 				SettingsUI.RefreshWindow()
 			end
 		end,
+		"primary",
 		"ACTION_UPGRADE_ALL_MAX_DESC"
 	))
-	win.UpgradeAllBtn = upgradeBtn
-
-	RegisterControl(CreateActionButton(
-		page1,
-		-330,
-		240,
-		function()
-			return L["SETTINGS_OPEN_CLICKCAST_BTN"]
-		end,
-		function()
-			if ns.MinimapButton and ns.MinimapButton.ToggleClickCastingWindow then
-				ns.MinimapButton.ToggleClickCastingWindow()
-			end
-		end,
-		nil
-	))
-
-	local matrixBtn = RegisterControl(CreateActionButton(
-		page1,
-		-330,
-		240,
-		function()
-			return L["SETTINGS_FREE_KEYS_MATRIX_BTN"]
-		end,
-		function()
-			if ns.ClickBindingUI and ns.ClickBindingUI.ToggleFreeKeysMatrix then
-				ns.ClickBindingUI.ToggleFreeKeysMatrix()
-			end
-		end,
-		"SETTINGS_FREE_KEYS_MATRIX_DESC"
-	))
-	matrixBtn:ClearAllPoints()
-	matrixBtn:SetPoint("TOPLEFT", page1, "TOPLEFT", 270, -330)
-
-	local exportBtn = RegisterControl(CreateActionButton(
-		page1,
-		-364,
-		240,
-		function()
-			return L["SETTINGS_EXPORT_BINDINGS_BTN"]
-		end,
-		function()
-			if ns.ClickBindingUI and ns.ClickBindingUI.ShowBindingsExportPopup then
-				ns.ClickBindingUI.ShowBindingsExportPopup()
-			end
-		end,
-		"SETTINGS_EXPORT_BINDINGS_DESC"
-	))
-
-	local reorderBtn1 = RegisterControl(CreateActionButton(
-		page1,
-		-364,
-		240,
-		function()
-			return L["SETTINGS_REORDER_BTN"]
-		end,
-		function()
-			SettingsUI.ToggleReorderWindow()
-		end,
-		"SETTINGS_REORDER_DESC"
-	))
-	reorderBtn1:ClearAllPoints()
-	reorderBtn1:SetPoint("TOPLEFT", page1, "TOPLEFT", 270, -364)
+	upgradeBtn:SetPoint("TOPLEFT", c1Ranks, "TOPLEFT", 14, upgY)
+	y1 = c1Ranks:Finalize(10)
+	p1.contentHeight = math.abs(y1) + 12
 
 	----------------------------------------------------------------------------
-	-- TAB 2: Zauberbuch & Allgemein
+	-- SEITE 2: Zauberbuch (eigene prominente Kategorie + Live-Slot-Vorschau)
 	----------------------------------------------------------------------------
-	local page2 = win.Pages[2]
-	RegisterControl(CreateSectionHeader(page2, "SETTINGS_HEADER_SPELLBOOK", -6))
+	local p2 = win.Pages[2]
+	local y2 = -6
 
-	RegisterControl(CreateDBCheckbox(page2, -30, "quickBindSpellbook", "SETTING_QUICK_BIND_SPELLBOOK", "SETTING_QUICK_BIND_SPELLBOOK_DESC"))
-	RegisterControl(CreateDBCheckbox(page2, -58, "showSpellbookBadges", "SETTING_SHOW_SPELLBOOK_BADGES", "SETTING_SHOW_SPELLBOOK_BADGES_DESC"))
-	RegisterControl(CreateDBCheckbox(page2, -86, "autoShowAllRanks", "SETTING_AUTO_SHOW_ALL_RANKS", "SETTING_AUTO_SHOW_ALL_RANKS_DESC"))
-	RegisterControl(CreateDBCheckbox(page2, -114, "autoSelectPrimarySpellTab", "SETTING_AUTO_SELECT_PRIMARY_TAB", "SETTING_AUTO_SELECT_PRIMARY_TAB_DESC"))
+	local c2Prev = Reg(Widgets.CreateCard(p2, "UX_CARD_PREVIEW", y2))
+	Reg(Widgets.CreateSpellbookLivePreview(c2Prev))
+	y2 = c2Prev:Finalize(8)
 
-	RegisterControl(CreateSectionHeader(page2, "SETTINGS_HEADER_GENERAL", -152))
-	RegisterControl(CreateDBCheckbox(page2, -176, "showMinimapButton", "SETTING_SHOW_MINIMAP_BUTTON", "SETTING_SHOW_MINIMAP_BUTTON_DESC"))
-
-	RegisterControl(CreatePillSelectorButton(
-		page2,
-		-210,
-		492,
-		function()
-			return string.format(L["LOCALE_BUTTON_FORMAT"], SettingsUI.GetCurrentLocaleShortLabel())
-		end,
-		function(owner)
-			SettingsUI.OpenLocaleMenu(owner)
-		end,
-		"LOCALE_MENU_TITLE",
-		"LOCALE_TOOLTIP_DESC"
-	))
-
-	RegisterControl(CreateActionButton(
-		page2,
-		-248,
-		290,
-		function()
-			if SettingsUI.IsOverlaysUnlocked() then
-				return L["OVERLAY_UNLOCK_BTN_LOCK_ALL"]
-			end
-			return L["OVERLAY_UNLOCK_BTN_UNLOCK_ALL"]
-		end,
-		function()
-			SettingsUI.ToggleOverlaysUnlocked()
-		end,
-		"SETTING_UNITHOVER_UNLOCK_MOVE_DESC"
-	))
-
-	local resetPosBtn = RegisterControl(CreateActionButton(
-		page2,
-		-248,
-		190,
-		function()
-			return L["OVERLAY_UNLOCK_BTN_RESET_POS"]
-		end,
-		function()
-			SettingsUI.ResetAllOverlayPositions()
-		end,
-		"OVERLAY_UNLOCK_BTN_RESET_POS_DESC"
-	))
-	resetPosBtn:ClearAllPoints()
-	resetPosBtn:SetPoint("TOPLEFT", page2, "TOPLEFT", 320, -248)
-
-	RegisterControl(CreateActionButton(
-		page2,
-		-284,
-		492,
-		function()
-			return L["SETTINGS_RUN_DEBUG_BTN"]
-		end,
-		function()
-			if ns.ClickBindingUI and ns.ClickBindingUI.RunTaintDiagnostics then
-				ns.ClickBindingUI.RunTaintDiagnostics()
-			end
-		end,
-		"SETTINGS_RUN_DEBUG_DESC"
-	))
+	local c2Sb = Reg(Widgets.CreateCard(p2, "SETTINGS_HEADER_SPELLBOOK", y2))
+	AddIndexedToggle(c2Sb, 2, { dbKey = "quickBindSpellbook", labelKey = "SETTING_QUICK_BIND_SPELLBOOK", descKey = "SETTING_QUICK_BIND_SPELLBOOK_DESC" }, "spellbook quick bind click")
+	AddIndexedToggle(c2Sb, 2, { dbKey = "showSpellbookBadges", labelKey = "SETTING_SHOW_SPELLBOOK_BADGES", descKey = "SETTING_SHOW_SPELLBOOK_BADGES_DESC" }, "spellbook badge key")
+	AddIndexedToggle(c2Sb, 2, { dbKey = "autoShowAllRanks", labelKey = "SETTING_AUTO_SHOW_ALL_RANKS", descKey = "SETTING_AUTO_SHOW_ALL_RANKS_DESC" }, "spellbook all ranks cvar")
+	AddIndexedToggle(c2Sb, 2, { dbKey = "autoSelectPrimarySpellTab", labelKey = "SETTING_AUTO_SELECT_PRIMARY_TAB", descKey = "SETTING_AUTO_SELECT_PRIMARY_TAB_DESC" }, "spellbook primary class tab")
+	y2 = c2Sb:Finalize(10)
+	p2.contentHeight = math.abs(y2) + 12
 
 	----------------------------------------------------------------------------
-	-- TAB 3: Unit-Frame Hover-Overlay
+	-- SEITE 3: Matrix & Reihenfolge (klar vom Zauberbuch getrennt + Reorder eingebettet)
 	----------------------------------------------------------------------------
-	local page3 = win.Pages[3]
-	RegisterControl(CreateSectionHeader(page3, "SETTINGS_HEADER_UNITHOVER", -6))
+	local p3 = win.Pages[3]
+	local y3 = -6
 
-	RegisterControl(CreatePillSelectorButton(
-		page3,
-		-30,
-		240,
-		function()
-			return string.format(L["UNITHOVER_MODE_BUTTON_FORMAT"], SettingsUI.GetCurrentUnitHoverModeShortLabel())
-		end,
-		function(owner)
-			if MenuUtil and MenuUtil.CreateContextMenu then
-				MenuUtil.CreateContextMenu(owner, function(_, rootDescription)
-					PopulateRadioMenu(rootDescription, "UNITHOVER_MODE_MENU_TITLE", "unitHoverMode", "off", UNITHOVER_MODES, "UNITHOVER_MODE_TOOLTIP_DESC")
-				end)
-			end
-		end,
-		"UNITHOVER_MODE_MENU_TITLE",
-		"UNITHOVER_MODE_TOOLTIP_DESC"
-	))
+	local c3Mat = Reg(Widgets.CreateCard(p3, "UX_CARD_MATRIX_SETTINGS", y3))
+	AddIndexedToggle(c3Mat, 3, { dbKey = "matrixAutoOpen", labelKey = "MATRIX_AUTO_OPEN_CHECKBOX", descKey = "MATRIX_AUTO_OPEN_DESC" }, "matrix auto open free keys")
+	AddIndexedToggle(c3Mat, 3, { dbKey = "matrixShowCombos", labelKey = "MATRIX_SHOW_COMBOS_CHECKBOX", descKey = "MATRIX_SHOW_COMBOS_DESC" }, "matrix combos 8x5 12x5 default")
+	AddIndexedSegmented(c3Mat, 3, {
+		dbKey = "matrixMetaMode",
+		defaultValue = "auto",
+		labelKey = "UX_META_LABEL",
+		descKey = "UX_META_DESC",
+		options = MATRIX_META_OPTIONS,
+	}, "mac macos cmd command meta matrix")
+	y3 = c3Mat:Finalize(8)
 
-	local anchorBtn = RegisterControl(CreatePillSelectorButton(
-		page3,
-		-30,
-		240,
-		function()
-			return string.format(L["UNITHOVER_ANCHOR_BUTTON_FORMAT"], SettingsUI.GetCurrentUnitHoverAnchorShortLabel())
-		end,
-		function(owner)
-			if MenuUtil and MenuUtil.CreateContextMenu then
-				MenuUtil.CreateContextMenu(owner, function(_, rootDescription)
-					PopulateRadioMenu(rootDescription, "UNITHOVER_ANCHOR_MENU_TITLE", "unitHoverAnchor", "cursor", UNITHOVER_ANCHORS, "UNITHOVER_ANCHOR_TOOLTIP_DESC")
-				end)
-			end
-		end,
-		"UNITHOVER_ANCHOR_MENU_TITLE",
-		"UNITHOVER_ANCHOR_TOOLTIP_DESC"
-	))
-	anchorBtn:ClearAllPoints()
-	anchorBtn:SetPoint("TOPLEFT", page3, "TOPLEFT", 270, -30)
+	local reorderCard
+	reorderCard, y3 = BuildEmbeddedReorderCard(p3, y3)
+	win.ReorderCard = reorderCard
+	RegisterSearchEntry({ tabIndex = 3, navKey = "UX_NAV_MATRIX", labelKey = "REORDER_WINDOW_TITLE", descKey = "SETTINGS_REORDER_DESC", keywords = "reorder mouse button mmb mmo mb6 modifier drag" })
+	p3.contentHeight = math.abs(y3) + 12
 
-	RegisterControl(CreateSliderControl(page3, -68, "unitHoverScale", 70, 150, 5, "SETTING_UNITHOVER_SCALE_FORMAT"))
-	RegisterControl(CreateSliderControl(page3, -118, "unitHoverAlpha", 30, 100, 5, "SETTING_UNITHOVER_ALPHA_FORMAT"))
+	----------------------------------------------------------------------------
+	-- SEITE 4: Unit-Frame Hover-Overlay (Anker-Schaubild + Abhängigkeits-Dimming)
+	----------------------------------------------------------------------------
+	local p4 = win.Pages[4]
+	local y4 = -6
+	local isHoverEnabled = function()
+		return (Database.Get("unitHoverMode") or "off") ~= "off"
+	end
 
-	RegisterControl(CreateDBCheckbox(page3, -168, "unitHoverShowMana", "SETTING_UNITHOVER_SHOW_MANA", "SETTING_UNITHOVER_SHOW_MANA_DESC"))
-	RegisterControl(CreateDBCheckbox(page3, -196, "unitHoverShowRankTags", "SETTING_UNITHOVER_SHOW_RANK_TAGS", "SETTING_UNITHOVER_SHOW_RANK_TAGS_DESC"))
-	RegisterControl(CreateDBCheckbox(page3, -224, "unitHoverShowRange", "SETTING_UNITHOVER_SHOW_RANGE", "SETTING_UNITHOVER_SHOW_RANGE_DESC"))
-	RegisterControl(CreateDBCheckbox(page3, -252, "unitHoverShowInCombat", "SETTING_UNITHOVER_SHOW_IN_COMBAT", "SETTING_UNITHOVER_SHOW_IN_COMBAT_DESC"))
+	local c4Mode = Reg(Widgets.CreateCard(p4, "SETTINGS_HEADER_UNITHOVER", y4))
+	AddIndexedSegmented(c4Mode, 4, {
+		dbKey = "unitHoverMode",
+		defaultValue = "off",
+		labelKey = "UNITHOVER_MODE_MENU_TITLE",
+		descKey = "UNITHOVER_MODE_TOOLTIP_DESC",
+		options = UNITHOVER_MODES,
+	}, "hover overlay unit frame mode")
+	Reg(Widgets.CreateHoverAnchorDiagram(c4Mode))
+	RegisterSearchEntry({ tabIndex = 4, navKey = "UX_NAV_HOVER", labelKey = "UNITHOVER_ANCHOR_MENU_TITLE", descKey = "UNITHOVER_ANCHOR_TOOLTIP_DESC", keywords = "anchor cursor top bottom left right free position" })
+	y4 = c4Mode:Finalize(8)
 
-	local unlockMoveCb = RegisterControl(CreateCheckboxControl(
-		page3,
-		-280,
-		"SETTING_UNITHOVER_UNLOCK_MOVE",
-		"SETTING_UNITHOVER_UNLOCK_MOVE_DESC",
-		function()
-			return SettingsUI.IsOverlaysUnlocked()
-		end,
-		function(val)
-			SettingsUI.SetOverlaysUnlocked(val)
+	local c4Disp = Reg(Widgets.CreateCard(p4, "UX_CARD_HOVER_DISPLAY", y4))
+	c4Disp.enabledFunc = isHoverEnabled
+	local hintFs = c4Disp:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+	hintFs:SetPoint("TOPRIGHT", c4Disp, "TOPRIGHT", -14, -12)
+	hintFs:SetText(L["UX_HOVER_DISABLED_HINT"])
+	c4Disp.disabledHintText = hintFs
+
+	Reg(Widgets.CreateSliderRow(c4Disp, { dbKey = "unitHoverScale", minVal = 70, maxVal = 150, stepVal = 5, formatKey = "SETTING_UNITHOVER_SCALE_FORMAT", enabledFunc = isHoverEnabled }))
+	RegisterSearchEntry({ tabIndex = 4, navKey = "UX_NAV_HOVER", labelKey = "SETTING_UNITHOVER_SCALE_FORMAT", keywords = "scale size zoom hover" })
+	Reg(Widgets.CreateSliderRow(c4Disp, { dbKey = "unitHoverAlpha", minVal = 30, maxVal = 100, stepVal = 5, formatKey = "SETTING_UNITHOVER_ALPHA_FORMAT", enabledFunc = isHoverEnabled }))
+	RegisterSearchEntry({ tabIndex = 4, navKey = "UX_NAV_HOVER", labelKey = "SETTING_UNITHOVER_ALPHA_FORMAT", keywords = "opacity alpha transparency hover" })
+
+	AddIndexedToggle(c4Disp, 4, { dbKey = "unitHoverShowMana", labelKey = "SETTING_UNITHOVER_SHOW_MANA", descKey = "SETTING_UNITHOVER_SHOW_MANA_DESC", enabledFunc = isHoverEnabled }, "hover mana")
+	AddIndexedToggle(c4Disp, 4, { dbKey = "unitHoverShowRankTags", labelKey = "SETTING_UNITHOVER_SHOW_RANK_TAGS", descKey = "SETTING_UNITHOVER_SHOW_RANK_TAGS_DESC", enabledFunc = isHoverEnabled }, "hover rank max tag")
+	AddIndexedToggle(c4Disp, 4, { dbKey = "unitHoverShowRange", labelKey = "SETTING_UNITHOVER_SHOW_RANGE", descKey = "SETTING_UNITHOVER_SHOW_RANGE_DESC", enabledFunc = isHoverEnabled }, "hover range oor out of range")
+	AddIndexedToggle(c4Disp, 4, { dbKey = "unitHoverShowInCombat", labelKey = "SETTING_UNITHOVER_SHOW_IN_COMBAT", descKey = "SETTING_UNITHOVER_SHOW_IN_COMBAT_DESC", enabledFunc = isHoverEnabled }, "hover combat infight")
+	y4 = c4Disp:Finalize(10)
+	p4.contentHeight = math.abs(y4) + 12
+
+	----------------------------------------------------------------------------
+	-- SEITE 5: Presets & Dual-Spec (Sichtbare Inline-Preset-Liste)
+	----------------------------------------------------------------------------
+	local p5 = win.Pages[5]
+	local c5Presets = Widgets.CreateCard(p5, "SETTINGS_HEADER_PRESETS", -6)
+	local newPBtn = Widgets.CreateStyledButton(c5Presets, 145, 22, function() return L["PRESET_BTN_NEW"] end, function()
+		if ns.ClickBindingUI and ns.ClickBindingUI.ShowNewPresetPopup then
+			ns.ClickBindingUI.ShowNewPresetPopup("", function(saved)
+				if saved and saved.name then selectedPresetName = saved.name end
+				SettingsUI.RefreshWindow()
+			end)
 		end
-	))
-	win.UnlockMoveCheckbox = unlockMoveCb
+	end, "primary", "PRESET_BTN_NEW_DESC")
+	newPBtn:SetPoint("TOPRIGHT", c5Presets, "TOPRIGHT", -12, -5)
+	c5Presets.NewBtn = newPBtn
 
-	RegisterControl(CreateActionButton(
-		page3,
-		-318,
-		492,
-		function()
-			return L["SETTINGS_REORDER_BTN"]
-		end,
-		function()
-			SettingsUI.ToggleReorderWindow()
-		end,
-		"SETTINGS_REORDER_DESC"
-	))
+	local emptyHint = c5Presets:CreateFontString(nil, "OVERLAY", "GameFontDisable")
+	emptyHint:SetPoint("TOPLEFT", c5Presets, "TOPLEFT", 18, -48)
+	emptyHint:SetPoint("TOPRIGHT", c5Presets, "TOPRIGHT", -18, -48)
+	emptyHint:SetJustifyH("CENTER")
+	emptyHint:SetWordWrap(true)
+	c5Presets.EmptyHint = emptyHint
 
-	----------------------------------------------------------------------------
-	-- TAB 4: Binding-Presets, Charakter-Übernahme & Import/Export
-	----------------------------------------------------------------------------
-	local page4 = win.Pages[4]
-	RegisterControl(CreateSectionHeader(page4, "SETTINGS_HEADER_PRESETS", -6))
-
-	RegisterControl(CreatePillSelectorButton(
-		page4,
-		-28,
-		492,
-		function()
-			local preset = GetSelectedPreset()
-			return string.format(L["PRESET_SELECTED_FORMAT"], FormatPresetLabel(preset))
-		end,
-		function(owner)
-			SettingsUI.OpenTab4PresetMenu(owner)
-		end,
-		"PRESET_TOOLTIP_TITLE",
-		"PRESET_TOOLTIP_DESC"
-	))
-
-	RegisterControl(CreateActionButton(
-		page4,
-		-62,
-		117,
-		function()
-			return L["PRESET_BTN_LOAD"]
-		end,
-		function()
-			local preset = GetSelectedPreset()
-			if preset and ns.ClickBindingUI and ns.ClickBindingUI.LoadPreset then
-				ns.ClickBindingUI.LoadPreset(preset)
+	local emptyBtn = Widgets.CreateStyledButton(c5Presets, 200, 26, function() return L["PRESET_BTN_NEW"] end, function()
+		if ns.ClickBindingUI and ns.ClickBindingUI.ShowNewPresetPopup then
+			ns.ClickBindingUI.ShowNewPresetPopup("", function(saved)
+				if saved and saved.name then selectedPresetName = saved.name end
 				SettingsUI.RefreshWindow()
-			elseif ns.ClickBindingUI and ns.ClickBindingUI.ShowNewPresetPopup then
-				ns.ClickBindingUI.ShowNewPresetPopup("", function(saved)
-					if saved and saved.name then
-						selectedPresetName = saved.name
-					end
-					SettingsUI.RefreshWindow()
-				end)
-			end
-		end,
-		"PRESET_BTN_LOAD_DESC"
-	))
-
-	local newPresetBtn = RegisterControl(CreateActionButton(
-		page4,
-		-62,
-		117,
-		function()
-			return L["PRESET_BTN_NEW"]
-		end,
-		function()
-			if ns.ClickBindingUI and ns.ClickBindingUI.ShowNewPresetPopup then
-				ns.ClickBindingUI.ShowNewPresetPopup("", function(saved)
-					if saved and saved.name then
-						selectedPresetName = saved.name
-					end
-					SettingsUI.RefreshWindow()
-				end)
-			end
-		end,
-		"PRESET_BTN_NEW_DESC"
-	))
-	newPresetBtn:ClearAllPoints()
-	newPresetBtn:SetPoint("TOPLEFT", page4, "TOPLEFT", 143, -62)
-
-	local overwritePresetBtn = RegisterControl(CreateActionButton(
-		page4,
-		-62,
-		117,
-		function()
-			return L["PRESET_BTN_OVERWRITE"]
-		end,
-		function()
-			local preset = GetSelectedPreset()
-			if preset and preset.name and ns.ClickBindingUI and ns.ClickBindingUI.SavePresetByName then
-				ns.ClickBindingUI.SavePresetByName(preset.name)
-				SettingsUI.RefreshWindow()
-			elseif ns.ClickBindingUI and ns.ClickBindingUI.ShowNewPresetPopup then
-				ns.ClickBindingUI.ShowNewPresetPopup("", function(saved)
-					if saved and saved.name then
-						selectedPresetName = saved.name
-					end
-					SettingsUI.RefreshWindow()
-				end)
-			end
-		end,
-		"PRESET_BTN_OVERWRITE_DESC"
-	))
-	overwritePresetBtn:ClearAllPoints()
-	overwritePresetBtn:SetPoint("TOPLEFT", page4, "TOPLEFT", 268, -62)
-
-	local deletePresetBtn = RegisterControl(CreateActionButton(
-		page4,
-		-62,
-		117,
-		function()
-			return L["PRESET_BTN_DELETE"]
-		end,
-		function()
-			local preset = GetSelectedPreset()
-			if preset and preset.name and ns.ClickBindingUI and ns.ClickBindingUI.DeletePresetByName then
-				ns.ClickBindingUI.DeletePresetByName(preset.name)
-				selectedPresetName = nil
-				SettingsUI.RefreshWindow()
-			end
-		end,
-		"PRESET_BTN_DELETE_DESC"
-	))
-	deletePresetBtn:ClearAllPoints()
-	deletePresetBtn:SetPoint("TOPLEFT", page4, "TOPLEFT", 393, -62)
-
-	RegisterControl(CreateSectionHeader(page4, "SETTINGS_HEADER_PROFILES", -98))
-
-	RegisterControl(CreateCheckboxControl(
-		page4,
-		-120,
-		"SETTING_USE_CHAR_SETTINGS",
-		"SETTING_USE_CHAR_SETTINGS_DESC",
-		function()
-			return Database.IsUsingCharSettings()
-		end,
-		function(val)
-			Database.SetUsingCharSettings(val)
+			end)
 		end
-	))
+	end, "primary")
+	emptyBtn:SetPoint("TOP", emptyHint, "BOTTOM", 0, -14)
+	c5Presets.EmptyCreateBtn = emptyBtn
+	win.PresetCard = c5Presets
+	RegisterSearchEntry({ tabIndex = 5, navKey = "UX_NAV_PRESETS", labelKey = "SETTINGS_HEADER_PRESETS", descKey = "PRESET_TOOLTIP_DESC", keywords = "preset loadout dual spec spec1 spec2 talent" })
 
-	RegisterControl(CreateDBCheckbox(page4, -146, "importMergeBindings", "SETTING_IMPORT_MERGE_BINDINGS", "SETTING_IMPORT_MERGE_BINDINGS_DESC"))
+	----------------------------------------------------------------------------
+	-- SEITE 6: Profile, Teilen & System
+	----------------------------------------------------------------------------
+	local p6 = win.Pages[6]
+	local y6 = -6
 
-	RegisterControl(CreatePillSelectorButton(
-		page4,
-		-178,
-		492,
-		function()
-			local prof, currentKey = GetSelectedCharProfile()
-			return string.format(L["PROFILE_SOURCE_CHAR_FORMAT"], FormatCharProfileLabel(prof, currentKey))
-		end,
-		function(owner)
-			SettingsUI.OpenSourceCharMenu(owner)
-		end,
-		"PROFILE_SOURCE_MENU_TITLE",
-		"PROFILE_SOURCE_CHAR_DESC"
-	))
+	local c6Prof = Reg(Widgets.CreateCard(p6, "SETTINGS_HEADER_PROFILES", y6))
+	AddIndexedToggle(c6Prof, 6, {
+		labelKey = "SETTING_USE_CHAR_SETTINGS",
+		descKey = "SETTING_USE_CHAR_SETTINGS_DESC",
+		getter = function() return Database.IsUsingCharSettings() end,
+		setter = function(v) Database.SetUsingCharSettings(v) end,
+	}, "character specific profile account")
+	AddIndexedToggle(c6Prof, 6, { dbKey = "importMergeBindings", labelKey = "SETTING_IMPORT_MERGE_BINDINGS", descKey = "SETTING_IMPORT_MERGE_BINDINGS_DESC" }, "merge replace import copy")
 
-	RegisterControl(CreateActionButton(
-		page4,
-		-212,
-		158,
-		function()
-			return L["PROFILE_BTN_COPY_ALL"]
-		end,
-		function()
+	local srcDropY = c6Prof:Advance(26, 6)
+	local srcCharBtn = Reg(Widgets.CreateStyledButton(c6Prof, c6Prof.innerWidth, 26, function()
+		local prof, curKey = GetSelectedCharProfile()
+		return string.format(L["PROFILE_SOURCE_CHAR_FORMAT"], FormatCharProfileLabel(prof, curKey)) .. "  |cffaaaaaa[v]|r"
+	end, function(self)
+		SettingsUI.OpenSourceCharMenu(self)
+	end, "secondary", "PROFILE_SOURCE_CHAR_DESC"))
+	srcCharBtn:SetPoint("TOPLEFT", c6Prof, "TOPLEFT", 14, srcDropY)
+
+	local cpRowY = c6Prof:Advance(26, 4)
+	local cpW = math.floor((c6Prof.innerWidth - 12) / 3)
+	for idx, cpDef in ipairs({
+		{ key = "PROFILE_BTN_COPY_ALL",      desc = "PROFILE_BTN_COPY_ALL_DESC",      scope = "all",      variant = "primary" },
+		{ key = "PROFILE_BTN_COPY_BINDINGS", desc = "PROFILE_BTN_COPY_BINDINGS_DESC", scope = "bindings", variant = "secondary" },
+		{ key = "PROFILE_BTN_COPY_SETTINGS", desc = "PROFILE_BTN_COPY_SETTINGS_DESC", scope = "settings", variant = "secondary" },
+	}) do
+		local b = Reg(Widgets.CreateStyledButton(c6Prof, cpW, 24, function() return L[cpDef.key] end, function()
 			local prof = GetSelectedCharProfile()
 			if prof and ns.ClickBindingUI and ns.ClickBindingUI.CopyFromCharacterProfile then
-				ns.ClickBindingUI.CopyFromCharacterProfile(prof, "all")
+				ns.ClickBindingUI.CopyFromCharacterProfile(prof, cpDef.scope)
 				SettingsUI.RefreshWindow()
 			end
-		end,
-		"PROFILE_BTN_COPY_ALL_DESC"
-	))
+		end, cpDef.variant, cpDef.desc))
+		b:SetPoint("TOPLEFT", c6Prof, "TOPLEFT", 14 + ((idx - 1) * (cpW + 6)), cpRowY)
+	end
+	y6 = c6Prof:Finalize(8)
 
-	local copyBindsBtn = RegisterControl(CreateActionButton(
-		page4,
-		-212,
-		158,
-		function()
-			return L["PROFILE_BTN_COPY_BINDINGS"]
-		end,
-		function()
-			local prof = GetSelectedCharProfile()
-			if prof and ns.ClickBindingUI and ns.ClickBindingUI.CopyFromCharacterProfile then
-				ns.ClickBindingUI.CopyFromCharacterProfile(prof, "bindings")
-				SettingsUI.RefreshWindow()
-			end
-		end,
-		"PROFILE_BTN_COPY_BINDINGS_DESC"
-	))
-	copyBindsBtn:ClearAllPoints()
-	copyBindsBtn:SetPoint("TOPLEFT", page4, "TOPLEFT", 185, -212)
+	local c6Share = Reg(Widgets.CreateCard(p6, "SETTINGS_HEADER_SHARE", y6))
+	AddIndexedSegmented(c6Share, 6, {
+		labelKey = "SHARE_SCOPE_MENU_TITLE",
+		descKey = "SHARE_SCOPE_TOOLTIP_DESC",
+		options = SHARE_SCOPE_OPTIONS,
+		getter = function() return selectedShareScope or "all" end,
+		setter = function(v) selectedShareScope = v; SettingsUI.RefreshWindow() end,
+	}, "export import string share scope")
 
-	local copySettingsBtn = RegisterControl(CreateActionButton(
-		page4,
-		-212,
-		158,
-		function()
-			return L["PROFILE_BTN_COPY_SETTINGS"]
-		end,
-		function()
-			local prof = GetSelectedCharProfile()
-			if prof and ns.ClickBindingUI and ns.ClickBindingUI.CopyFromCharacterProfile then
-				ns.ClickBindingUI.CopyFromCharacterProfile(prof, "settings")
-				SettingsUI.RefreshWindow()
-			end
-		end,
-		"PROFILE_BTN_COPY_SETTINGS_DESC"
-	))
-	copySettingsBtn:ClearAllPoints()
-	copySettingsBtn:SetPoint("TOPLEFT", page4, "TOPLEFT", 352, -212)
+	local shRowY = c6Share:Advance(26, 4)
+	local shW = math.floor((c6Share.innerWidth - 12) / 3)
+	local expBtn = Reg(Widgets.CreateStyledButton(c6Share, shW, 24, function() return L["SHARE_BTN_EXPORT_STRING"] end, function()
+		if ns.ClickBindingUI and ns.ClickBindingUI.ShowExportStringPopup then
+			ns.ClickBindingUI.ShowExportStringPopup(selectedShareScope or "all")
+		end
+	end, "primary", "SHARE_BTN_EXPORT_STRING_DESC"))
+	expBtn:SetPoint("TOPLEFT", c6Share, "TOPLEFT", 14, shRowY)
 
-	RegisterControl(CreateSectionHeader(page4, "SETTINGS_HEADER_SHARE", -250))
+	local impBtn = Reg(Widgets.CreateStyledButton(c6Share, shW, 24, function() return L["SHARE_BTN_IMPORT_STRING"] end, function()
+		if ns.ClickBindingUI and ns.ClickBindingUI.ShowImportStringPopup then
+			ns.ClickBindingUI.ShowImportStringPopup(selectedShareScope or "all")
+		end
+	end, "secondary", "SHARE_BTN_IMPORT_STRING_DESC"))
+	impBtn:SetPoint("TOPLEFT", c6Share, "TOPLEFT", 14 + shW + 6, shRowY)
 
-	RegisterControl(CreatePillSelectorButton(
-		page4,
-		-272,
-		492,
-		function()
-			return string.format(L["SHARE_SCOPE_BUTTON_FORMAT"], SettingsUI.GetCurrentShareScopeShortLabel())
-		end,
-		function(owner)
-			SettingsUI.OpenShareScopeMenu(owner)
-		end,
-		"SHARE_SCOPE_MENU_TITLE",
-		"SHARE_SCOPE_TOOLTIP_DESC"
-	))
+	local sumBtn = Reg(Widgets.CreateStyledButton(c6Share, shW, 24, function() return L["SETTINGS_EXPORT_BINDINGS_BTN"] end, function()
+		if ns.ClickBindingUI and ns.ClickBindingUI.ShowBindingsExportPopup then
+			ns.ClickBindingUI.ShowBindingsExportPopup()
+		end
+	end, "secondary", "SETTINGS_EXPORT_BINDINGS_DESC"))
+	sumBtn:SetPoint("TOPLEFT", c6Share, "TOPLEFT", 14 + ((shW + 6) * 2), shRowY)
+	y6 = c6Share:Finalize(8)
 
-	RegisterControl(CreateActionButton(
-		page4,
-		-306,
-		240,
-		function()
-			return L["SHARE_BTN_EXPORT_STRING"]
-		end,
-		function()
-			if ns.ClickBindingUI and ns.ClickBindingUI.ShowExportStringPopup then
-				ns.ClickBindingUI.ShowExportStringPopup(selectedShareScope or "all")
-			end
-		end,
-		"SHARE_BTN_EXPORT_STRING_DESC"
-	))
+	local c6Sys = Reg(Widgets.CreateCard(p6, "SETTINGS_HEADER_GENERAL", y6))
+	AddIndexedSegmented(c6Sys, 6, {
+		dbKey = "addonLocale",
+		defaultValue = "auto",
+		labelKey = "LOCALE_MENU_TITLE",
+		descKey = "LOCALE_TOOLTIP_DESC",
+		options = LOCALE_OPTIONS,
+	}, "language locale english deutsch espanol spanish")
+	AddIndexedToggle(c6Sys, 6, { dbKey = "showMinimapButton", labelKey = "SETTING_SHOW_MINIMAP_BUTTON", descKey = "SETTING_SHOW_MINIMAP_BUTTON_DESC" }, "minimap icon button")
 
-	local importStrBtn = RegisterControl(CreateActionButton(
-		page4,
-		-306,
-		240,
-		function()
-			return L["SHARE_BTN_IMPORT_STRING"]
-		end,
-		function()
-			if ns.ClickBindingUI and ns.ClickBindingUI.ShowImportStringPopup then
-				ns.ClickBindingUI.ShowImportStringPopup(selectedShareScope or "all")
-			end
-		end,
-		"SHARE_BTN_IMPORT_STRING_DESC"
-	))
-	importStrBtn:ClearAllPoints()
-	importStrBtn:SetPoint("TOPLEFT", page4, "TOPLEFT", 270, -306)
+	local sysRowY = c6Sys:Advance(26, 4)
+	local sysHalfW = math.floor((c6Sys.innerWidth - 6) / 2)
+	local rstPosBtn = Reg(Widgets.CreateStyledButton(c6Sys, sysHalfW, 24, function() return L["OVERLAY_UNLOCK_BTN_RESET_POS"] end, function()
+		SettingsUI.ResetAllOverlayPositions()
+	end, "secondary", "OVERLAY_UNLOCK_BTN_RESET_POS_DESC"))
+	rstPosBtn:SetPoint("TOPLEFT", c6Sys, "TOPLEFT", 14, sysRowY)
 
-	RegisterControl(CreateActionButton(
-		page4,
-		-340,
-		492,
-		function()
-			return L["SETTINGS_EXPORT_BINDINGS_BTN"]
-		end,
-		function()
-			if ns.ClickBindingUI and ns.ClickBindingUI.ShowBindingsExportPopup then
-				ns.ClickBindingUI.ShowBindingsExportPopup()
-			end
-		end,
-		"SETTINGS_EXPORT_BINDINGS_DESC"
-	))
+	local dbgBtn = Reg(Widgets.CreateStyledButton(c6Sys, sysHalfW, 24, function() return L["SETTINGS_RUN_DEBUG_BTN"] end, function()
+		if ns.ClickBindingUI and ns.ClickBindingUI.RunTaintDiagnostics then
+			ns.ClickBindingUI.RunTaintDiagnostics()
+		end
+	end, "secondary", "SETTINGS_RUN_DEBUG_DESC"))
+	dbgBtn:SetPoint("TOPLEFT", c6Sys, "TOPLEFT", 14 + sysHalfW + 6, sysRowY)
+	y6 = c6Sys:Finalize(10)
+	p6.contentHeight = math.abs(y6) + 12
 
 	win:Hide()
 	settingsWindow = win
 	SelectTab(1)
 	return win
 end
+
+--------------------------------------------------------------------------------
+-- Overlay-Steuerung & Fenster-Lebenszyklus
+--------------------------------------------------------------------------------
 
 function SettingsUI.IsOverlaysUnlocked()
 	local hoverUnlocked = ns.UnitHoverTooltip and ns.UnitHoverTooltip.IsMoveUnlocked and ns.UnitHoverTooltip.IsMoveUnlocked() or false
@@ -1509,24 +1873,49 @@ function SettingsUI.RefreshWindow()
 	if not settingsWindow or not settingsWindow:IsShown() then
 		return
 	end
-	if settingsWindow.TitleText then
-		settingsWindow.TitleText:SetText(string.format("%s  |cff888888v%s|r", L["SETTINGS_MENU_TITLE"], Constants.VERSION))
+	settingsWindow.TitleText:SetText(string.format("%s  |cff888888v%s|r", L["SETTINGS_MENU_TITLE"], Constants.VERSION))
+	if settingsWindow.SearchPlaceholder then
+		settingsWindow.SearchPlaceholder:SetText(L["UX_SEARCH_PLACEHOLDER"])
 	end
-	if settingsWindow.TabButtons then
-		for _, tabBtn in ipairs(settingsWindow.TabButtons) do
-			if tabBtn.Text and tabBtn.labelKey then
-				tabBtn.Text:SetText(L[tabBtn.labelKey])
+	if settingsWindow.QuickHeader then
+		settingsWindow.QuickHeader:SetText(L["UX_QUICK_HEADER"])
+	end
+	for _, qb in ipairs(settingsWindow.QuickButtons or {}) do
+		qb:RefreshValue()
+	end
+
+	local isSearching = (currentSearchQuery ~= "")
+	for i, tabBtn in ipairs(settingsWindow.TabButtons) do
+		tabBtn.Text:SetText(L[tabBtn.labelKey] or tabBtn.labelKey)
+		local isSelected = (not isSearching) and (i == activeTabIndex)
+		tabBtn.ActiveBar:SetShown(isSelected)
+		if isSelected then
+			tabBtn.Bg:SetColorTexture(0.18, 0.16, 0.08, 0.90)
+			tabBtn.Text:SetTextColor(1.0, 0.85, 0.25)
+		else
+			tabBtn.Bg:SetColorTexture(0, 0, 0, 0)
+			tabBtn.Text:SetTextColor(0.82, 0.85, 0.90)
+		end
+		settingsWindow.Pages[i]:SetShown(isSelected)
+	end
+
+	if isSearching then
+		settingsWindow.SearchPage:Show()
+		RenderSearchResults()
+	else
+		settingsWindow.SearchPage:Hide()
+		for _, ctrl in ipairs(settingsWindow.Controls) do
+			if ctrl.RefreshValue then
+				ctrl:RefreshValue()
 			end
 		end
-	end
-	for _, ctrl in ipairs(settingsWindow.Controls) do
-		if ctrl.RefreshValue then
-			ctrl:RefreshValue()
+		if activeTabIndex == 3 then
+			SettingsUI.RefreshReorderWindow()
+		elseif activeTabIndex == 5 then
+			RefreshPresetManagerCard()
 		end
 	end
-	if SettingsUI.RefreshReorderWindow then
-		SettingsUI.RefreshReorderWindow()
-	end
+	UpdateScrollChildHeight()
 end
 
 function SettingsUI.OpenSettingsTab(tabIndex)
@@ -1547,525 +1936,14 @@ function SettingsUI.OpenSettingsTab(tabIndex)
 	if win.Raise then
 		win:Raise()
 	end
-	if tabIndex and tabIndex >= 1 and tabIndex <= 4 then
+	if win.SearchBox and currentSearchQuery ~= "" then
+		win.SearchBox:SetText("")
+	end
+	if tabIndex and tabIndex >= 1 and tabIndex <= #NAV_SECTIONS then
 		SelectTab(tabIndex)
+	else
+		SettingsUI.RefreshWindow()
 	end
-	SettingsUI.RefreshWindow()
-end
-
-function SettingsUI.HideWindow()
-	if settingsWindow and settingsWindow:IsShown() then
-		settingsWindow:Hide()
-	end
-	if SettingsUI.HideReorderWindow then
-		SettingsUI.HideReorderWindow()
-	end
-end
-
---------------------------------------------------------------------------------
--- Drag-&-Drop Reorder-Editor für Maustasten (inkl. MB6..MB31) & Matrix-Modifikatoren
---------------------------------------------------------------------------------
-local reorderWindow = nil
-local REORDER_ROW_H = 26
-local REORDER_ROW_GAP = 2
-
-local function GetMouseButtonDisplayLabel(buttonName)
-	local norm = Constants.NormalizeMouseButtonName(buttonName)
-	local short = Constants.GetShortButtonName(norm)
-	local full = (Constants.GetButtonDisplayName and Constants.GetButtonDisplayName(norm)) or short
-	return string.format("|cffffd100%s|r  |cffffffff%s|r", short, full)
-end
-
-local function EnsureReorderListRow(scrollChild, rowsPool, idx, isButtonList)
-	if rowsPool[idx] then
-		return rowsPool[idx]
-	end
-	local row = CreateFrame("Button", nil, scrollChild, "BackdropTemplate")
-	row:SetHeight(REORDER_ROW_H)
-	row:EnableMouse(true)
-	row:RegisterForClicks("LeftButtonUp")
-
-	if row.SetBackdrop then
-		row:SetBackdrop({
-			bgFile = "Interface\\Buttons\\WHITE8x8",
-			edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-			tile = true,
-			tileSize = 8,
-			edgeSize = 10,
-			insets = { left = 2, right = 2, top = 2, bottom = 2 },
-		})
-		row:SetBackdropColor(0.11, 0.14, 0.20, 0.92)
-		row:SetBackdropBorderColor(0.32, 0.42, 0.58, 0.85)
-	end
-
-	local handleText = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-	handleText:SetPoint("LEFT", row, "LEFT", 6, 0)
-	handleText:SetText("|cff8899bb::|r")
-	row.HandleText = handleText
-
-	local labelOffsetLeft = 22
-	if isButtonList then
-		local cb = CreateFrame("CheckButton", nil, row, "UICheckButtonTemplate")
-		cb:SetSize(20, 20)
-		cb:SetPoint("LEFT", row, "LEFT", 18, 0)
-		cb:SetScript("OnClick", function(self)
-			PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
-			if row.itemKey and Database.SetMatrixButtonColumnVisible then
-				Database.SetMatrixButtonColumnVisible(row.itemKey, self:GetChecked() and true or false)
-				SettingsUI.RefreshReorderWindow()
-			end
-		end)
-		cb:SetScript("OnEnter", function(self)
-			GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-			GameTooltip_SetTitle(GameTooltip, L["MATRIX_PIN_COL_HEADER"] or "Matrix")
-			GameTooltip_AddNormalLine(GameTooltip, L["REORDER_COL_CHECK_TOOLTIP"], true)
-			GameTooltip:Show()
-		end)
-		cb:SetScript("OnLeave", function()
-			GameTooltip:Hide()
-		end)
-		row.ColCheckbox = cb
-		labelOffsetLeft = 40
-	end
-
-	local downBtn = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
-	downBtn:SetSize(20, 20)
-	downBtn:SetPoint("RIGHT", row, "RIGHT", -4, 0)
-	downBtn:SetText("v")
-	downBtn:SetScript("OnClick", function()
-		PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
-		if row.onMoveDelta then
-			row.onMoveDelta(1)
-		end
-	end)
-	row.DownBtn = downBtn
-
-	local upBtn = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
-	upBtn:SetSize(20, 20)
-	upBtn:SetPoint("RIGHT", downBtn, "LEFT", -2, 0)
-	upBtn:SetText("^")
-	upBtn:SetScript("OnClick", function()
-		PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
-		if row.onMoveDelta then
-			row.onMoveDelta(-1)
-		end
-	end)
-	row.UpBtn = upBtn
-
-	local label = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-	label:SetPoint("LEFT", row, "LEFT", labelOffsetLeft, 0)
-	label:SetPoint("RIGHT", upBtn, "LEFT", -4, 0)
-	label:SetJustifyH("LEFT")
-	label:SetWordWrap(false)
-	row.Label = label
-
-	row:SetScript("OnEnter", function(self)
-		if not (reorderWindow and reorderWindow.dragState) then
-			if self.SetBackdropBorderColor then
-				self:SetBackdropBorderColor(0.75, 0.85, 1.0, 1.0)
-			end
-			GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-			GameTooltip_SetTitle(GameTooltip, L["REORDER_WINDOW_TITLE"])
-			GameTooltip_AddNormalLine(GameTooltip, L["REORDER_DRAG_HINT_TOOLTIP"], true)
-			GameTooltip:Show()
-		end
-	end)
-	row:SetScript("OnLeave", function(self)
-		GameTooltip:Hide()
-		if not (reorderWindow and reorderWindow.dragState and reorderWindow.dragState.itemKey == self.itemKey) then
-			if self.SetBackdropBorderColor then
-				self:SetBackdropBorderColor(0.32, 0.42, 0.58, 0.85)
-			end
-		end
-	end)
-
-	row:SetScript("OnMouseDown", function(self, button)
-		if button == "LeftButton" and reorderWindow and self.itemKey then
-			GameTooltip:Hide()
-			reorderWindow.dragState = {
-				listType = isButtonList and "button" or "modifier",
-				itemKey = self.itemKey,
-				scrollChild = scrollChild,
-			}
-			SettingsUI.RefreshReorderWindow()
-		end
-	end)
-
-	row:SetScript("OnMouseUp", function(_, button)
-		if button == "LeftButton" and reorderWindow and reorderWindow.dragState then
-			reorderWindow.dragState = nil
-			PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
-			SettingsUI.RefreshReorderWindow()
-		end
-	end)
-
-	rowsPool[idx] = row
-	return row
-end
-
-local function EnsureReorderWindow()
-	if reorderWindow then
-		return reorderWindow
-	end
-
-	local f = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
-	f:SetSize(560, 490)
-	f:SetPoint("CENTER", UIParent, "CENTER", 0, 20)
-	f:SetFrameStrata("DIALOG")
-	f:SetToplevel(true)
-	f:EnableMouse(true)
-	f:SetMovable(true)
-	f:SetClampedToScreen(true)
-	f:RegisterForDrag("LeftButton")
-	f:SetScript("OnDragStart", function(self)
-		self:StartMoving()
-	end)
-	f:SetScript("OnDragStop", function(self)
-		self:StopMovingOrSizing()
-	end)
-
-	if f.SetBackdrop then
-		f:SetBackdrop({
-			bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background-Dark",
-			edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
-			tile = true,
-			tileSize = 16,
-			edgeSize = 24,
-			insets = { left = 6, right = 6, top = 6, bottom = 6 },
-		})
-		f:SetBackdropColor(0.06, 0.07, 0.10, 0.97)
-		f:SetBackdropBorderColor(0.85, 0.72, 0.40, 1.0)
-	end
-
-	local icon = f:CreateTexture(nil, "ARTWORK")
-	icon:SetSize(20, 20)
-	icon:SetPoint("TOPLEFT", f, "TOPLEFT", 16, -14)
-	icon:SetAtlas(Constants.ICON_ATLAS)
-
-	local title = f:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
-	title:SetPoint("LEFT", icon, "RIGHT", 8, 0)
-	f.Title = title
-
-	local closeBtn = CreateFrame("Button", nil, f, "UIPanelCloseButton")
-	closeBtn:SetPoint("TOPRIGHT", f, "TOPRIGHT", -4, -4)
-	closeBtn:SetScript("OnClick", function()
-		PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF)
-		f:Hide()
-	end)
-
-	local subtitle = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-	subtitle:SetPoint("TOPLEFT", f, "TOPLEFT", 16, -40)
-	subtitle:SetPoint("TOPRIGHT", f, "TOPRIGHT", -16, -40)
-	subtitle:SetJustifyH("LEFT")
-	subtitle:SetWordWrap(true)
-	f.Subtitle = subtitle
-
-	local function CreateListBox(xOffset, width, height)
-		local box = CreateFrame("Frame", nil, f, "BackdropTemplate")
-		box:SetSize(width, height)
-		box:SetPoint("TOPLEFT", f, "TOPLEFT", xOffset, -88)
-		if box.SetBackdrop then
-			box:SetBackdrop({
-				bgFile = "Interface\\Buttons\\WHITE8x8",
-				edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-				tile = true,
-				tileSize = 8,
-				edgeSize = 12,
-				insets = { left = 3, right = 3, top = 3, bottom = 3 },
-			})
-			box:SetBackdropColor(0.04, 0.05, 0.08, 0.90)
-			box:SetBackdropBorderColor(0.45, 0.45, 0.55, 0.85)
-		end
-
-		local scrollFrame = CreateFrame("ScrollFrame", nil, box, "UIPanelScrollFrameTemplate")
-		scrollFrame:SetPoint("TOPLEFT", box, "TOPLEFT", 6, -6)
-		scrollFrame:SetPoint("BOTTOMRIGHT", box, "BOTTOMRIGHT", -26, 6)
-
-		local scrollChild = CreateFrame("Frame", nil, scrollFrame)
-		scrollChild:SetSize(width - 34, 1)
-		scrollFrame:SetScrollChild(scrollChild)
-
-		box.ScrollFrame = scrollFrame
-		box.ScrollChild = scrollChild
-		box.Rows = {}
-		return box
-	end
-
-	local leftHeader = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-	leftHeader:SetPoint("TOPLEFT", f, "TOPLEFT", 16, -70)
-	f.LeftHeader = leftHeader
-
-	local rightHeader = f:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-	rightHeader:SetPoint("TOPLEFT", f, "TOPLEFT", 288, -70)
-	f.RightHeader = rightHeader
-
-	f.LeftBox = CreateListBox(16, 256, 316)
-	f.RightBox = CreateListBox(288, 256, 350)
-
-	local addMmoBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-	addMmoBtn:SetSize(256, 26)
-	addMmoBtn:SetPoint("TOPLEFT", f.LeftBox, "BOTTOMLEFT", 0, -8)
-	addMmoBtn:SetScript("OnClick", function(self)
-		PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
-		if MenuUtil and MenuUtil.CreateContextMenu then
-			MenuUtil.CreateContextMenu(self, function(_, rootDescription)
-				rootDescription:CreateTitle(L["REORDER_ADD_MMO_MENU_TITLE"])
-				rootDescription:SetScrollMode(280)
-				for n = 6, 31 do
-					local btnKey = "Button" .. tostring(n)
-					local short = "MB" .. tostring(n)
-					local full = (Constants.GetButtonDisplayName and Constants.GetButtonDisplayName(btnKey)) or ("Mouse Button " .. tostring(n))
-					local isVisible = Database.IsMatrixButtonColumnVisible and Database.IsMatrixButtonColumnVisible(btnKey)
-					local label = isVisible and string.format("|cff40ff59%s|r (%s)", short, full) or string.format("|cffffd100%s|r (%s)", short, full)
-					rootDescription:CreateButton(label, function()
-						if Database.AddMouseButtonToOrder then
-							Database.AddMouseButtonToOrder(btnKey, true)
-						end
-						SettingsUI.RefreshReorderWindow()
-					end)
-				end
-			end)
-		end
-	end)
-	f.AddMmoBtn = addMmoBtn
-
-	local presetMmbBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-	presetMmbBtn:SetSize(256, 26)
-	presetMmbBtn:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 16, 14)
-	presetMmbBtn:SetScript("OnClick", function()
-		PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
-		if Database.ApplyMiddleMouseCenterOrder then
-			Database.ApplyMiddleMouseCenterOrder()
-		end
-		SettingsUI.RefreshReorderWindow()
-		if DEFAULT_CHAT_FRAME then
-			DEFAULT_CHAT_FRAME:AddMessage(L["CHAT_ORDER_MMB_CENTER"])
-		end
-	end)
-	f.PresetMmbBtn = presetMmbBtn
-
-	local resetOrderBtn = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-	resetOrderBtn:SetSize(256, 26)
-	resetOrderBtn:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -16, 14)
-	resetOrderBtn:SetScript("OnClick", function()
-		PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
-		if Database.ResetButtonAndModifierOrder then
-			Database.ResetButtonAndModifierOrder()
-		end
-		SettingsUI.RefreshReorderWindow()
-		if DEFAULT_CHAT_FRAME then
-			DEFAULT_CHAT_FRAME:AddMessage(L["CHAT_ORDER_RESET"])
-		end
-	end)
-	f.ResetOrderBtn = resetOrderBtn
-
-	-- Live Drag-&-Drop Tracking: Berechnet aus der Maus-Y-Position die Zielzeile und sortiert direkt um
-	f:SetScript("OnUpdate", function(self)
-		local ds = self.dragState
-		if not ds then
-			return
-		end
-		if not IsMouseButtonDown("LeftButton") then
-			self.dragState = nil
-			SettingsUI.RefreshReorderWindow()
-			return
-		end
-		local sc = ds.scrollChild
-		if not sc or not sc:GetTop() then
-			return
-		end
-		local _, cursorY = GetCursorPosition()
-		local scale = sc:GetEffectiveScale() or 1
-		cursorY = cursorY / scale
-		local relY = sc:GetTop() - cursorY
-		local rowPitch = REORDER_ROW_H + REORDER_ROW_GAP
-		local targetIdx = math.floor(relY / rowPitch) + 1
-		if ds.listType == "button" then
-			local list = Database.GetOrderedMouseButtons and Database.GetOrderedMouseButtons(true) or {}
-			if #list > 0 then
-				targetIdx = math.max(1, math.min(#list, targetIdx))
-				local curIdx = Database.GetButtonOrderIndex and Database.GetButtonOrderIndex(ds.itemKey) or targetIdx
-				if targetIdx ~= curIdx and Database.MoveMouseButtonInOrder then
-					Database.MoveMouseButtonInOrder(ds.itemKey, targetIdx)
-					SettingsUI.RefreshReorderWindow()
-				end
-			end
-		elseif ds.listType == "modifier" then
-			local visibleMods = self.visibleModOrders or {}
-			if #visibleMods > 0 then
-				targetIdx = math.max(1, math.min(#visibleMods, targetIdx))
-				local curVisualIdx = nil
-				for i, mId in ipairs(visibleMods) do
-					if mId == ds.itemKey then
-						curVisualIdx = i
-						break
-					end
-				end
-				if curVisualIdx and targetIdx ~= curVisualIdx then
-					local targetModOrder = visibleMods[targetIdx]
-					local fullOrder = Database.GetOrderedModifierIDs and Database.GetOrderedModifierIDs() or {}
-					local fullTargetIdx = nil
-					for i, id in ipairs(fullOrder) do
-						if id == targetModOrder then
-							fullTargetIdx = i
-							break
-						end
-					end
-					if fullTargetIdx and Database.MoveModifierInOrder then
-						Database.MoveModifierInOrder(ds.itemKey, fullTargetIdx)
-						SettingsUI.RefreshReorderWindow()
-					end
-				end
-			end
-		end
-	end)
-
-	f:SetScript("OnHide", function(self)
-		self.dragState = nil
-	end)
-
-	f:Hide()
-	reorderWindow = f
-	return f
-end
-
-function SettingsUI.RefreshReorderWindow()
-	if not reorderWindow or not reorderWindow:IsShown() then
-		return
-	end
-	local f = reorderWindow
-	f.Title:SetText(L["REORDER_WINDOW_TITLE"])
-	f.Subtitle:SetText(L["REORDER_WINDOW_SUBTITLE"])
-	f.LeftHeader:SetText("|cffffd100" .. L["REORDER_HDR_MOUSE_BUTTONS"] .. "|r")
-	f.RightHeader:SetText("|cff99ccff" .. L["REORDER_HDR_MODIFIERS"] .. "|r")
-	f.AddMmoBtn:SetText(L["REORDER_ADD_MMO_BTN"])
-	f.PresetMmbBtn:SetText(L["REORDER_PRESET_MMB_CENTER_BTN"])
-	f.ResetOrderBtn:SetText(L["REORDER_RESET_BTN"])
-
-	local rowPitch = REORDER_ROW_H + REORDER_ROW_GAP
-
-	-- 1. Linke Liste: Maustasten
-	local buttons = Database.GetOrderedMouseButtons and Database.GetOrderedMouseButtons(true) or {}
-	local leftChild = f.LeftBox.ScrollChild
-	local leftWidth = leftChild:GetWidth()
-	for idx, btnName in ipairs(buttons) do
-		local row = EnsureReorderListRow(leftChild, f.LeftBox.Rows, idx, true)
-		row:ClearAllPoints()
-		row:SetPoint("TOPLEFT", leftChild, "TOPLEFT", 0, -((idx - 1) * rowPitch))
-		row:SetWidth(leftWidth)
-		row.itemKey = btnName
-		row.Label:SetText(string.format("|cff888888%d.|r %s", idx, GetMouseButtonDisplayLabel(btnName)))
-		if row.ColCheckbox then
-			local isVis = Database.IsMatrixButtonColumnVisible and Database.IsMatrixButtonColumnVisible(btnName)
-			row.ColCheckbox:SetChecked(isVis and true or false)
-		end
-		row.UpBtn:SetEnabled(idx > 1)
-		row.DownBtn:SetEnabled(idx < #buttons)
-		row.onMoveDelta = function(delta)
-			if Database.MoveMouseButtonInOrder then
-				Database.MoveMouseButtonInOrder(btnName, idx + delta)
-				SettingsUI.RefreshReorderWindow()
-			end
-		end
-		local isDragging = f.dragState and f.dragState.listType == "button" and f.dragState.itemKey == btnName
-		if row.SetBackdropColor then
-			if isDragging then
-				row:SetBackdropColor(0.26, 0.22, 0.08, 0.96)
-				row:SetBackdropBorderColor(1.0, 0.82, 0.25, 1.0)
-			else
-				row:SetBackdropColor(0.11, 0.14, 0.20, 0.92)
-				row:SetBackdropBorderColor(0.32, 0.42, 0.58, 0.85)
-			end
-		end
-		row:Show()
-	end
-	for idx = #buttons + 1, #f.LeftBox.Rows do
-		f.LeftBox.Rows[idx]:Hide()
-	end
-	leftChild:SetHeight(math.max(1, #buttons * rowPitch))
-
-	-- 2. Rechte Liste: Matrix-Modifikatoren
-	local orderedMods = (ns.ClickBindingUI and ns.ClickBindingUI.GetOrderedMatrixModRows and ns.ClickBindingUI.GetOrderedMatrixModRows()) or {}
-	local showMeta = (ns.ClickBindingUI and ns.ClickBindingUI.IsMatrixMetaActive and ns.ClickBindingUI.IsMatrixMetaActive()) or false
-	local visibleMods = {}
-	f.visibleModOrders = {}
-	for _, item in ipairs(orderedMods) do
-		if showMeta or not item.row.isMeta then
-			table.insert(visibleMods, item.row)
-			table.insert(f.visibleModOrders, item.row.modOrder)
-		end
-	end
-
-	local rightChild = f.RightBox.ScrollChild
-	local rightWidth = rightChild:GetWidth()
-	for idx, modRow in ipairs(visibleMods) do
-		local row = EnsureReorderListRow(rightChild, f.RightBox.Rows, idx, false)
-		row:ClearAllPoints()
-		row:SetPoint("TOPLEFT", rightChild, "TOPLEFT", 0, -((idx - 1) * rowPitch))
-		row:SetWidth(rightWidth)
-		row.itemKey = modRow.modOrder
-		local modTitle = L[modRow.labelKey] or modRow.fallback
-		row.Label:SetText(string.format("|cff888888%d.|r |cffb8d8ff%s|r", idx, modTitle))
-		row.UpBtn:SetEnabled(idx > 1)
-		row.DownBtn:SetEnabled(idx < #visibleMods)
-		row.onMoveDelta = function(delta)
-			local targetVisual = visibleMods[idx + delta]
-			if targetVisual and Database.GetOrderedModifierIDs and Database.MoveModifierInOrder then
-				local fullOrder = Database.GetOrderedModifierIDs()
-				for fullIdx, id in ipairs(fullOrder) do
-					if id == targetVisual.modOrder then
-						Database.MoveModifierInOrder(modRow.modOrder, fullIdx)
-						SettingsUI.RefreshReorderWindow()
-						break
-					end
-				end
-			end
-		end
-		local isDragging = f.dragState and f.dragState.listType == "modifier" and f.dragState.itemKey == modRow.modOrder
-		if row.SetBackdropColor then
-			if isDragging then
-				row:SetBackdropColor(0.26, 0.22, 0.08, 0.96)
-				row:SetBackdropBorderColor(1.0, 0.82, 0.25, 1.0)
-			else
-				row:SetBackdropColor(0.11, 0.14, 0.20, 0.92)
-				row:SetBackdropBorderColor(0.32, 0.42, 0.58, 0.85)
-			end
-		end
-		row:Show()
-	end
-	for idx = #visibleMods + 1, #f.RightBox.Rows do
-		f.RightBox.Rows[idx]:Hide()
-	end
-	rightChild:SetHeight(math.max(1, #visibleMods * rowPitch))
-end
-
-function SettingsUI.ShowReorderWindow()
-	if Constants.IsGamepadUIActive and Constants.IsGamepadUIActive() then
-		if DEFAULT_CHAT_FRAME then
-			DEFAULT_CHAT_FRAME:AddMessage(L["CHAT_GAMEPAD_STANDBY"])
-		end
-		return
-	end
-	local f = EnsureReorderWindow()
-	f:Show()
-	if f.Raise then
-		f:Raise()
-	end
-	SettingsUI.RefreshReorderWindow()
-end
-
-function SettingsUI.HideReorderWindow()
-	if reorderWindow and reorderWindow:IsShown() then
-		reorderWindow:Hide()
-	end
-end
-
-function SettingsUI.ToggleReorderWindow()
-	if reorderWindow and reorderWindow:IsShown() then
-		reorderWindow:Hide()
-		return
-	end
-	SettingsUI.ShowReorderWindow()
 end
 
 function SettingsUI.OpenSettingsMenu()
@@ -2090,6 +1968,16 @@ function SettingsUI.OpenSettingsMenu()
 		SettingsUI.RefreshWindow()
 	end
 end
+
+function SettingsUI.HideWindow()
+	if settingsWindow and settingsWindow:IsShown() then
+		settingsWindow:Hide()
+	end
+end
+
+--------------------------------------------------------------------------------
+-- Zahnrad-Portrait am ClickBindingFrame & Blizzard-Optionen (CanvasLayout)
+--------------------------------------------------------------------------------
 
 local clickBindingSettingsBtn = nil
 
@@ -2118,7 +2006,6 @@ function SettingsUI.AttachToClickBindingFrame()
 		return
 	end
 
-	-- Moderner runder Portrait-Button links neben MacrosPortrait mit nativem Zahnrad-Badge (questlog-icon-setting)
 	local btn = CreateFrame("Button", nil, ClickBindingFrame)
 	btn:SetSize(31, 31)
 	if ClickBindingFrame.MacrosPortrait then
@@ -2131,14 +2018,11 @@ function SettingsUI.AttachToClickBindingFrame()
 	local portrait = btn:CreateTexture(nil, "ARTWORK")
 	portrait:SetAllPoints(btn)
 	portrait:SetAtlas(Constants.ICON_ATLAS)
-	btn.Portrait = portrait
 
 	local border = btn:CreateTexture(nil, "OVERLAY", nil, 1)
 	border:SetAtlas("Transmog-nav-slot-selected", true)
 	border:SetPoint("CENTER")
-	btn.Frame = border
 
-	-- Kleines dunkles Badge unten rechts mit Blizzards scharfem Zahnrad-Atlas
 	local gearBg = btn:CreateTexture(nil, "OVERLAY", nil, 2)
 	gearBg:SetSize(16, 16)
 	gearBg:SetPoint("BOTTOMRIGHT", btn, "BOTTOMRIGHT", 2, -2)
@@ -2157,14 +2041,8 @@ function SettingsUI.AttachToClickBindingFrame()
 	highlight:SetSize(31, 31)
 	highlight:SetPoint("CENTER", 0, 1)
 
-	btn:SetScript("OnMouseDown", function(self)
-		self.GearIcon:SetPoint("CENTER", self.GearBg, "CENTER", 1, -1)
-	end)
-
-	btn:SetScript("OnMouseUp", function(self)
-		self.GearIcon:SetPoint("CENTER", self.GearBg, "CENTER", 0, 0)
-	end)
-
+	btn:SetScript("OnMouseDown", function(self) self.GearIcon:SetPoint("CENTER", self.GearBg, "CENTER", 1, -1) end)
+	btn:SetScript("OnMouseUp", function(self) self.GearIcon:SetPoint("CENTER", self.GearBg, "CENTER", 0, 0) end)
 	btn:SetScript("OnClick", function(_, mouseButton)
 		PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
 		if mouseButton == "RightButton" and ns.ClickBindingUI and ns.ClickBindingUI.ToggleFreeKeysMatrix then
@@ -2173,7 +2051,6 @@ function SettingsUI.AttachToClickBindingFrame()
 			SettingsUI.OpenSettingsMenu()
 		end
 	end)
-
 	btn:SetScript("OnEnter", function(self)
 		GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
 		GameTooltip_SetTitle(GameTooltip, L["SETTINGS_BUTTON_TOOLTIP_TITLE"])
@@ -2184,26 +2061,15 @@ function SettingsUI.AttachToClickBindingFrame()
 		end
 		GameTooltip:Show()
 	end)
-
-	btn:SetScript("OnLeave", function()
-		GameTooltip:Hide()
-	end)
+	btn:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
 	clickBindingSettingsBtn = btn
 end
 
 local blizzardCategoryRegistered = false
 
--- Registriert Better Click Casting unter Esc -> Optionen -> AddOns über ein isoliertes CanvasLayout,
--- damit Blizzards geteilte SettingsList.ScrollBox und die globale Optionssuche zu 100 % ungetaintet bleiben.
 function SettingsUI.RegisterBlizzardOptions()
-	if blizzardCategoryRegistered then
-		return
-	end
-	if not Settings
-		or not Settings.RegisterCanvasLayoutCategory
-		or not Settings.RegisterAddOnCategory
-	then
+	if blizzardCategoryRegistered or not Settings or not Settings.RegisterCanvasLayoutCategory or not Settings.RegisterAddOnCategory then
 		return
 	end
 	blizzardCategoryRegistered = true
@@ -2218,7 +2084,6 @@ function SettingsUI.RegisterBlizzardOptions()
 
 	local headerTitle = canvas:CreateFontString(nil, "OVERLAY", "GameFontHighlightHuge")
 	headerTitle:SetPoint("LEFT", headerIcon, "RIGHT", 10, 0)
-	headerTitle:SetJustifyH("LEFT")
 
 	local divider = canvas:CreateTexture(nil, "ARTWORK")
 	divider:SetAtlas("Options_HorizontalDivider", true)
@@ -2232,11 +2097,11 @@ function SettingsUI.RegisterBlizzardOptions()
 	end
 
 	local rows = {}
-	local function CreateCanvasRow(index, getLabelFunc, getBtnTextFunc, getTooltipDescFunc, onClickFunc)
+	local function CreateCanvasRow(index, getLabelFunc, getBtnTextFunc, onClickFunc)
 		local row = CreateFrame("Frame", nil, canvas)
-		row:SetHeight(36)
-		row:SetPoint("TOPLEFT", canvas, "TOPLEFT", 20, -64 - ((index - 1) * 42))
-		row:SetPoint("TOPRIGHT", canvas, "TOPRIGHT", -24, -64 - ((index - 1) * 42))
+		row:SetHeight(34)
+		row:SetPoint("TOPLEFT", canvas, "TOPLEFT", 20, -62 - ((index - 1) * 38))
+		row:SetPoint("TOPRIGHT", canvas, "TOPRIGHT", -24, -62 - ((index - 1) * 38))
 
 		local rowBg = row:CreateTexture(nil, "BACKGROUND")
 		rowBg:SetAllPoints()
@@ -2244,141 +2109,42 @@ function SettingsUI.RegisterBlizzardOptions()
 
 		local label = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
 		label:SetPoint("LEFT", row, "LEFT", 12, 0)
-		label:SetPoint("RIGHT", row, "RIGHT", -240, 0)
+		label:SetPoint("RIGHT", row, "RIGHT", -230, 0)
 		label:SetJustifyH("LEFT")
-		label:SetWordWrap(false)
-		row.Label = label
 
 		local btn = CreateFrame("Button", nil, row, "UIPanelButtonTemplate")
-		btn:SetSize(210, 26)
+		btn:SetSize(200, 24)
 		btn:SetPoint("RIGHT", row, "RIGHT", -10, 0)
-		btn:RegisterForClicks("LeftButtonUp")
 		btn:SetScript("OnClick", function()
 			PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON)
 			onClickFunc()
 		end)
-		btn:SetScript("OnEnter", function(self)
-			local desc = getTooltipDescFunc and getTooltipDescFunc()
-			if desc and desc ~= "" then
-				GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-				GameTooltip_SetTitle(GameTooltip, getLabelFunc())
-				GameTooltip_AddNormalLine(GameTooltip, desc, true)
-				GameTooltip:Show()
-			end
-		end)
-		btn:SetScript("OnLeave", function()
-			GameTooltip:Hide()
-		end)
-		row.Button = btn
 
 		row.RefreshRow = function()
 			label:SetText(getLabelFunc() or "")
 			btn:SetText(getBtnTextFunc() or "")
 		end
-
 		table.insert(rows, row)
 	end
 
-	-- 1. Tab 1: Klickbelegung & Zauberränge
-	CreateCanvasRow(
-		1,
-		function() return L["BLIZZ_SETTINGS_ROW_CLICKCAST"] end,
-		function() return L["BLIZZ_SETTINGS_OPEN_BTN"] end,
-		function() return L["SETTINGS_BUTTON_TOOLTIP_DESC"] end,
-		function()
+	for i, nav in ipairs(NAV_SECTIONS) do
+		local tabIdx = i
+		CreateCanvasRow(i, function() return L[nav.labelKey] end, function() return L["BLIZZ_SETTINGS_OPEN_BTN"] end, function()
 			CloseBlizzardSettingsIfSafe()
-			SettingsUI.OpenSettingsTab(1)
+			SettingsUI.OpenSettingsTab(tabIdx)
+		end)
+	end
+	CreateCanvasRow(7, function() return L["BLIZZ_SETTINGS_ROW_WINDOW"] end, function() return L["SETTINGS_OPEN_CLICKCAST_BTN"] end, function()
+		CloseBlizzardSettingsIfSafe()
+		if ns.MinimapButton and ns.MinimapButton.ToggleClickCastingWindow then
+			ns.MinimapButton.ToggleClickCastingWindow()
 		end
-	)
-
-	-- 2. Tab 2: Zauberbuch & Allgemein
-	CreateCanvasRow(
-		2,
-		function() return L["BLIZZ_SETTINGS_ROW_SPELLBOOK"] end,
-		function() return L["BLIZZ_SETTINGS_OPEN_BTN"] end,
-		function() return L["SETTING_QUICK_BIND_SPELLBOOK_DESC"] end,
-		function()
-			CloseBlizzardSettingsIfSafe()
-			SettingsUI.OpenSettingsTab(2)
-		end
-	)
-
-	-- 3. Tab 3: Unit-Frame Hover-Overlay
-	CreateCanvasRow(
-		3,
-		function() return L["BLIZZ_SETTINGS_ROW_UNITHOVER"] end,
-		function() return L["BLIZZ_SETTINGS_OPEN_BTN"] end,
-		function() return L["UNITHOVER_MODE_TOOLTIP_DESC"] end,
-		function()
-			CloseBlizzardSettingsIfSafe()
-			SettingsUI.OpenSettingsTab(3)
-		end
-	)
-
-	-- 4. Tab 4: Profile, Charakter-Übernahme & Import/Export
-	CreateCanvasRow(
-		4,
-		function() return L["BLIZZ_SETTINGS_ROW_PROFILES"] end,
-		function() return L["BLIZZ_SETTINGS_OPEN_BTN"] end,
-		function() return L["PROFILE_SOURCE_CHAR_DESC"] end,
-		function()
-			CloseBlizzardSettingsIfSafe()
-			SettingsUI.OpenSettingsTab(4)
-		end
-	)
-
-	-- 5. Direkt Blizzards Klickbelegungs-Fenster (/bcc) öffnen
-	CreateCanvasRow(
-		5,
-		function() return L["BLIZZ_SETTINGS_ROW_WINDOW"] end,
-		function() return L["SETTINGS_OPEN_CLICKCAST_BTN"] end,
-		function() return L["MINIMAP_HINT_LEFT"] end,
-		function()
-			CloseBlizzardSettingsIfSafe()
-			if ns.MinimapButton and ns.MinimapButton.ToggleClickCastingWindow then
-				ns.MinimapButton.ToggleClickCastingWindow()
-			end
-		end
-	)
-
-	-- 6. Freie-Tasten-Matrix (/bcc keys) öffnen
-	CreateCanvasRow(
-		6,
-		function() return L["SETTINGS_FREE_KEYS_MATRIX_BTN"] end,
-		function() return L["BLIZZ_SETTINGS_OPEN_BTN"] end,
-		function() return L["SETTINGS_FREE_KEYS_MATRIX_DESC"] end,
-		function()
-			CloseBlizzardSettingsIfSafe()
-			if ns.ClickBindingUI and ns.ClickBindingUI.ToggleFreeKeysMatrix then
-				ns.ClickBindingUI.ToggleFreeKeysMatrix()
-			end
-		end
-	)
-
-	-- 7. Alle Overlays entsperren / sperren (/bcc move)
-	CreateCanvasRow(
-		7,
-		function() return L["BLIZZ_SETTINGS_ROW_MOVE"] end,
-		function()
-			if SettingsUI.IsOverlaysUnlocked() then
-				return L["OVERLAY_UNLOCK_BTN_LOCK_ALL"]
-			end
-			return L["OVERLAY_UNLOCK_BTN_UNLOCK_ALL"]
-		end,
-		function() return L["SETTING_UNITHOVER_UNLOCK_MOVE_DESC"] end,
-		function()
-			CloseBlizzardSettingsIfSafe()
-			SettingsUI.ToggleOverlaysUnlocked()
-		end
-	)
+	end)
 
 	local function RefreshCanvas()
 		headerTitle:SetText(string.format("%s  |cff888888v%s|r", L["ADDON_TITLE"] or "Better Click Casting", Constants.VERSION))
-		for _, row in ipairs(rows) do
-			row.RefreshRow()
-		end
+		for _, row in ipairs(rows) do row.RefreshRow() end
 	end
-
 	canvas:SetScript("OnShow", RefreshCanvas)
 	RefreshCanvas()
 

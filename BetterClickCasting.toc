@@ -29,6 +29,7 @@ Core\Constants.lua
 Core\Database.lua
 Core\SpellRanks.lua
 
+Modules\SettingsWidgets.lua
 Modules\SettingsUI.lua
 Modules\MinimapButton.lua
 Modules\SpellBookUI.lua
