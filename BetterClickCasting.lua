@@ -24,6 +24,7 @@ loaderFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
 loaderFrame:RegisterEvent("INPUT_DEVICE_INTERFACE_TRANSITION")
 loaderFrame:RegisterEvent("ACTIVE_TALENT_GROUP_CHANGED")
 loaderFrame:RegisterEvent("PLAYER_TALENT_UPDATE")
+loaderFrame:RegisterEvent("ADDON_ACTION_BLOCKED")
 
 -- Merkt sich den zuletzt aktiven Dual-Spec-Index (1 oder 2), damit ein Wechsel zwischen Primär- und
 -- Sekundär-Spec zuverlässig erkannt wird, aber Login-/Reload-Init-Events (ACTIVE_TALENT_GROUP_CHANGED
@@ -145,15 +146,24 @@ loaderFrame:SetScript("OnEvent", function(self, event, arg1, arg2)
 			C_Timer.After(1.0, Database.SaveCharacterSnapshot)
 		end
 		if ns.Constants and ns.Constants.IsGamepadUIActive and ns.Constants.IsGamepadUIActive() then
+			if MinimapButton and MinimapButton.UpdateSecureAttributes then
+				MinimapButton.UpdateSecureAttributes()
+			end
 			if ClickBindingUI and ClickBindingUI.UpdateGamepadStandbyState then
 				ClickBindingUI.UpdateGamepadStandbyState()
 			end
 			return
 		end
+		if MinimapButton and MinimapButton.UpdateSecureAttributes then
+			MinimapButton.UpdateSecureAttributes()
+		end
 		if ClickBindingUI and ClickBindingUI.ScheduleSmartRuleCheck then
 			ClickBindingUI.ScheduleSmartRuleCheck(1.2, false)
 		end
 	elseif event == "INPUT_DEVICE_INTERFACE_TRANSITION" then
+		if MinimapButton and MinimapButton.UpdateSecureAttributes then
+			MinimapButton.UpdateSecureAttributes()
+		end
 		if ClickBindingUI and ClickBindingUI.UpdateGamepadStandbyState then
 			ClickBindingUI.UpdateGamepadStandbyState()
 		end
@@ -162,6 +172,10 @@ loaderFrame:SetScript("OnEvent", function(self, event, arg1, arg2)
 		end
 		if UnitHoverTooltip and UnitHoverTooltip.UpdateTrackingState then
 			UnitHoverTooltip.UpdateTrackingState()
+		end
+	elseif event == "ADDON_ACTION_BLOCKED" then
+		if arg1 == "BetterClickCasting" and ClickBindingUI and ClickBindingUI.CaptureBlockedActionDiagnostics then
+			ClickBindingUI.CaptureBlockedActionDiagnostics(arg1, arg2)
 		end
 	else
 		-- Zentrales Gamepad-Standby-Gate: Alle Laufzeit- und UI-Events (SPELLS_CHANGED,
@@ -221,6 +235,9 @@ loaderFrame:SetScript("OnEvent", function(self, event, arg1, arg2)
 				ClickBindingUI.UpdateSaveButtonCombatShield(true)
 			end
 		elseif event == "PLAYER_REGEN_ENABLED" then
+			if MinimapButton and MinimapButton.OnCombatEnded then
+				MinimapButton.OnCombatEnded()
+			end
 			if ClickBindingUI and ClickBindingUI.UpdateSaveButtonCombatShield then
 				ClickBindingUI.UpdateSaveButtonCombatShield(false)
 			end

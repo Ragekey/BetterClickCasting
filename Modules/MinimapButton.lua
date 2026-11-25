@@ -9,6 +9,9 @@ local MinimapButton = {}
 ns.MinimapButton = MinimapButton
 
 local buttonFrame = nil
+local pendingPositionUpdate = false
+local pendingVisibilityUpdate = false
+local pendingAttributeUpdate = false
 
 function MinimapButton.ToggleClickCastingWindow()
 	if Constants.IsGamepadUIActive and Constants.IsGamepadUIActive() then
@@ -38,6 +41,11 @@ local function UpdatePosition(overrideAngleDeg)
 	if not buttonFrame or not Minimap then
 		return
 	end
+	if InCombatLockdown and InCombatLockdown() then
+		pendingPositionUpdate = true
+		return
+	end
+	pendingPositionUpdate = false
 	local angleDeg = overrideAngleDeg or Database.Get("minimapAngle") or 225
 	local angleRad = math.rad(angleDeg)
 	local radius = (math.max(Minimap:GetWidth() or 140, 140) / 2) + 5
@@ -50,8 +58,23 @@ end
 
 MinimapButton.UpdatePosition = UpdatePosition
 
+local function StopDraggingButton(self)
+	self:SetScript("OnUpdate", nil)
+	self:UnlockHighlight()
+	self.isDragging = false
+	if self.pendingAngle ~= nil then
+		Database.Set("minimapAngle", self.pendingAngle)
+		self.pendingAngle = nil
+	end
+end
+
 local function OnDragUpdate(self)
 	if not Minimap then
+		return
+	end
+	if InCombatLockdown and InCombatLockdown() then
+		StopDraggingButton(self)
+		pendingPositionUpdate = true
 		return
 	end
 	local mx, my = Minimap:GetCenter()
@@ -79,7 +102,45 @@ function MinimapButton.UpdateVisibility()
 	if not buttonFrame then
 		return
 	end
+	if InCombatLockdown and InCombatLockdown() then
+		pendingVisibilityUpdate = true
+		return
+	end
+	pendingVisibilityUpdate = false
 	buttonFrame:SetShown(Database.Get("showMinimapButton") and true or false)
+end
+
+-- Setzt die SecureActionButton-Attribute für den taintfreien Linksklick (/clickcast).
+-- Im Gamepad-Standby werden die Makro-Attribute geleert, damit kein versehentliches Öffnen passiert.
+function MinimapButton.UpdateSecureAttributes()
+	if not buttonFrame then
+		return
+	end
+	if InCombatLockdown and InCombatLockdown() then
+		pendingAttributeUpdate = true
+		return
+	end
+	pendingAttributeUpdate = false
+	if Constants.IsGamepadUIActive and Constants.IsGamepadUIActive() then
+		buttonFrame:SetAttribute("type1", nil)
+		buttonFrame:SetAttribute("macrotext1", nil)
+	else
+		local slashCmd = (type(SLASH_CLICKCASTING1) == "string" and SLASH_CLICKCASTING1 ~= "") and SLASH_CLICKCASTING1 or "/clickcast"
+		buttonFrame:SetAttribute("type1", "macro")
+		buttonFrame:SetAttribute("macrotext1", "/stopmacro [combat]\n" .. slashCmd)
+	end
+end
+
+function MinimapButton.OnCombatEnded()
+	if pendingAttributeUpdate then
+		MinimapButton.UpdateSecureAttributes()
+	end
+	if pendingPositionUpdate then
+		UpdatePosition()
+	end
+	if pendingVisibilityUpdate then
+		MinimapButton.UpdateVisibility()
+	end
 end
 
 function MinimapButton.Init()
@@ -87,13 +148,15 @@ function MinimapButton.Init()
 		return
 	end
 
-	-- Nativer Minimap-Button nach Blizzard-/LibDBIcon-Standard mit gemipmapptem Atlas
-	local btn = CreateFrame("Button", "BetterClickCastingMinimapButton", Minimap)
+	-- Nativer Minimap-Button als SecureActionButtonTemplate:
+	-- Linksklick führt /clickcast über Blizzards sicheren Makro-Pfad aus (kein MultiBar-/UIPanel-Taint).
+	local btn = CreateFrame("Button", "BetterClickCastingMinimapButton", Minimap, "SecureActionButtonTemplate")
 	btn:SetSize(31, 31)
 	btn:SetFrameStrata("MEDIUM")
 	btn:SetFrameLevel(8)
 	btn:RegisterForClicks("LeftButtonUp", "RightButtonUp")
 	btn:RegisterForDrag("LeftButton")
+	btn:SetAttribute("useOnKeyDown", false)
 	btn:SetHighlightTexture("Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight", "ADD")
 
 	local bg = btn:CreateTexture(nil, "BACKGROUND")
@@ -123,6 +186,9 @@ function MinimapButton.Init()
 	end)
 
 	btn:SetScript("OnDragStart", function(self)
+		if InCombatLockdown and InCombatLockdown() then
+			return
+		end
 		self.isDragging = true
 		self:LockHighlight()
 		self.Icon:SetPoint("CENTER", 0, 1)
@@ -131,16 +197,12 @@ function MinimapButton.Init()
 	end)
 
 	btn:SetScript("OnDragStop", function(self)
-		self:SetScript("OnUpdate", nil)
-		self:UnlockHighlight()
-		self.isDragging = false
-		if self.pendingAngle ~= nil then
-			Database.Set("minimapAngle", self.pendingAngle)
-			self.pendingAngle = nil
-		end
+		StopDraggingButton(self)
 	end)
 
-	btn:SetScript("OnClick", function(self, mouseButton)
+	-- Wichtig: OnClick niemals überschreiben, damit SecureActionButton_OnClick (Linksklick -> /clickcast)
+	-- unangetastet bleibt. Rechtsklick, Kampf-Hinweis und Gamepad-Standby laufen über PostClick.
+	btn:SetScript("PostClick", function(self, mouseButton)
 		if self.isDragging then
 			return
 		end
@@ -152,8 +214,10 @@ function MinimapButton.Init()
 		end
 		if mouseButton == "RightButton" then
 			SettingsUI.OpenSettingsMenu(self)
-		else
-			MinimapButton.ToggleClickCastingWindow()
+		elseif InCombatLockdown and InCombatLockdown() then
+			if UIErrorsFrame and ERR_NOT_IN_COMBAT then
+				UIErrorsFrame:AddMessage(ERR_NOT_IN_COMBAT, 1.0, 0.1, 0.1, 1.0)
+			end
 		end
 	end)
 
@@ -176,6 +240,7 @@ function MinimapButton.Init()
 	end)
 
 	buttonFrame = btn
+	MinimapButton.UpdateSecureAttributes()
 	UpdatePosition()
 	MinimapButton.UpdateVisibility()
 end

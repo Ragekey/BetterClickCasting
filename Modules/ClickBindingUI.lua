@@ -13,10 +13,13 @@ local ClickBindingUI = {}
 ns.ClickBindingUI = ClickBindingUI
 
 local isHooked = false
+local isSaveButtonHooked = false
 local isRebuildingGroups = false
 local heroCardFrame = nil
 local presetDropdownButton = nil
 local gamepadStandbyBadge = nil
+local saveButtonGlowFrame = nil
+local combatLockActive = false
 local dismissedSignature = nil
 local smartCheckPending = false
 local lastKnownProviderCustomBindings = {}
@@ -458,17 +461,24 @@ end
 --------------------------------------------------------------------------------
 
 local function SetSaveButtonGlowShown(shown)
-	if not ClickBindingFrame or not ClickBindingFrame.SaveButton then
+	if Constants.IsGamepadUIActive()
+		or not shown
+		or not ClickBindingFrame
+		or not ClickBindingFrame:IsShown()
+		or not ClickBindingFrame.SaveButton
+	then
+		if saveButtonGlowFrame then
+			saveButtonGlowFrame:Hide()
+		end
 		return
 	end
 	local saveBtn = ClickBindingFrame.SaveButton
-	if shown and not saveBtn.BCCGlowFrame then
-		-- Exaktes 3-Slice YellowGlow-Pattern aus Blizzard_SharedTalentFrameTemplates.xml (CommitButton.YellowGlow)
-		local glowFrame = CreateFrame("Frame", nil, saveBtn)
+	if not saveButtonGlowFrame then
+		-- Exaktes 3-Slice YellowGlow-Pattern aus Blizzard_SharedTalentFrameTemplates.xml (CommitButton.YellowGlow),
+		-- aber strikt auf UIParent geparentet (keine Felder oder Kinder auf Blizzards SaveButton).
+		local glowFrame = CreateFrame("Frame", nil, UIParent)
 		glowFrame:SetSize(1, 1)
-		glowFrame:SetPoint("LEFT", saveBtn, "LEFT", -12, 0)
-		glowFrame:SetPoint("RIGHT", saveBtn, "RIGHT", 12, 0)
-		glowFrame:SetFrameLevel(saveBtn:GetFrameLevel() + 2)
+		glowFrame:EnableMouse(false)
 
 		local left = glowFrame:CreateTexture(nil, "ARTWORK")
 		left:SetAtlas("newplayertutorial-yellowGlow-redbutton-left", true)
@@ -490,18 +500,23 @@ local function SetSaveButtonGlowShown(shown)
 		glowFrame.Middle = middle
 
 		local hint = glowFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-		hint:SetPoint("BOTTOMRIGHT", saveBtn, "TOPRIGHT", 0, 5)
+		hint:SetPoint("BOTTOMRIGHT", glowFrame, "TOPRIGHT", -12, 14)
 		hint:SetText(Colors.HEADER_SUB .. L["SAVE_BUTTON_GLOW_HINT"] .. Colors.RESET)
 		glowFrame.Hint = hint
 
-		saveBtn.BCCGlowFrame = glowFrame
+		saveButtonGlowFrame = glowFrame
 	end
-	if saveBtn.BCCGlowFrame then
-		if saveBtn.BCCGlowFrame.Hint then
-			saveBtn.BCCGlowFrame.Hint:SetText(Colors.HEADER_SUB .. L["SAVE_BUTTON_GLOW_HINT"] .. Colors.RESET)
-		end
-		saveBtn.BCCGlowFrame:SetShown(shown and true or false)
+	saveButtonGlowFrame:SetFrameStrata(saveBtn:GetFrameStrata() or "MEDIUM")
+	saveButtonGlowFrame:SetFrameLevel((saveBtn:GetFrameLevel() or 1) + 2)
+	saveButtonGlowFrame:ClearAllPoints()
+	saveButtonGlowFrame:SetPoint("LEFT", saveBtn, "LEFT", -12, 0)
+	saveButtonGlowFrame:SetPoint("RIGHT", saveBtn, "RIGHT", 12, 0)
+	if saveButtonGlowFrame.Hint then
+		saveButtonGlowFrame.Hint:ClearAllPoints()
+		saveButtonGlowFrame.Hint:SetPoint("BOTTOMRIGHT", saveBtn, "TOPRIGHT", 0, 5)
+		saveButtonGlowFrame.Hint:SetText(Colors.HEADER_SUB .. L["SAVE_BUTTON_GLOW_HINT"] .. Colors.RESET)
 	end
+	saveButtonGlowFrame:Show()
 end
 
 -- Schützt Blizzards SaveButton während InCombatLockdown() durch ein reines, auf UIParent
@@ -510,7 +525,13 @@ end
 local saveCombatShield = nil
 
 function ClickBindingUI.UpdateSaveButtonCombatShield(forceCombatState)
-	local inCombat = (forceCombatState ~= nil) and forceCombatState or ((InCombatLockdown and InCombatLockdown()) and true or false)
+	if forceCombatState ~= nil then
+		combatLockActive = forceCombatState and true or false
+	end
+	local inCombat = combatLockActive or ((InCombatLockdown and InCombatLockdown()) and true or false)
+	if forceCombatState == false then
+		inCombat = false
+	end
 	if Constants.IsGamepadUIActive()
 		or not inCombat
 		or not ClickBindingFrame
@@ -529,7 +550,7 @@ function ClickBindingUI.UpdateSaveButtonCombatShield(forceCombatState)
 		shield:SetFrameStrata("DIALOG")
 		shield:SetFrameLevel(500)
 		shield:EnableMouse(true)
-		shield:RegisterForClicks("AnyUp")
+		shield:RegisterForClicks("AnyDown", "AnyUp")
 
 		local dim = shield:CreateTexture(nil, "ARTWORK")
 		dim:SetAllPoints()
@@ -540,7 +561,10 @@ function ClickBindingUI.UpdateSaveButtonCombatShield(forceCombatState)
 		hint:SetJustifyH("RIGHT")
 		shield.Hint = hint
 
-		shield:SetScript("OnClick", function()
+		shield:SetScript("OnClick", function(_, _, down)
+			if down then
+				return
+			end
 			PlaySound(SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_OFF)
 			if DEFAULT_CHAT_FRAME then
 				DEFAULT_CHAT_FRAME:AddMessage(L["CHAT_COMBAT_ERR"])
@@ -555,8 +579,10 @@ function ClickBindingUI.UpdateSaveButtonCombatShield(forceCombatState)
 		shield:SetScript("OnLeave", function()
 			GameTooltip:Hide()
 		end)
+		-- Wichtig: Bei PLAYER_REGEN_DISABLED feuert das Event oft kurz vor InCombatLockdown() == true.
+		-- Solange combatLockActive gesetzt ist, darf OnUpdate den Schild niemals vorzeitig ausblenden.
 		shield:SetScript("OnUpdate", function(self)
-			if not ClickBindingFrame or not ClickBindingFrame:IsShown() or not (InCombatLockdown and InCombatLockdown()) then
+			if not ClickBindingFrame or not ClickBindingFrame:IsShown() or (not combatLockActive and not (InCombatLockdown and InCombatLockdown())) then
 				self:Hide()
 			end
 		end)
@@ -569,6 +595,78 @@ function ClickBindingUI.UpdateSaveButtonCombatShield(forceCombatState)
 		saveCombatShield.Hint:SetText(L["SAVE_COMBAT_LOCKED_HINT"])
 	end
 	saveCombatShield:Show()
+end
+
+-- Rein lesender Mitschnitt bei ADDON_ACTION_BLOCKED für BetterClickCasting:
+-- Erfasst den exakten Laufzeit-Zustand (Combat, alle 6 C_RestrictedActions-Flags, Taint-Status von
+-- dataProvider/SaveButton, SpellBook-Tab und aktives Preset) in BetterClickCastingDB.lastDebugReport.
+function ClickBindingUI.CaptureBlockedActionDiagnostics(blockedAddon, blockedFunc, silent)
+	if blockedAddon ~= Constants.ADDON_NAME and blockedAddon ~= "BetterClickCasting" then
+		return nil
+	end
+	local inCombat = (InCombatLockdown and InCombatLockdown()) and 1 or 0
+	local uac = (UnitAffectingCombat and UnitAffectingCombat("player")) and 1 or 0
+	local restrParts = {}
+	for rIdx = 0, 5 do
+		local active = 0
+		if C_RestrictedActions and C_RestrictedActions.IsAddOnRestrictionActive then
+			local ok, val = pcall(C_RestrictedActions.IsAddOnRestrictionActive, rIdx)
+			if ok and val then
+				active = 1
+			end
+		end
+		table.insert(restrParts, tostring(active))
+	end
+	local cbShown = (ClickBindingFrame and ClickBindingFrame:IsShown()) and 1 or 0
+	local pending = (ClickBindingFrame and ClickBindingFrame.pendingChanges) and 1 or 0
+	local dpSec, dpTaint = "nil", "nil"
+	local sbSec, sbTaint = "nil", "nil"
+	local dpCount = 0
+	if ClickBindingFrame then
+		if issecurevariable then
+			local s1, t1 = issecurevariable(ClickBindingFrame, "dataProvider")
+			dpSec, dpTaint = s1 and "1" or "0", tostring(t1 or "secure")
+			local s2, t2 = issecurevariable(ClickBindingFrame, "SaveButton")
+			sbSec, sbTaint = s2 and "1" or "0", tostring(t2 or "secure")
+		end
+		if ClickBindingFrame.dataProvider and ClickBindingFrame.dataProvider.GetSize then
+			dpCount = ClickBindingFrame.dataProvider:GetSize() or 0
+		end
+	end
+	local psShown = (PlayerSpellsFrame and PlayerSpellsFrame:IsShown()) and 1 or 0
+	local psTab = (PlayerSpellsFrame and PlayerSpellsFrame.GetTab and tostring(PlayerSpellsFrame:GetTab() or "nil")) or "nil"
+	local gp = Constants.IsGamepadUIActive() and 1 or 0
+	local preset = ClickBindingUI.GetEffectiveActivePresetName() or "none"
+
+	local line = string.format(
+		"BCCBLOCK|v%s|fn=%s|c=%d,uac=%d|r=%s|cb=%d,pend=%d,dp=%s/%s,sb=%s/%s,n=%d|ps=%d,tab=%s|gp=%d|preset=%s",
+		tostring(Constants.VERSION or "?"),
+		tostring(blockedFunc or "?"),
+		inCombat,
+		uac,
+		table.concat(restrParts, ","),
+		cbShown,
+		pending,
+		dpSec,
+		dpTaint,
+		sbSec,
+		sbTaint,
+		dpCount,
+		psShown,
+		psTab,
+		gp,
+		tostring(preset)
+	)
+
+	if not silent then
+		if BetterClickCastingDB then
+			BetterClickCastingDB.lastDebugReport = line
+		end
+		if DEFAULT_CHAT_FRAME then
+			DEFAULT_CHAT_FRAME:AddMessage("|cffff5555Better Click Casting:|r " .. line)
+		end
+	end
+	return line
 end
 
 --------------------------------------------------------------------------------
@@ -4881,6 +4979,7 @@ function ClickBindingUI.UpdateGamepadStandbyState()
 			ClickBindingUI.ApplyScrollBoxLayout()
 			ClickBindingUI.RebuildGroups()
 			ClickBindingUI.RefreshVisibleLines()
+			ClickBindingUI.UpdateSaveButtonCombatShield()
 		end
 	end
 end
@@ -5167,7 +5266,7 @@ local function RunDeepStressSelfTest(findings, infoNotes)
 		-- und die vollständige Wiederherstellung des Ausgangszustands.
 		if ClickBindingFrame and ClickBindingFrame.dataProvider then
 			local origPending = ClickBindingFrame.pendingChanges
-			local origGlowShown = (ClickBindingFrame.SaveButton and ClickBindingFrame.SaveButton.BCCGlowFrame and ClickBindingFrame.SaveButton.BCCGlowFrame:IsShown()) or false
+			local origGlowShown = (saveButtonGlowFrame and saveButtonGlowFrame:IsShown()) or false
 			local origActivePreset = Database.GetActivePresetName and Database.GetActivePresetName()
 			local origProviderElements = {}
 			for _, el in ClickBindingFrame.dataProvider:Enumerate() do
@@ -5374,14 +5473,52 @@ local function RunDeepStressSelfTest(findings, infoNotes)
 			SettingsUI.SetOverlaysUnlocked(wasUnlocked, true)
 		end
 
-		-- Combat-Save-Shield-Lebenszyklus testen (taintfreies UIParent-Overlay über SaveButton)
+		-- Combat-Save-Shield-Lebenszyklus & SaveButton-Hygiene testen (taintfreies UIParent-Overlay)
+		if ClickBindingFrame and ClickBindingFrame.SaveButton then
+			if ClickBindingFrame.SaveButton.BCCGlowFrame ~= nil or ClickBindingFrame.SaveButton._bccSnapshotHooked ~= nil then
+				table.insert(findings, "DeepTest SaveButton: unexpected custom fields written directly onto ClickBindingFrame.SaveButton")
+			end
+			if issecurevariable then
+				local sbSec, sbTaint = issecurevariable(ClickBindingFrame, "SaveButton")
+				if not sbSec then
+					table.insert(findings, string.format("DeepTest SaveButton: ClickBindingFrame.SaveButton tainted by %s", tostring(sbTaint)))
+				end
+			end
+		end
 		ClickBindingUI.UpdateSaveButtonCombatShield(true)
 		if not (saveCombatShield and saveCombatShield:IsShown()) then
 			table.insert(findings, "DeepTest SaveCombatShield: shield failed to show when forceCombatState=true")
+		else
+			-- Race-Condition-Prüfung: OnUpdate darf den Schild bei aktivem combatLockActive vor InCombatLockdown() nicht verstecken
+			local shieldOnUpdate = saveCombatShield:GetScript("OnUpdate")
+			if type(shieldOnUpdate) == "function" then
+				shieldOnUpdate(saveCombatShield, 0.016)
+			end
+			if not saveCombatShield:IsShown() then
+				table.insert(findings, "DeepTest SaveCombatShield: OnUpdate prematurely hid shield while combatLockActive=true")
+			end
 		end
 		ClickBindingUI.UpdateSaveButtonCombatShield(false)
 		if saveCombatShield and saveCombatShield:IsShown() then
 			table.insert(findings, "DeepTest SaveCombatShield: shield failed to hide when forceCombatState=false")
+		end
+		local blockedDiag = ClickBindingUI.CaptureBlockedActionDiagnostics("BetterClickCasting", "SetProfileByInfo()", true)
+		if type(blockedDiag) ~= "string" or not string.find(blockedDiag, "^BCCBLOCK|") then
+			table.insert(findings, "DeepTest BlockedDiag: CaptureBlockedActionDiagnostics returned invalid format")
+		end
+		-- SecureActionButton-Prüfung für den Minimap-Button (taintfreies /clickcast-Öffnen)
+		local mmBtn = _G.BetterClickCastingMinimapButton
+		if mmBtn and mmBtn.GetAttribute then
+			if mmBtn:GetAttribute("useOnKeyDown") ~= false then
+				table.insert(findings, "DeepTest MinimapButton: expected useOnKeyDown=false on SecureActionButton")
+			end
+			if not Constants.IsGamepadUIActive() then
+				local mmType = mmBtn:GetAttribute("type1")
+				local mmMacro = mmBtn:GetAttribute("macrotext1")
+				if mmType ~= "macro" or type(mmMacro) ~= "string" or not string.find(mmMacro, "/stopmacro %[combat%]") then
+					table.insert(findings, string.format("DeepTest MinimapButton: unexpected secure macro attributes (type1=%s)", tostring(mmType)))
+				end
+			end
 		end
 
 		if not wasMatrixShown then
@@ -5405,6 +5542,10 @@ function ClickBindingUI.RunTaintDiagnostics(subArg)
 		return
 	end
 	if subArg == "taintlog" and SetCVar and GetCVar then
+		if InCombatLockdown and InCombatLockdown() then
+			DEFAULT_CHAT_FRAME:AddMessage(L["CHAT_COMBAT_ERR"])
+			return
+		end
 		local current = tostring(GetCVar("taintLog") or "0")
 		local nextVal = (current == "0") and "1" or "0"
 		SetCVar("taintLog", nextVal)
@@ -6074,7 +6215,7 @@ function ClickBindingUI.SetupHooks()
 		end)
 	end
 
-	if ClickBindingFrame.SaveButton and not ClickBindingFrame.SaveButton._bccSnapshotHooked then
+	if ClickBindingFrame.SaveButton and not isSaveButtonHooked then
 		ClickBindingFrame.SaveButton:HookScript("OnClick", function()
 			-- Geladenes Preset wurde per Hardware-Klick auf "Speichern" bestätigt (auch wenn HideUIPanel/OnHide zuvor lief)
 			CommitPendingPresetOnSave()
@@ -6082,7 +6223,7 @@ function ClickBindingUI.SetupHooks()
 				C_Timer.After(0.1, Database.SaveCharacterSnapshot)
 			end
 		end)
-		ClickBindingFrame.SaveButton._bccSnapshotHooked = true
+		isSaveButtonHooked = true
 	end
 
 	if ClickBindingFrame.CleanDataProvider then
@@ -6120,6 +6261,7 @@ function ClickBindingUI.SetupHooks()
 			ClickBindingUI.AutoSelectPrimarySpellBookTab()
 			ClickBindingUI.RebuildGroups()
 			ClickBindingUI.RefreshVisibleLines()
+			ClickBindingUI.UpdateSaveButtonCombatShield()
 		end
 	end
 

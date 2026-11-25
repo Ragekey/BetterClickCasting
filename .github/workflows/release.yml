@@ -2,9 +2,16 @@ name: Package and Release AddOn
 
 on:
   push:
+    branches:
+      - main
     tags:
       - "v*"
   workflow_dispatch:
+    inputs:
+      beta_suffix:
+        description: "Optionales Beta-Suffix fuer Tag aus aktuellem Branch (z. B. beta.1 -> erzeugt vX.Y.Z-beta.1)"
+        required: false
+        type: string
 
 jobs:
   release:
@@ -19,10 +26,66 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Resolve Release Tag
+        id: resolve
+        env:
+          INPUT_BETA_SUFFIX: ${{ inputs.beta_suffix }}
+        run: |
+          set -euo pipefail
+
+          # Fall 1: Direkter Tag-Push (z. B. v0.9.4 oder v1.0.0-beta.1 auf dev/main)
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            TAG_NAME="${GITHUB_REF#refs/tags/}"
+            echo "Detected tag push: ${TAG_NAME}"
+            echo "should_release=true" >> "$GITHUB_OUTPUT"
+            echo "tag_name=${TAG_NAME}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          TOC_VERSION=$(grep -E '^##[[:space:]]*Version:' BetterClickCasting.toc | head -n1 | sed -E 's/^##[[:space:]]*Version:[[:space:]]*//; s/[[:space:]\r]*$//')
+          if [[ -z "${TOC_VERSION}" ]]; then
+            echo "ERROR: Could not read ## Version from BetterClickCasting.toc" >&2
+            exit 1
+          fi
+
+          # Fall 2: Manueller Workflow-Start mit Beta-Suffix (z. B. auf dev -> v0.9.4-beta.1)
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" && -n "${INPUT_BETA_SUFFIX}" ]]; then
+            CLEAN_SUFFIX="${INPUT_BETA_SUFFIX#-}"
+            TAG_NAME="v${TOC_VERSION}-${CLEAN_SUFFIX}"
+          else
+            # Fall 3: Merge / Push auf main -> automatisches Stable-Release vX.Y.Z
+            TAG_NAME="v${TOC_VERSION}"
+          fi
+
+          if git rev-parse -q --verify "refs/tags/${TAG_NAME}" >/dev/null; then
+            if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" && -z "${INPUT_BETA_SUFFIX}" ]]; then
+              echo "Manual re-run for existing tag ${TAG_NAME}."
+              echo "should_release=true" >> "$GITHUB_OUTPUT"
+              echo "tag_name=${TAG_NAME}" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "Tag ${TAG_NAME} already exists; skipping auto-release (bump ## Version in .toc for a new release)."
+            echo "should_release=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "${TAG_NAME}" -m "Release ${TAG_NAME}"
+          git push origin "refs/tags/${TAG_NAME}"
+
+          echo "Created and pushed new release tag: ${TAG_NAME}"
+          echo "should_release=true" >> "$GITHUB_OUTPUT"
+          echo "tag_name=${TAG_NAME}" >> "$GITHUB_OUTPUT"
+
       - name: Package & Upload AddOn (CurseForge / GitHub Releases / Wago)
+        if: steps.resolve.outputs.should_release == 'true'
         uses: BigWigsMods/packager@v2
         env:
           GITHUB_OAUTH: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REF: refs/tags/${{ steps.resolve.outputs.tag_name }}
+          GITHUB_REF_NAME: ${{ steps.resolve.outputs.tag_name }}
+          GITHUB_REF_TYPE: tag
           # Optional in den GitHub Repository Secrets hinterlegen, sobald das CurseForge/Wago-Projekt angelegt ist:
           CF_API_KEY: ${{ secrets.CF_API_KEY }}
           WAGO_API_TOKEN: ${{ secrets.WAGO_API_TOKEN }}
