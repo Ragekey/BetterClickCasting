@@ -351,6 +351,12 @@ local function RunDeepStressSelfTest(findings, infoNotes)
 				SettingsUI.SetSearchFilter("__no_match_xyz__")
 				SettingsUI.SetSearchFilter("")
 			end
+			if SettingsUI.GetSelectedSourceCharProfile then
+				local srcProf, curCharKey = SettingsUI.GetSelectedSourceCharProfile()
+				if srcProf and srcProf.key == curCharKey then
+					table.insert(findings, "DeepTest SourceCharPreselect: unexpectedly preselected active character itself")
+				end
+			end
 		end
 		if SettingsUI and SettingsUI.ShowReorderWindow and SettingsUI.HideReorderWindow then
 			SettingsUI.ShowReorderWindow()

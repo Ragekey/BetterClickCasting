@@ -481,7 +481,7 @@ function SettingsWidgets.CreateSliderRow(card, spec)
 end
 
 --------------------------------------------------------------------------------
--- Live-Vorschau 1: Echte Klickbelegungs-Musterzeile (Seite 1)
+-- Live-Vorschau 1: Originalgetreue ClickBindingFrame-Zeile (2-zeilig + Gruppen-Header)
 --------------------------------------------------------------------------------
 
 function SettingsWidgets.CreateLineLivePreview(card)
@@ -505,89 +505,197 @@ function SettingsWidgets.CreateLineLivePreview(card)
 	)
 	toggleBtn:SetPoint("TOPRIGHT", card, "TOPRIGHT", -12, -7)
 
-	local y = card:Advance(48, 4)
+	local y = card:Advance(74, 4)
 	local holder = CreateFrame("Frame", nil, card)
-	holder:SetSize(card.innerWidth, 48)
+	holder:SetSize(card.innerWidth, 74)
 	holder:SetPoint("TOPLEFT", card, "TOPLEFT", 14, y)
 
-	local mockRow = CreateFrame("Frame", nil, holder, "BackdropTemplate")
-	mockRow:SetPoint("LEFT", holder, "LEFT", 0, 0)
-	mockRow:SetPoint("RIGHT", holder, "RIGHT", 0, 0)
-	SettingsWidgets.ApplyBoxBackdrop(mockRow, { 0.05, 0.06, 0.09, 0.96 }, { 0.34, 0.40, 0.52, 0.90 }, false)
+	-- Echter Untergruppen-Header wie im ClickBindingFrame
+	local groupHdr = holder:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+	groupHdr:SetPoint("TOPLEFT", holder, "TOPLEFT", 4, -2)
+	groupHdr:SetJustifyH("LEFT")
+
+	-- Originales 2-zeiliges ClickBindingLineTemplate-Layout (450px breit)
+	local mockRow = CreateFrame("Frame", nil, holder)
+	mockRow:SetWidth(math.min(450, card.innerWidth - 4))
+	mockRow:SetPoint("TOP", holder, "TOP", 0, -22)
+
+	local rowBg = mockRow:CreateTexture(nil, "BACKGROUND")
+	rowBg:SetAtlas("ClickCastList-ButtonBackground")
+	rowBg:SetPoint("TOPLEFT", mockRow, "TOPLEFT", 0, 0)
+	rowBg:SetPoint("BOTTOMRIGHT", mockRow, "BOTTOMRIGHT", 0, 0)
 
 	local icon = mockRow:CreateTexture(nil, "ARTWORK")
-	icon:SetPoint("LEFT", mockRow, "LEFT", 8, 0)
+	icon:SetPoint("LEFT", mockRow, "LEFT", 0, 0)
 	icon:SetTexture(135907)
-	icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
 
-	local spellText = mockRow:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-	spellText:SetPoint("LEFT", icon, "RIGHT", 8, 0)
-	spellText:SetJustifyH("LEFT")
+	local nameFS = mockRow:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+	nameFS:SetJustifyH("LEFT")
+	nameFS:SetWordWrap(false)
 
-	local bindText = mockRow:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-	bindText:SetPoint("RIGHT", mockRow, "RIGHT", -10, 0)
-	bindText:SetText("|cffffd100SHIFT-LMB|r")
+	local bindFS = mockRow:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+	bindFS:SetJustifyH("LEFT")
+	bindFS:SetWordWrap(false)
 
-	local eyeTex = mockRow:CreateTexture(nil, "ARTWORK")
-	eyeTex:SetSize(15, 15)
-	eyeTex:SetPoint("RIGHT", bindText, "LEFT", -8, 0)
-	eyeTex:SetAtlas("Raid-Icon-SummonPending")
-	eyeTex:SetAlpha(0.85)
+	-- Obere Zeile rechts: Freistehendes Augen-Icon ("friends-icon-eye") + Manakosten links daneben
+	local eyeHolder = CreateFrame("Frame", nil, mockRow)
+	eyeHolder:SetSize(22, 18)
+	local eyeIcon = eyeHolder:CreateTexture(nil, "ARTWORK")
+	eyeIcon:SetAtlas("friends-icon-eye")
+	eyeIcon:SetPoint("CENTER", eyeHolder, "CENTER", 0, 0)
+	eyeIcon:SetVertexColor(0.55, 0.90, 1.0)
 
-	local rankPill = CreateFrame("Frame", nil, mockRow, "BackdropTemplate")
-	rankPill:SetSize(64, 18)
-	rankPill:SetPoint("RIGHT", eyeTex, "LEFT", -6, 0)
-	SettingsWidgets.ApplyBoxBackdrop(rankPill, { 0.14, 0.17, 0.24, 0.95 }, { 0.50, 0.58, 0.72, 0.90 }, false)
-	local rankPillText = rankPill:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-	rankPillText:SetPoint("CENTER", 0, 0)
+	local manaFS = mockRow:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+	manaFS:SetJustifyH("RIGHT")
+	manaFS:SetWordWrap(false)
 
-	local manaText = mockRow:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-	manaText:SetText("|cff66bbff" .. L["UX_PREVIEW_MANA"] .. "|r")
+	-- Untere Zeile rechts: Gestylter DeleteButton ("groupfinder-icon-redx") + BCCRankButton links daneben
+	local delBtn = CreateFrame("Frame", nil, mockRow)
+	local delBg = delBtn:CreateTexture(nil, "BACKGROUND")
+	delBg:SetAtlas("common-dropdown-c-button")
+	delBg:SetPoint("TOPLEFT", -2, 2)
+	delBg:SetPoint("BOTTOMRIGHT", 2, -2)
+	local delIcon = delBtn:CreateTexture(nil, "ARTWORK")
+	delIcon:SetAtlas("groupfinder-icon-redx", true)
+	delIcon:SetPoint("CENTER", 0, 0)
+	delIcon:SetScale(0.8)
+
+	local rankBtn = CreateFrame("Frame", nil, mockRow)
+	local rankBg = rankBtn:CreateTexture(nil, "BACKGROUND")
+	rankBg:SetAtlas("common-dropdown-c-button")
+	rankBg:SetPoint("TOPLEFT", -2, 2)
+	rankBg:SetPoint("BOTTOMRIGHT", 2, -2)
+	local rankArrow = rankBtn:CreateTexture(nil, "OVERLAY")
+	rankArrow:SetAtlas("common-dropdown-a-button")
+	rankArrow:SetSize(10, 10)
+	rankArrow:SetPoint("RIGHT", rankBtn, "RIGHT", -5, -1)
+	local rankText = rankBtn:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+	rankText:SetPoint("LEFT", rankBtn, "LEFT", 6, 0)
+	rankText:SetPoint("RIGHT", rankArrow, "LEFT", -2, 0)
+	rankText:SetJustifyH("CENTER")
+	rankText:SetWordWrap(false)
 
 	holder.RefreshValue = function()
 		toggleBtn:RefreshValue()
-		local compact = Database.Get("compactListMode")
+		local compact = Database.Get("compactListMode") and true or false
 		local showRank = Database.Get("showRankInName")
 		local hlDown = Database.Get("highlightDownranks")
 		local showSwitcher = Database.Get("showRankSwitcher")
 		local showMana = Database.Get("showLineManaCost")
 		local smartRules = Database.Get("enableSmartRankRules")
+		local groupMode = Database.Get("groupingMode") or "modifier"
+		local hoverOn = (Database.Get("unitHoverMode") or "off") ~= "off"
 
-		mockRow:SetHeight(compact and 30 or 44)
-		icon:SetSize(compact and 22 or 30, compact and 22 or 30)
+		-- Gruppen-Header oberhalb der Zeile live passend zu groupingMode anzeigen
+		if groupMode == "none" then
+			groupHdr:Hide()
+			mockRow:ClearAllPoints()
+			mockRow:SetPoint("CENTER", holder, "CENTER", 0, 0)
+		else
+			local gTitle = ""
+			if groupMode == "modifier" then
+				gTitle = string.format(L["GROUP_HDR_MOD_FORMAT"] or "%s", "Shift")
+			elseif groupMode == "button" then
+				local btnDisp = (Constants.GetButtonDisplayName and Constants.GetButtonDisplayName("LeftButton")) or "Left Button"
+				gTitle = string.format("%s (LMB)", btnDisp)
+			else
+				gTitle = L["GROUP_HDR_SPELLS"] or "Spells"
+			end
+			groupHdr:SetText(string.format("%s%s%s  %s(1)%s", Colors.HEADER_SUB, gTitle, Colors.RESET, Colors.MUTED, Colors.RESET))
+			groupHdr:Show()
+			mockRow:ClearAllPoints()
+			mockRow:SetPoint("TOP", holder, "TOP", 0, -20)
+		end
+
+		-- Exakte Metriken aus ApplyLineCompactMetrics (ClickBindingUI.lua:1376-1383)
+		local lineH = compact and 32 or 46
+		local iconSz = compact and 26 or 35
+		local topRowY = compact and 6 or 9
+		local botRowY = compact and -6 or -8
+		local btnH = compact and 15 or 18
+		local delW = compact and 20 or 22
+		local rankW = compact and 88 or 92
+
+		mockRow:SetHeight(lineH)
+		icon:SetSize(iconSz, iconSz)
+		nameFS:SetFontObject(compact and "GameFontNormalSmall" or "GameFontNormal")
+
+		-- Obere Zeile: Name links, Auge + Mana rechts
+		eyeHolder:SetSize(delW, btnH)
+		eyeIcon:SetSize(compact and 12 or 14, compact and 12 or 14)
+		eyeHolder:ClearAllPoints()
+		eyeHolder:SetPoint("RIGHT", mockRow, "RIGHT", -6, topRowY)
+		eyeHolder:SetShown(hoverOn)
+
+		manaFS:SetText("|cff80c8ff" .. L["UX_PREVIEW_MANA"] .. "|r")
+		manaFS:ClearAllPoints()
+		if hoverOn then
+			manaFS:SetPoint("RIGHT", eyeHolder, "LEFT", -4, 0)
+		else
+			manaFS:SetPoint("RIGHT", mockRow, "RIGHT", -8, topRowY)
+		end
+		manaFS:SetShown(showMana and true or false)
 
 		local baseName = L["UX_PREVIEW_SPELL_NAME"]
-		local rLabel = isDownrankPreview and L["UX_PREVIEW_RANK_DOWN"] or L["UX_PREVIEW_RANK_MAX"]
-		local namePart = baseName
+		local subtext = isDownrankPreview and L["UX_PREVIEW_RANK_DOWN"] or L["UX_PREVIEW_RANK_MAX"]
+		local formattedName = baseName
 		if showRank then
-			local rColor = (isDownrankPreview and hlDown) and Colors.RANK_DOWN or (not isDownrankPreview and Colors.RANK_MAX or "|cffcccccc")
-			namePart = string.format("%s %s(%s)%s", baseName, rColor, rLabel, Colors.RESET)
-		elseif isDownrankPreview and hlDown then
-			namePart = Colors.RANK_DOWN .. baseName .. Colors.RESET
-		end
-		spellText:SetText(namePart)
-
-		manaText:SetText("|cff66bbff" .. L["UX_PREVIEW_MANA"] .. "|r")
-		manaText:SetShown(showMana and true or false)
-
-		if showSwitcher then
-			rankPill:Show()
-			local shortR = isDownrankPreview and "R2" or "R4"
-			if smartRules then
-				local tag = isDownrankPreview and (Colors.RANK_DOWN .. (L["TAG_RULE_FIX_SHORT"] or "FIX") .. Colors.RESET)
-					or (Colors.TAG_MAX .. (L["TAG_MAX_SHORT"] or "MAX") .. Colors.RESET)
-				rankPillText:SetText(shortR .. " " .. tag)
-				rankPill:SetWidth(68)
+			if hlDown then
+				if not isDownrankPreview then
+					formattedName = string.format("%s %s(%s)%s %s%s%s", baseName, Colors.RANK_MAX, subtext, Colors.RESET, Colors.TAG_MAX, L["TAG_MAX"], Colors.RESET)
+				else
+					local maxHint = L["MAX_RANK_HINT_FORMAT"] and string.format(L["MAX_RANK_HINT_FORMAT"], 4) or ""
+					formattedName = string.format("%s %s(%s%s)%s", baseName, Colors.RANK_DOWN, subtext, maxHint, Colors.RESET)
+				end
 			else
-				rankPillText:SetText(shortR .. " v")
-				rankPill:SetWidth(44)
+				formattedName = string.format("%s %s(%s)%s", baseName, Colors.RANK_MAX, subtext, Colors.RESET)
 			end
-			manaText:ClearAllPoints()
-			manaText:SetPoint("RIGHT", rankPill, "LEFT", -8, 0)
+		end
+		nameFS:SetText(formattedName)
+		nameFS:ClearAllPoints()
+		nameFS:SetPoint("LEFT", icon, "RIGHT", 5, topRowY)
+		if showMana then
+			nameFS:SetPoint("RIGHT", manaFS, "LEFT", -6, 0)
+		elseif hoverOn then
+			nameFS:SetPoint("RIGHT", eyeHolder, "LEFT", -6, 0)
 		else
-			rankPill:Hide()
-			manaText:ClearAllPoints()
-			manaText:SetPoint("RIGHT", eyeTex, "LEFT", -8, 0)
+			nameFS:SetPoint("RIGHT", mockRow, "RIGHT", -8, topRowY)
+		end
+
+		-- Untere Zeile: BindingText links, RankSwitcher + DeleteButton rechts
+		local fullBind = (Constants.GetFullBindingString and Constants.GetFullBindingString({ button = "LeftButton", modifiers = 1 })) or "SHIFT - Left Button"
+		bindFS:SetText(fullBind)
+		bindFS:ClearAllPoints()
+		bindFS:SetPoint("LEFT", icon, "RIGHT", 5, botRowY)
+
+		delBtn:SetSize(delW, btnH)
+		delBtn:ClearAllPoints()
+		delBtn:SetPoint("RIGHT", mockRow, "RIGHT", -6, botRowY)
+
+		rankBtn:SetSize(rankW, btnH)
+		rankBtn:ClearAllPoints()
+		rankBtn:SetPoint("RIGHT", delBtn, "LEFT", -4, 0)
+		if showSwitcher then
+			local shortRank = isDownrankPreview and "R2" or "R4"
+			local shortTag = isDownrankPreview and (L["TAG_RULE_FIX_SHORT"] or "FIX") or (L["TAG_MAX_SHORT"] or "MAX")
+			if smartRules then
+				if hlDown and not isDownrankPreview then
+					rankText:SetText(string.format("%s%s (%s)%s", Colors.TAG_MAX, shortRank, shortTag, Colors.RESET))
+					rankBg:SetVertexColor(0.82, 1.0, 0.85, 1.0)
+				elseif hlDown and isDownrankPreview then
+					rankText:SetText(string.format("%s%s (%s)%s", Colors.RANK_DOWN, shortRank, shortTag, Colors.RESET))
+					rankBg:SetVertexColor(1.0, 0.88, 0.72, 1.0)
+				else
+					rankText:SetText(string.format("%s%s (%s)%s", Colors.RANK_MAX, shortRank, shortTag, Colors.RESET))
+					rankBg:SetVertexColor(1.0, 1.0, 1.0, 1.0)
+				end
+			else
+				rankText:SetText(string.format("%s%s%s", isDownrankPreview and Colors.RANK_DOWN or Colors.RANK_MAX, shortRank, Colors.RESET))
+				rankBg:SetVertexColor(1.0, 1.0, 1.0, 1.0)
+			end
+			rankBtn:Show()
+		else
+			rankBtn:Hide()
 		end
 	end
 
@@ -597,57 +705,98 @@ function SettingsWidgets.CreateLineLivePreview(card)
 end
 
 --------------------------------------------------------------------------------
--- Live-Vorschau 2: Zauberbuch-Musterslots (Seite 2)
+-- Live-Vorschau 2: Originalgetreue SpellBookItemTemplate-Slots + BCCBindBadge
 --------------------------------------------------------------------------------
 
 function SettingsWidgets.CreateSpellbookLivePreview(card)
-	local y = card:Advance(54, 4)
+	local y = card:Advance(68, 4)
 	local holder = CreateFrame("Frame", nil, card)
-	holder:SetSize(card.innerWidth, 54)
+	holder:SetSize(card.innerWidth, 68)
 	holder:SetPoint("TOPLEFT", card, "TOPLEFT", 14, y)
 
-	local function MakeMockSlot(xOffset, rankKey, badgeLabel)
-		local slot = CreateFrame("Frame", nil, holder, "BackdropTemplate")
-		slot:SetSize(218, 48)
-		slot:SetPoint("TOPLEFT", holder, "TOPLEFT", xOffset, -2)
-		SettingsWidgets.ApplyBoxBackdrop(slot, { 0.06, 0.07, 0.10, 0.95 }, { 0.30, 0.34, 0.44, 0.85 }, false)
+	-- Pergament-Hintergrund im Stil von PlayerSpellsFrame.SpellBookFrame
+	local pageBg = CreateFrame("Frame", nil, holder, "BackdropTemplate")
+	pageBg:SetAllPoints(holder)
+	SettingsWidgets.ApplyBoxBackdrop(pageBg, { 0.14, 0.11, 0.08, 0.85 }, { 0.42, 0.34, 0.22, 0.80 }, false)
 
-		local icon = slot:CreateTexture(nil, "ARTWORK")
-		icon:SetSize(34, 34)
-		icon:SetPoint("LEFT", slot, "LEFT", 8, 0)
+	local function MakeMockSpellBookItem(xOffset, rankKey, modLine, btnLine)
+		local item = CreateFrame("Frame", nil, pageBg)
+		item:SetSize(214, 56)
+		item:SetPoint("TOPLEFT", pageBg, "TOPLEFT", xOffset, -8)
+
+		local backplate = item:CreateTexture(nil, "BACKGROUND")
+		backplate:SetAtlas("spellbook-item-backplate", true)
+		backplate:SetAlpha(0.35)
+		backplate:SetPoint("CENTER", item, "CENTER", 5, -3)
+
+		local iconBtn = CreateFrame("Frame", nil, item)
+		iconBtn:SetSize(37, 37)
+		iconBtn:SetPoint("LEFT", item, "LEFT", 6, -2)
+
+		local icon = iconBtn:CreateTexture(nil, "ARTWORK")
+		icon:SetAllPoints(iconBtn)
 		icon:SetTexture(135907)
-		icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
 
-		local qbBorder = slot:CreateTexture(nil, "OVERLAY")
-		qbBorder:SetPoint("TOPLEFT", icon, "TOPLEFT", -2, 2)
-		qbBorder:SetPoint("BOTTOMRIGHT", icon, "BOTTOMRIGHT", 2, -2)
-		qbBorder:SetColorTexture(0.25, 1.0, 0.45, 0.22)
-		slot.QuickBindGlow = qbBorder
+		local iconBorder = iconBtn:CreateTexture(nil, "OVERLAY", nil, 1)
+		iconBorder:SetAtlas("spellbook-item-iconframe")
+		iconBorder:SetPoint("TOPLEFT", iconBtn, "TOPLEFT", -4, 4)
+		iconBorder:SetPoint("BOTTOMRIGHT", iconBtn, "BOTTOMRIGHT", 4, -4)
 
-		local badge = CreateFrame("Frame", nil, slot, "BackdropTemplate")
-		badge:SetSize(42, 15)
-		badge:SetPoint("TOPRIGHT", slot, "TOPRIGHT", -6, -5)
-		SettingsWidgets.ApplyBoxBackdrop(badge, { 0.06, 0.24, 0.12, 0.95 }, { 0.30, 0.90, 0.45, 0.95 }, false)
-		local bText = badge:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-		bText:SetPoint("CENTER", 0, 0)
-		bText:SetText("|cff40ff59" .. badgeLabel .. "|r")
-		slot.Badge = badge
+		local qbHighlight = iconBtn:CreateTexture(nil, "OVERLAY", nil, 2)
+		qbHighlight:SetAtlas("clickcast-highlight-binding", true)
+		qbHighlight:SetBlendMode("ADD")
+		qbHighlight:SetPoint("CENTER", iconBtn, "CENTER", 0, 0)
+		qbHighlight:SetScale(0.92)
+		item.QuickBindGlow = qbHighlight
 
-		local name = slot:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-		name:SetPoint("TOPLEFT", icon, "TOPRIGHT", 8, -3)
-		name:SetJustifyH("LEFT")
-		slot.Name = name
+		-- Originales BCCBindBadge (SpellBookUI.lua:135-171): sitzt oben mittig AUF der Icon-Kante!
+		local badgeFrame = CreateFrame("Frame", nil, iconBtn)
+		badgeFrame:SetSize(44, modLine and 20 or 14)
+		badgeFrame:SetPoint("BOTTOM", icon, "TOP", 0, -2)
+		badgeFrame:SetFrameLevel(iconBtn:GetFrameLevel() + 6)
 
-		local sub = slot:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-		sub:SetPoint("TOPLEFT", name, "BOTTOMLEFT", 0, -2)
-		sub:SetJustifyH("LEFT")
-		slot.Sub = sub
-		slot.rankKey = rankKey
-		return slot
+		local bBg = badgeFrame:CreateTexture(nil, "OVERLAY", nil, 1)
+		bBg:SetAtlas("common-dropdown-c-button")
+		bBg:SetVertexColor(0.06, 0.09, 0.13, 0.96)
+		bBg:SetPoint("TOPLEFT", badgeFrame, "TOPLEFT", -4, 4)
+		bBg:SetPoint("BOTTOMRIGHT", badgeFrame, "BOTTOMRIGHT", 4, -4)
+
+		local fontPath, fontSize = GameFontNormalSmall:GetFont()
+		local baseSz = (fontSize and math.max(9, fontSize - 1)) or 10
+		local smallSz = math.max(8, baseSz - 1)
+
+		if modLine then
+			local topFs = badgeFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+			if fontPath then topFs:SetFont(fontPath, smallSz, "OUTLINE") end
+			topFs:SetPoint("TOP", badgeFrame, "TOP", 0, -1)
+			topFs:SetText(Colors.MUTED .. modLine .. Colors.RESET)
+		end
+
+		local botFs = badgeFrame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+		if fontPath then botFs:SetFont(fontPath, baseSz, "OUTLINE") end
+		botFs:SetPoint("BOTTOM", badgeFrame, "BOTTOM", 0, 1)
+		botFs:SetText(Colors.BIND_BADGE .. btnLine .. Colors.RESET)
+		item.Badge = badgeFrame
+
+		local nameFs = item:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+		nameFs:SetPoint("TOPLEFT", iconBtn, "TOPRIGHT", 10, -3)
+		nameFs:SetPoint("RIGHT", item, "RIGHT", -4, 0)
+		nameFs:SetJustifyH("LEFT")
+		nameFs:SetWordWrap(false)
+		nameFs:SetTextColor(1.0, 0.88, 0.55)
+		item.Name = nameFs
+
+		local subFs = item:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+		subFs:SetPoint("TOPLEFT", nameFs, "BOTTOMLEFT", 0, -2)
+		subFs:SetJustifyH("LEFT")
+		subFs:SetTextColor(0.78, 0.72, 0.60)
+		item.Sub = subFs
+		item.rankKey = rankKey
+		return item
 	end
 
-	local slotMax = MakeMockSlot(0, "UX_PREVIEW_RANK_MAX", "S-LMB")
-	local slotDown = MakeMockSlot(232, "UX_PREVIEW_RANK_DOWN", "MMB")
+	local slotMax = MakeMockSpellBookItem(8, "UX_PREVIEW_RANK_MAX", "SHIFT", "LMB")
+	local slotDown = MakeMockSpellBookItem(236, "UX_PREVIEW_RANK_DOWN", nil, "MMB")
 
 	holder.RefreshValue = function()
 		local qb = Database.Get("quickBindSpellbook")
@@ -660,14 +809,143 @@ function SettingsWidgets.CreateSpellbookLivePreview(card)
 			s.QuickBindGlow:SetShown(qb and true or false)
 			s.Badge:SetShown(badges and true or false)
 		end
-		slotDown:SetAlpha(allRanks and 1.0 or 0.28)
+		slotDown:SetShown(allRanks and true or false)
 	end
 	holder:RefreshValue()
 	return holder
 end
 
 --------------------------------------------------------------------------------
--- Live-Vorschau 3: Visuelles Anker-Schaubild für das Hover-Overlay (Seite 4)
+-- Live-Vorschau 3a: Echte Unit-Frame Hover-Karte (Seite 4: Hover-Overlay)
+--------------------------------------------------------------------------------
+
+function SettingsWidgets.CreateHoverOverlayLivePreview(card)
+	local y = card:Advance(112, 4)
+	local stage = CreateFrame("Frame", nil, card, "BackdropTemplate")
+	stage:SetSize(card.innerWidth, 112)
+	stage:SetPoint("TOPLEFT", card, "TOPLEFT", 14, y)
+	stage:SetClipsChildren(true)
+	SettingsWidgets.ApplyBoxBackdrop(stage, { 0.035, 0.045, 0.07, 0.92 }, { 0.22, 0.28, 0.38, 0.75 }, false)
+
+	-- Exakter Nachbau von hoverCard aus Modules/UnitHoverTooltip.lua:556-785
+	local mockCard = CreateFrame("Frame", nil, stage, "BackdropTemplate")
+	mockCard:SetPoint("CENTER", stage, "CENTER", 0, 0)
+	mockCard:SetBackdrop(CARD_BACKDROP)
+
+	local hdrLeft = mockCard:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+	hdrLeft:SetPoint("TOPLEFT", mockCard, "TOPLEFT", 10, -8)
+	hdrLeft:SetJustifyH("LEFT")
+
+	local hdrRight = mockCard:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+	hdrRight:SetPoint("TOPRIGHT", mockCard, "TOPRIGHT", -10, -8)
+	hdrRight:SetJustifyH("RIGHT")
+
+	local div = mockCard:CreateTexture(nil, "ARTWORK")
+	div:SetHeight(1)
+	div:SetPoint("TOPLEFT", mockCard, "TOPLEFT", 8, -23)
+	div:SetPoint("TOPRIGHT", mockCard, "TOPRIGHT", -8, -23)
+	div:SetColorTexture(0.65, 0.55, 0.30, 0.35)
+
+	local rows = {}
+	for i = 1, 3 do
+		local r = {
+			Key   = mockCard:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall"),
+			Spell = mockCard:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall"),
+			Right = mockCard:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall"),
+		}
+		r.Key:SetJustifyH("LEFT")
+		r.Spell:SetJustifyH("LEFT")
+		r.Right:SetJustifyH("RIGHT")
+		rows[i] = r
+	end
+
+	stage.RefreshValue = function()
+		local mode = Database.Get("unitHoverMode") or "off"
+		local scalePct = tonumber(Database.Get("unitHoverScale")) or 100
+		local alphaPct = tonumber(Database.Get("unitHoverAlpha")) or 94
+		local showMana = Database.Get("unitHoverShowMana") and true or false
+		local showTags = Database.Get("unitHoverShowRankTags") and true or false
+		local showRange = Database.Get("unitHoverShowRange") and true or false
+
+		mockCard:SetBackdropColor(0.06, 0.07, 0.10, math.max(0.30, math.min(1.0, alphaPct / 100)))
+		mockCard:SetBackdropBorderColor(0.65, 0.55, 0.30, 0.90)
+		mockCard:SetAlpha((mode == "off") and 0.40 or 1.0)
+
+		-- Sanft geklemmte Live-Skalierung innerhalb der Vorschau-Bühne, damit die Karte nie den Rahmen sprengt
+		local previewScale = math.max(0.75, math.min(1.16, scalePct / 100))
+		mockCard:SetScale(previewScale)
+
+		hdrLeft:SetText("|cffffd100" .. (L["UNITHOVER_HDR_PREFIX"] or "Click Cast") .. "|r")
+		hdrRight:SetText("|cff40ff40Shift|r")
+
+		local sName = L["UX_PREVIEW_SPELL_NAME"]
+		local rMax = L["UX_PREVIEW_RANK_MAX"]
+		local rDown = L["UX_PREVIEW_RANK_DOWN"]
+		local tagMax = showTags and (" " .. Colors.TAG_MAX .. L["TAG_MAX"] .. Colors.RESET) or ""
+		local tagDown = showTags and (" " .. Colors.RANK_DOWN .. string.format(L["UNITHOVER_TAG_DOWNRANK_FORMAT"] or "[-%d]", 2) .. Colors.RESET) or ""
+
+		local rowDefs = {
+			{
+				key = Colors.BIND_BADGE .. "LMB|r",
+				spell = string.format("|T135907:14:14:0:0:64:64:4:60:4:60|t |cffffffff%s|r %s(%s)%s%s", sName, Colors.RANK_MAX, rMax, Colors.RESET, tagMax),
+				mana = "|cff80c8ff215 Mana|r",
+			},
+			{
+				key = Colors.BIND_BADGE .. "RMB|r",
+				spell = string.format("|T135953:14:14:0:0:64:64:4:60:4:60|t |cffffffff%s|r %s(%s)%s%s", sName, Colors.RANK_DOWN, rDown, Colors.RESET, tagDown),
+				mana = "|cff80c8ff" .. L["UX_PREVIEW_MANA"] .. "|r",
+			},
+		}
+
+		if showRange then
+			table.insert(rowDefs, {
+				key = Colors.WARN_UNLEARNED .. "MMB|r",
+				spell = string.format("|T135987:14:14:0:0:64:64:4:60:4:60:255:130:130|t |cff777777%s (%s)|r%s %s%s|r", sName, rMax, tagMax, Colors.WARN_UNLEARNED, L["UNITHOVER_TAG_OOR"] or "[OOR]"),
+				mana = "|cff777777305 Mana|r",
+			})
+		else
+			table.insert(rowDefs, {
+				key = Colors.BIND_BADGE .. "MMB|r",
+				spell = string.format("|T135987:14:14:0:0:64:64:4:60:4:60|t |cffffffff%s|r %s(%s)%s%s", sName, Colors.RANK_MAX, rMax, Colors.RESET, tagMax),
+				mana = "|cff80c8ff305 Mana|r",
+			})
+		end
+
+		local maxRowW = 190
+		local keyColW = 34
+		local spellColX = 10 + keyColW + 8
+		local yOff = -29
+
+		for i, def in ipairs(rowDefs) do
+			local r = rows[i]
+			r.Key:SetText(def.key)
+			r.Spell:SetText(def.spell)
+			r.Right:SetText(showMana and def.mana or "")
+
+			r.Key:ClearAllPoints()
+			r.Key:SetPoint("TOPLEFT", mockCard, "TOPLEFT", 10, yOff)
+			r.Spell:ClearAllPoints()
+			r.Spell:SetPoint("TOPLEFT", mockCard, "TOPLEFT", spellColX, yOff)
+			r.Right:ClearAllPoints()
+			r.Right:SetPoint("TOPRIGHT", mockCard, "TOPRIGHT", -10, yOff)
+
+			local sw = r.Spell:GetStringWidth() or 120
+			local rw = showMana and ((r.Right:GetStringWidth() or 55) + 16) or 0
+			local totalW = spellColX + sw + rw
+			if totalW > maxRowW then
+				maxRowW = totalW
+			end
+			yOff = yOff - 17
+		end
+
+		mockCard:SetSize(math.min(390, maxRowW + 14), math.abs(yOff) + 7)
+	end
+	stage:RefreshValue()
+	return stage
+end
+
+--------------------------------------------------------------------------------
+-- Live-Vorschau 3b: Visuelles Anker-Schaubild für das Hover-Overlay (Seite 4)
 --------------------------------------------------------------------------------
 
 function SettingsWidgets.CreateHoverAnchorDiagram(card)

@@ -147,27 +147,55 @@ local function FormatCharProfileLabel(prof, currentKey)
 	return string.format("%s (%d)%s", nameText, bindCount, activeTag)
 end
 
-local function GetSelectedCharProfile()
+-- Liefert ausschließlich andere gespeicherte Charaktere (niemals den aktuell eingeloggten Charakter),
+-- intelligent vorsortiert: 1. gleiche Klasse mit Bindings, 2. Twinks mit Bindings, 3. zuletzt gespielt (updatedAt).
+local function GetOtherCharProfiles()
 	local list, currentKey = Database.GetSavedCharProfiles()
-	if selectedSourceCharKey then
-		for _, prof in ipairs(list) do
+	local _, playerClassFile = Constants.GetPlayerClassInfo()
+	local others = {}
+	for _, prof in ipairs(list) do
+		if prof.key and prof.key ~= currentKey then
+			table.insert(others, prof)
+		end
+	end
+	table.sort(others, function(a, b)
+		local aHasBinds = (type(a.bindings) == "table" and #a.bindings > 0)
+		local bHasBinds = (type(b.bindings) == "table" and #b.bindings > 0)
+		local aSameClass = (playerClassFile and a.classFile == playerClassFile and aHasBinds) and true or false
+		local bSameClass = (playerClassFile and b.classFile == playerClassFile and bHasBinds) and true or false
+		if aSameClass ~= bSameClass then
+			return aSameClass
+		end
+		if aHasBinds ~= bHasBinds then
+			return aHasBinds
+		end
+		local aTime = tonumber(a.updatedAt) or 0
+		local bTime = tonumber(b.updatedAt) or 0
+		if aTime ~= bTime then
+			return aTime > bTime
+		end
+		return tostring(a.name or a.key) < tostring(b.name or b.key)
+	end)
+	return others, currentKey
+end
+
+local function GetSelectedCharProfile()
+	local others, currentKey = GetOtherCharProfiles()
+	if selectedSourceCharKey and selectedSourceCharKey ~= currentKey then
+		for _, prof in ipairs(others) do
 			if prof.key == selectedSourceCharKey then
-				return prof, currentKey
+				return prof, currentKey, others
 			end
 		end
 	end
-	for _, prof in ipairs(list) do
-		if prof.key ~= currentKey then
-			selectedSourceCharKey = prof.key
-			return prof, currentKey
-		end
+	if others[1] then
+		selectedSourceCharKey = others[1].key
+		return others[1], currentKey, others
 	end
-	if list[1] then
-		selectedSourceCharKey = list[1].key
-		return list[1], currentKey
-	end
-	return nil, currentKey
+	selectedSourceCharKey = nil
+	return nil, currentKey, others
 end
+SettingsUI.GetSelectedSourceCharProfile = GetSelectedCharProfile
 
 local function GetShortLabelFromList(list, currentVal, fallbackKey)
 	for _, entry in ipairs(list) do
@@ -351,8 +379,8 @@ function SettingsUI.OpenSourceCharMenu(ownerRegion)
 	end
 	MenuUtil.CreateContextMenu(ownerRegion, function(_, rootDescription)
 		rootDescription:CreateTitle(L["PROFILE_SOURCE_MENU_TITLE"])
-		local list, currentKey = Database.GetSavedCharProfiles()
-		if #list == 0 then
+		local others, currentKey = GetOtherCharProfiles()
+		if #others == 0 then
 			rootDescription:CreateTitle(L["PROFILE_NO_CHAR_SAVED"])
 			return
 		end
@@ -364,17 +392,15 @@ function SettingsUI.OpenSourceCharMenu(ownerRegion)
 			selectedSourceCharKey = key
 			SettingsUI.RefreshWindow()
 		end
-		for _, prof in ipairs(list) do
+		for _, prof in ipairs(others) do
 			local radio = rootDescription:CreateRadio(FormatCharProfileLabel(prof, currentKey), IsSelected, SetSelected, prof.key)
-			if prof.key ~= currentKey then
-				radio:CreateButton(L["PROFILE_DELETE_SNAPSHOT"], function()
-					Database.DeleteCharProfile(prof.key)
-					if selectedSourceCharKey == prof.key then
-						selectedSourceCharKey = nil
-					end
-					SettingsUI.RefreshWindow()
-				end)
-			end
+			radio:CreateButton(L["PROFILE_DELETE_SNAPSHOT"], function()
+				Database.DeleteCharProfile(prof.key)
+				if selectedSourceCharKey == prof.key then
+					selectedSourceCharKey = nil
+				end
+				SettingsUI.RefreshWindow()
+			end)
 		end
 	end)
 end
@@ -1447,10 +1473,13 @@ local function EnsureSettingsWindow()
 	qMatrixBtn:SetPoint("BOTTOMLEFT", sidebar, "BOTTOMLEFT", 9, 36)
 
 	local qMoveBtn = Widgets.CreateStyledButton(sidebar, 164, 24, function()
-		return SettingsUI.IsOverlaysUnlocked() and L["UX_QUICK_MOVE_ACTIVE"] or L["UX_QUICK_MOVE"]
+		if SettingsUI.IsOverlaysUnlocked() then
+			return "|cff40ff59•|r " .. L["UX_QUICK_MOVE_ACTIVE"]
+		end
+		return L["UX_QUICK_MOVE"]
 	end, function()
 		SettingsUI.ToggleOverlaysUnlocked()
-	end, "primary", "SETTING_UNITHOVER_UNLOCK_MOVE_DESC")
+	end, "secondary", "SETTING_UNITHOVER_UNLOCK_MOVE_DESC")
 	qMoveBtn:SetPoint("BOTTOMLEFT", sidebar, "BOTTOMLEFT", 9, 8)
 	win.QuickButtons = { qClickBtn, qMatrixBtn, qMoveBtn }
 
@@ -1630,13 +1659,17 @@ local function EnsureSettingsWindow()
 	p3.contentHeight = math.abs(y3) + 12
 
 	----------------------------------------------------------------------------
-	-- SEITE 4: Unit-Frame Hover-Overlay (Anker-Schaubild + Abhängigkeits-Dimming)
+	-- SEITE 4: Unit-Frame Hover-Overlay (Live-Preview + Anker-Schaubild + Details)
 	----------------------------------------------------------------------------
 	local p4 = win.Pages[4]
 	local y4 = -6
 	local isHoverEnabled = function()
 		return (Database.Get("unitHoverMode") or "off") ~= "off"
 	end
+
+	local c4Prev = Reg(Widgets.CreateCard(p4, "UX_CARD_PREVIEW", y4))
+	Reg(Widgets.CreateHoverOverlayLivePreview(c4Prev))
+	y4 = c4Prev:Finalize(8)
 
 	local c4Mode = Reg(Widgets.CreateCard(p4, "SETTINGS_HEADER_UNITHOVER", y4))
 	AddIndexedSegmented(c4Mode, 4, {
@@ -1732,17 +1765,25 @@ local function EnsureSettingsWindow()
 	local cpRowY = c6Prof:Advance(26, 4)
 	local cpW = math.floor((c6Prof.innerWidth - 12) / 3)
 	for idx, cpDef in ipairs({
-		{ key = "PROFILE_BTN_COPY_ALL",      desc = "PROFILE_BTN_COPY_ALL_DESC",      scope = "all",      variant = "primary" },
-		{ key = "PROFILE_BTN_COPY_BINDINGS", desc = "PROFILE_BTN_COPY_BINDINGS_DESC", scope = "bindings", variant = "secondary" },
-		{ key = "PROFILE_BTN_COPY_SETTINGS", desc = "PROFILE_BTN_COPY_SETTINGS_DESC", scope = "settings", variant = "secondary" },
+		{ key = "PROFILE_BTN_COPY_ALL",      desc = "PROFILE_BTN_COPY_ALL_DESC",      scope = "all" },
+		{ key = "PROFILE_BTN_COPY_BINDINGS", desc = "PROFILE_BTN_COPY_BINDINGS_DESC", scope = "bindings" },
+		{ key = "PROFILE_BTN_COPY_SETTINGS", desc = "PROFILE_BTN_COPY_SETTINGS_DESC", scope = "settings" },
 	}) do
-		local b = Reg(Widgets.CreateStyledButton(c6Prof, cpW, 24, function() return L[cpDef.key] end, function()
+		local b = Widgets.CreateStyledButton(c6Prof, cpW, 24, function() return L[cpDef.key] end, function()
 			local prof = GetSelectedCharProfile()
 			if prof and ns.ClickBindingUI and ns.ClickBindingUI.CopyFromCharacterProfile then
 				ns.ClickBindingUI.CopyFromCharacterProfile(prof, cpDef.scope)
 				SettingsUI.RefreshWindow()
 			end
-		end, cpDef.variant, cpDef.desc))
+		end, "secondary", cpDef.desc)
+		local origRefresh = b.RefreshValue
+		b.RefreshValue = function(self)
+			origRefresh(self)
+			local hasSource = (GetSelectedCharProfile() ~= nil)
+			self:SetEnabled(hasSource)
+			self:SetAlpha(hasSource and 1.0 or 0.40)
+		end
+		Reg(b)
 		b:SetPoint("TOPLEFT", c6Prof, "TOPLEFT", 14 + ((idx - 1) * (cpW + 6)), cpRowY)
 	end
 	y6 = c6Prof:Finalize(8)
@@ -1762,7 +1803,7 @@ local function EnsureSettingsWindow()
 		if ns.ClickBindingUI and ns.ClickBindingUI.ShowExportStringPopup then
 			ns.ClickBindingUI.ShowExportStringPopup(selectedShareScope or "all")
 		end
-	end, "primary", "SHARE_BTN_EXPORT_STRING_DESC"))
+	end, "secondary", "SHARE_BTN_EXPORT_STRING_DESC"))
 	expBtn:SetPoint("TOPLEFT", c6Share, "TOPLEFT", 14, shRowY)
 
 	local impBtn = Reg(Widgets.CreateStyledButton(c6Share, shW, 24, function() return L["SHARE_BTN_IMPORT_STRING"] end, function()
