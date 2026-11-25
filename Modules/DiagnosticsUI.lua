@@ -324,6 +324,11 @@ local function RunDeepStressSelfTest(findings, infoNotes)
 		if not wasCBShown and ns.MinimapButton and ns.MinimapButton.ToggleClickCastingWindow then
 			ns.MinimapButton.ToggleClickCastingWindow()
 		end
+		if ClickBindingFrame and ClickBindingFrame:IsShown() then
+			if not (PlayerSpellsFrame and PlayerSpellsFrame:IsShown() and PlayerSpellsFrame.GetTab and PlayerSpellsFrame:GetTab() == PlayerSpellsFrame.spellBookTabID) then
+				table.insert(findings, string.format("DeepTest SpellBookTab: expected SpellBook tab active alongside ClickBindingFrame (got tab=%s)", tostring(PlayerSpellsFrame and PlayerSpellsFrame.GetTab and PlayerSpellsFrame:GetTab())))
+			end
+		end
 		ClickBindingUI.SetupHooks()
 
 		for _, gMode in ipairs({ "modifier", "button", "type", "none" }) do
@@ -681,7 +686,7 @@ local function RunDeepStressSelfTest(findings, infoNotes)
 		if not wasCBShown and ClickBindingFrame and ClickBindingFrame:IsShown() and ns.MinimapButton and ns.MinimapButton.ToggleClickCastingWindow then
 			ns.MinimapButton.ToggleClickCastingWindow()
 		end
-		table.insert(infoNotes, "DeepTest UI lifecycle: ClickBindingFrame (4 group modes + compact toggle), SettingsUI (Tabs 1-4), Matrix (4x5/8x5/5x5/12x5) & Overlays cycled OK")
+		table.insert(infoNotes, "DeepTest UI lifecycle: ClickBindingFrame (4 group modes + compact toggle + SpellBook tab sync), SettingsUI (Tabs 1-6 + Sticky/Search), Matrix (4x5/8x5/5x5/12x5) & Overlays cycled OK")
 	end
 end
 

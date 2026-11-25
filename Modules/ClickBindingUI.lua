@@ -2332,14 +2332,21 @@ end
 -- Zauberbuch-Sync und Hooks
 --------------------------------------------------------------------------------
 
+local isRescuingSpellBookTab = false
+
 function ClickBindingUI.EnsureSpellBookTabForClickBinding()
 	if InCombatLockdown and InCombatLockdown() then
 		return
 	end
 	-- Im Controller-Modus (GamepadUI) wird das TabSystem von PlayerSpellsFrame ausgeblendet
 	-- und durch GamepadMode.FrameControlsManager verwaltet; dort niemals per AddOn eingreifen.
-	if InputUtil and InputUtil.IsGamepadUIEnabled and InputUtil.IsGamepadUIEnabled() then
+	if Constants.IsGamepadUIActive and Constants.IsGamepadUIActive() then
 		return
+	end
+	-- Direkt nach Login oder /reload ist Blizzard_PlayerSpells (LoadOnDemand) oft noch nicht geladen;
+	-- vorab laden, damit GetTab() nicht nil bleibt und SetToDefaultAvailableTab() nicht im Talentbaum landet.
+	if not PlayerSpellsFrame and PlayerSpellsFrame_LoadUI then
+		PlayerSpellsFrame_LoadUI()
 	end
 	if not PlayerSpellsFrame or not PlayerSpellsUtil or not PlayerSpellsUtil.FrameTabs then
 		return
@@ -2352,11 +2359,11 @@ function ClickBindingUI.EnsureSpellBookTabForClickBinding()
 		PlayerSpellsFrame:ClearInspectUnit()
 	end
 	-- In WoW Forever teilen sich Zauberbuch und Talentbaum denselben PlayerSpellsFrame.
-	-- Wurde zuvor der Talentbaum geöffnet (und ist das Fenster nicht schon als Zauberbuch offen),
-	-- wechseln wir über SetTab(spellBookTabID) auf den SpellBook-Tab, ohne SetUIPanelAttribute via TrySetTab zu tainten.
+	-- Sowohl bei currentTabID == nil (frischer /reload ohne vorheriges Zauberbuch-Öffnen) als auch bei aktivem
+	-- Talent-/Spec-Tab vorab auf spellBookTabID umschalten, ohne SetUIPanelAttribute via TrySetTab zu tainten.
 	local currentTabID = PlayerSpellsFrame.GetTab and PlayerSpellsFrame:GetTab()
 	local spellBookTabID = PlayerSpellsFrame.spellBookTabID
-	if currentTabID and spellBookTabID and currentTabID ~= spellBookTabID then
+	if spellBookTabID and currentTabID ~= spellBookTabID then
 		if PlayerSpellsFrame:IsShown() and HideUIPanel then
 			HideUIPanel(PlayerSpellsFrame)
 		end
@@ -2366,6 +2373,47 @@ function ClickBindingUI.EnsureSpellBookTabForClickBinding()
 			PlayerSpellsFrame:TrySetTab(spellBookTab)
 		end
 	end
+end
+
+-- Rettungsanker für den direkten /clickcast-Pfad (z. B. Minimap-Linksklick bei bereits offenem Talentbaum
+-- oder nach Verdrängung beim ersten Laden): Greift ausschließlich im echten Fehlerfall ein, wenn PlayerSpellsFrame
+-- nach ClickBindingFrameMixin:OnShow() nicht auf spellBookTabID steht, und lässt den Normalfall zu 100 % unberührt.
+local function RescueSpellBookTabAfterClickCastShow()
+	if isRescuingSpellBookTab then
+		return
+	end
+	if InCombatLockdown and InCombatLockdown() then
+		return
+	end
+	if Constants.IsGamepadUIActive and Constants.IsGamepadUIActive() then
+		return
+	end
+	if not PlayerSpellsFrame or not PlayerSpellsFrame:IsShown() then
+		return
+	end
+	local spellBookTabID = PlayerSpellsFrame.spellBookTabID
+	local currentTabID = PlayerSpellsFrame.GetTab and PlayerSpellsFrame:GetTab()
+	if not spellBookTabID or currentTabID == spellBookTabID then
+		return
+	end
+
+	isRescuingSpellBookTab = true
+	if PlayerSpellsFrame.ClearInspectUnit and PlayerSpellsFrame.IsInspecting and PlayerSpellsFrame:IsInspecting() then
+		PlayerSpellsFrame:ClearInspectUnit()
+	end
+	if PlayerSpellsFrame.SetTab then
+		PlayerSpellsFrame:SetTab(spellBookTabID)
+	end
+	if PlayerSpellsFrame.SetMinimized and PlayerSpellsFrame.IsMinimized and not PlayerSpellsFrame:IsMinimized() then
+		PlayerSpellsFrame:SetMinimized(true)
+	end
+	if ClickBindingFrame and not ClickBindingFrame:IsShown() and ShowUIPanel then
+		ShowUIPanel(ClickBindingFrame)
+		if ClickBindingFrame.SetFocusedFrame then
+			ClickBindingFrame:SetFocusedFrame(PlayerSpellsFrame)
+		end
+	end
+	isRescuingSpellBookTab = false
 end
 
 function ClickBindingUI.SyncAutoShowAllRanks()
@@ -2514,6 +2562,7 @@ function ClickBindingUI.SetupHooks()
 			return
 		end
 		ClickBindingUI.UpdateGamepadStandbyState()
+		RescueSpellBookTabAfterClickCastShow()
 		ClickBindingUI.UpdatePresetDropdownButton()
 		ClickBindingUI.SyncAutoShowAllRanks()
 		ClickBindingUI.AutoSelectPrimarySpellBookTab()
