@@ -61,11 +61,13 @@ end
 SettingsWidgets.StripColorCodes = StripColorCodes
 
 --------------------------------------------------------------------------------
--- Karten-Container mit automatischem Höhen-Tracking
+-- Karten-Container mit automatischem Höhen- & 2-Spalten-Tracking
 --------------------------------------------------------------------------------
 
+SettingsWidgets.DEFAULT_CARD_WIDTH = 640
+
 function SettingsWidgets.CreateCard(parent, titleKey, topY, width)
-	local cardWidth = width or 486
+	local cardWidth = width or SettingsWidgets.DEFAULT_CARD_WIDTH
 	local card = CreateFrame("Frame", nil, parent, "BackdropTemplate")
 	card:SetWidth(cardWidth)
 	card:SetPoint("TOPLEFT", parent, "TOPLEFT", 10, topY)
@@ -86,14 +88,39 @@ function SettingsWidgets.CreateCard(parent, titleKey, topY, width)
 
 	card.cursorY = -38
 	card.innerWidth = cardWidth - 28
+	card.colGap = 12
+	card.colWidth = math.floor((card.innerWidth - card.colGap) / 2)
+	card.lastPairY = nil
 
 	function card:Advance(height, gap)
+		self.lastPairY = nil
 		local used = self.cursorY
 		self.cursorY = self.cursorY - height - (gap or 6)
 		return used
 	end
 
+	-- Platziert ein Element entweder über die volle Breite (col == nil) oder in Spalte 1 / 2
+	function card:PlaceCell(height, gap, col)
+		if col == 1 then
+			local used = self.cursorY
+			self.cursorY = self.cursorY - height - (gap or 6)
+			self.lastPairY = used
+			return 14, used, self.colWidth
+		elseif col == 2 then
+			local used = self.lastPairY
+			if not used then
+				used = self.cursorY
+				self.cursorY = self.cursorY - height - (gap or 6)
+			end
+			self.lastPairY = nil
+			return 14 + self.colWidth + self.colGap, used, self.colWidth
+		end
+		local used = self:Advance(height, gap)
+		return 14, used, self.innerWidth
+	end
+
 	function card:Finalize(bottomPad)
+		self.lastPairY = nil
 		local totalH = math.abs(self.cursorY) + (bottomPad or 8)
 		self:SetHeight(totalH)
 		return topY - totalH - 10
@@ -193,12 +220,13 @@ end
 
 function SettingsWidgets.CreateToggleRow(card, spec)
 	local hasSub = (spec.descKey ~= nil)
-	local rowH = hasSub and 36 or 24
-	local y = card:Advance(rowH, 4)
+	local isTwoCol = (spec.col ~= nil)
+	local rowH = hasSub and (isTwoCol and 34 or 36) or 24
+	local x, y, cellW = card:PlaceCell(rowH, 4, spec.col)
 
 	local row = CreateFrame("Button", nil, card)
-	row:SetSize(card.innerWidth, rowH)
-	row:SetPoint("TOPLEFT", card, "TOPLEFT", 14, y)
+	row:SetSize(cellW, rowH)
+	row:SetPoint("TOPLEFT", card, "TOPLEFT", x, y)
 	row:RegisterForClicks("LeftButtonUp")
 
 	local hl = row:CreateTexture(nil, "HIGHLIGHT")
@@ -207,10 +235,11 @@ function SettingsWidgets.CreateToggleRow(card, spec)
 
 	local cb = CreateFrame("CheckButton", nil, row, "UICheckButtonTemplate")
 	cb:SetSize(22, 22)
-	cb:SetPoint("TOPLEFT", row, "TOPLEFT", -2, hasSub and -1 or -1)
+	cb:SetPoint("TOPLEFT", row, "TOPLEFT", -2, -1)
 
-	local title = row:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-	title:SetPoint("TOPLEFT", row, "TOPLEFT", 24, hasSub and -2 or -5)
+	local titleFont = isTwoCol and "GameFontHighlightSmall" or "GameFontHighlight"
+	local title = row:CreateFontString(nil, "OVERLAY", titleFont)
+	title:SetPoint("TOPLEFT", row, "TOPLEFT", 24, hasSub and -3 or -5)
 	title:SetPoint("RIGHT", row, "RIGHT", -4, 0)
 	title:SetJustifyH("LEFT")
 	title:SetWordWrap(false)
@@ -404,11 +433,11 @@ end
 
 function SettingsWidgets.CreateSliderRow(card, spec)
 	local rowH = 42
-	local y = card:Advance(rowH, 6)
+	local x, y, cellW = card:PlaceCell(rowH, 6, spec.col)
 
 	local container = CreateFrame("Frame", nil, card)
-	container:SetSize(card.innerWidth, rowH)
-	container:SetPoint("TOPLEFT", card, "TOPLEFT", 14, y)
+	container:SetSize(cellW, rowH)
+	container:SetPoint("TOPLEFT", card, "TOPLEFT", x, y)
 
 	local title = container:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
 	title:SetPoint("TOPLEFT", container, "TOPLEFT", 0, 0)
@@ -719,9 +748,13 @@ function SettingsWidgets.CreateSpellbookLivePreview(card)
 	pageBg:SetAllPoints(holder)
 	SettingsWidgets.ApplyBoxBackdrop(pageBg, { 0.14, 0.11, 0.08, 0.85 }, { 0.42, 0.34, 0.22, 0.80 }, false)
 
+	local slotW = math.min(256, math.floor((card.innerWidth - 52) / 2))
+	local leftSlotX = math.max(12, math.floor((card.innerWidth - (slotW * 2 + 28)) / 2))
+	local rightSlotX = leftSlotX + slotW + 28
+
 	local function MakeMockSpellBookItem(xOffset, rankKey, modLine, btnLine)
 		local item = CreateFrame("Frame", nil, pageBg)
-		item:SetSize(214, 56)
+		item:SetSize(slotW, 56)
 		item:SetPoint("TOPLEFT", pageBg, "TOPLEFT", xOffset, -8)
 
 		local backplate = item:CreateTexture(nil, "BACKGROUND")
@@ -795,8 +828,8 @@ function SettingsWidgets.CreateSpellbookLivePreview(card)
 		return item
 	end
 
-	local slotMax = MakeMockSpellBookItem(8, "UX_PREVIEW_RANK_MAX", "SHIFT", "LMB")
-	local slotDown = MakeMockSpellBookItem(236, "UX_PREVIEW_RANK_DOWN", nil, "MMB")
+	local slotMax = MakeMockSpellBookItem(leftSlotX, "UX_PREVIEW_RANK_MAX", "SHIFT", "LMB")
+	local slotDown = MakeMockSpellBookItem(rightSlotX, "UX_PREVIEW_RANK_DOWN", nil, "MMB")
 
 	holder.RefreshValue = function()
 		local qb = Database.Get("quickBindSpellbook")
@@ -954,21 +987,25 @@ function SettingsWidgets.CreateHoverAnchorDiagram(card)
 	wrap:SetSize(card.innerWidth, 106)
 	wrap:SetPoint("TOPLEFT", card, "TOPLEFT", 14, y)
 
+	local unitCenterX = math.max(155, math.floor(card.innerWidth * 0.34))
+	local freeColX = math.max(330, card.innerWidth - 196)
+	local freeBtnW = math.min(168, card.innerWidth - freeColX - 18)
+
 	local unitBox = CreateFrame("Frame", nil, wrap, "BackdropTemplate")
-	unitBox:SetSize(134, 42)
-	unitBox:SetPoint("CENTER", wrap, "LEFT", 155, -2)
+	unitBox:SetSize(140, 42)
+	unitBox:SetPoint("CENTER", wrap, "LEFT", unitCenterX, -2)
 	SettingsWidgets.ApplyBoxBackdrop(unitBox, { 0.08, 0.22, 0.13, 0.95 }, { 0.35, 0.72, 0.45, 0.95 }, false)
 
 	local unitLabel = unitBox:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
 	unitLabel:SetPoint("CENTER", 0, 0)
 
 	local anchorDefs = {
-		{ value = "top",    shortKey = "UNITHOVER_ANCHOR_TOP_SHORT",    point = "BOTTOM", rel = unitBox, relPoint = "TOP",    x = 0,  y = 5,  w = 76 },
-		{ value = "bottom", shortKey = "UNITHOVER_ANCHOR_BOTTOM_SHORT", point = "TOP",    rel = unitBox, relPoint = "BOTTOM", x = 0,  y = -5, w = 76 },
-		{ value = "left",   shortKey = "UNITHOVER_ANCHOR_LEFT_SHORT",   point = "RIGHT",  rel = unitBox, relPoint = "LEFT",   x = -6, y = 0,  w = 72 },
-		{ value = "right",  shortKey = "UNITHOVER_ANCHOR_RIGHT_SHORT",  point = "LEFT",   rel = unitBox, relPoint = "RIGHT",  x = 6,  y = 0,  w = 72 },
-		{ value = "cursor", shortKey = "UNITHOVER_ANCHOR_CURSOR_SHORT", point = "TOPLEFT", rel = wrap,   relPoint = "TOPLEFT", x = 330, y = -22, w = 126 },
-		{ value = "free",   shortKey = "UNITHOVER_ANCHOR_FREE_SHORT",   point = "TOPLEFT", rel = wrap,   relPoint = "TOPLEFT", x = 330, y = -54, w = 126 },
+		{ value = "top",    shortKey = "UNITHOVER_ANCHOR_TOP_SHORT",    point = "BOTTOM",  rel = unitBox, relPoint = "TOP",     x = 0,        y = 5,   w = 82 },
+		{ value = "bottom", shortKey = "UNITHOVER_ANCHOR_BOTTOM_SHORT", point = "TOP",     rel = unitBox, relPoint = "BOTTOM",  x = 0,        y = -5,  w = 82 },
+		{ value = "left",   shortKey = "UNITHOVER_ANCHOR_LEFT_SHORT",   point = "RIGHT",   rel = unitBox, relPoint = "LEFT",    x = -6,       y = 0,   w = 78 },
+		{ value = "right",  shortKey = "UNITHOVER_ANCHOR_RIGHT_SHORT",  point = "LEFT",    rel = unitBox, relPoint = "RIGHT",   x = 6,        y = 0,   w = 78 },
+		{ value = "cursor", shortKey = "UNITHOVER_ANCHOR_CURSOR_SHORT", point = "TOPLEFT", rel = wrap,    relPoint = "TOPLEFT", x = freeColX, y = -22, w = freeBtnW },
+		{ value = "free",   shortKey = "UNITHOVER_ANCHOR_FREE_SHORT",   point = "TOPLEFT", rel = wrap,    relPoint = "TOPLEFT", x = freeColX, y = -54, w = freeBtnW },
 	}
 
 	local buttons = {}

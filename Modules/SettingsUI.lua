@@ -599,7 +599,7 @@ local function BuildEmbeddedReorderCard(page, topY)
 	card.Subtitle = subtitle
 
 	local hdrY = card:Advance(18, 2)
-	local colW = 222
+	local colW = math.floor((card.innerWidth - 14) / 2)
 	local leftHeader = card:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
 	leftHeader:SetPoint("TOPLEFT", card, "TOPLEFT", 14, hdrY)
 	card.LeftHeader = leftHeader
@@ -611,9 +611,11 @@ local function BuildEmbeddedReorderCard(page, topY)
 	local function CreateListBox(xOff, height)
 		local box = CreateFrame("Frame", nil, card, "BackdropTemplate")
 		box:SetSize(colW, height)
+		box.boxHeight = height
 		Widgets.ApplyBoxBackdrop(box, { 0.04, 0.05, 0.08, 0.94 }, { 0.34, 0.40, 0.52, 0.85 }, false)
 
 		local sf = CreateFrame("ScrollFrame", nil, box, "UIPanelScrollFrameTemplate")
+		sf.scrollBarHideable = true
 		sf:SetPoint("TOPLEFT", box, "TOPLEFT", 5, -5)
 		sf:SetPoint("BOTTOMRIGHT", box, "BOTTOMRIGHT", -25, 5)
 
@@ -787,7 +789,13 @@ function SettingsUI.RefreshReorderWindow()
 	for idx = #buttons + 1, #f.LeftBox.Rows do
 		f.LeftBox.Rows[idx]:Hide()
 	end
-	leftChild:SetHeight(math.max(1, #buttons * rowPitch))
+	local leftTotalH = math.max(1, #buttons * rowPitch)
+	leftChild:SetHeight(leftTotalH)
+	local leftNeedsScroll = leftTotalH > ((f.LeftBox.boxHeight or 210) - 10)
+	f.LeftBox.ScrollFrame:EnableMouseWheel(leftNeedsScroll)
+	if f.LeftBox.ScrollFrame.ScrollBar then
+		f.LeftBox.ScrollFrame.ScrollBar:SetShown(leftNeedsScroll)
+	end
 
 	local orderedMods = (ns.ClickBindingUI and ns.ClickBindingUI.GetOrderedMatrixModRows and ns.ClickBindingUI.GetOrderedMatrixModRows()) or {}
 	local showMeta = (ns.ClickBindingUI and ns.ClickBindingUI.IsMatrixMetaActive and ns.ClickBindingUI.IsMatrixMetaActive()) or false
@@ -838,7 +846,13 @@ function SettingsUI.RefreshReorderWindow()
 	for idx = #visibleMods + 1, #f.RightBox.Rows do
 		f.RightBox.Rows[idx]:Hide()
 	end
-	rightChild:SetHeight(math.max(1, #visibleMods * rowPitch))
+	local rightTotalH = math.max(1, #visibleMods * rowPitch)
+	rightChild:SetHeight(rightTotalH)
+	local rightNeedsScroll = rightTotalH > ((f.RightBox.boxHeight or 240) - 10)
+	f.RightBox.ScrollFrame:EnableMouseWheel(rightNeedsScroll)
+	if f.RightBox.ScrollFrame.ScrollBar then
+		f.RightBox.ScrollFrame.ScrollBar:SetShown(rightNeedsScroll)
+	end
 end
 
 function SettingsUI.ShowReorderWindow()
@@ -871,7 +885,6 @@ local function EnsurePresetListRow(card, idx)
 
 	local nameFs = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
 	nameFs:SetPoint("LEFT", row, "LEFT", 10, 0)
-	nameFs:SetWidth(155)
 	nameFs:SetJustifyH("LEFT")
 	nameFs:SetWordWrap(false)
 	row.NameText = nameFs
@@ -954,6 +967,7 @@ local function EnsurePresetListRow(card, idx)
 	local spec1Btn = MakeSpecBtn(1)
 	spec1Btn:SetPoint("RIGHT", spec2Btn, "LEFT", -4, 0)
 	row.Spec1Btn = spec1Btn
+	nameFs:SetPoint("RIGHT", spec1Btn, "LEFT", -10, 0)
 
 	presetListRows[idx] = row
 	return row
@@ -1068,8 +1082,9 @@ local function EnsureSearchResultRow(parent, idx)
 	if searchResultRows[idx] then
 		return searchResultRows[idx]
 	end
+	local rowW = Widgets.DEFAULT_CARD_WIDTH or 640
 	local row = CreateFrame("Frame", nil, parent, "BackdropTemplate")
-	row:SetSize(486, 52)
+	row:SetSize(rowW, 52)
 	Widgets.ApplyBoxBackdrop(row, Widgets.THEME.cardBg, Widgets.THEME.cardBorder, false)
 
 	local catBadge = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
@@ -1079,7 +1094,7 @@ local function EnsureSearchResultRow(parent, idx)
 
 	local title = row:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
 	title:SetPoint("TOPLEFT", catBadge, "BOTTOMLEFT", 0, -3)
-	title:SetWidth(290)
+	title:SetWidth(rowW - 220)
 	title:SetJustifyH("LEFT")
 	title:SetWordWrap(false)
 	row.Title = title
@@ -1208,13 +1223,58 @@ end
 -- Hauptfenster: Sidebar Command Center (BetterClickCastingSettingsFrame)
 --------------------------------------------------------------------------------
 
-local function UpdateScrollChildHeight()
-	if not settingsWindow or not settingsWindow.ScrollChild then
+local WINDOW_WIDTH = 880
+local WINDOW_HEIGHT = 696
+local RIGHT_AREA_TOP_OFFSET = 54
+local RIGHT_AREA_BOTTOM_PAD = 10
+local RIGHT_AREA_TOTAL_HEIGHT = WINDOW_HEIGHT - RIGHT_AREA_TOP_OFFSET - RIGHT_AREA_BOTTOM_PAD
+
+local function SyncStickyAndScrollLayout()
+	if not settingsWindow or not settingsWindow.ScrollFrame or not settingsWindow.ScrollChild then
 		return
 	end
-	local activePage = (currentSearchQuery ~= "") and settingsWindow.SearchPage or settingsWindow.Pages[activeTabIndex]
-	local h = (activePage and activePage.contentHeight) or 460
-	settingsWindow.ScrollChild:SetHeight(math.max(460, h))
+	local isSearching = (currentSearchQuery ~= "")
+	local activeSticky = (not isSearching) and settingsWindow.StickyCards and settingsWindow.StickyCards[activeTabIndex] or nil
+	for _, sCard in pairs(settingsWindow.StickyCards or {}) do
+		sCard:SetShown(activeSticky == sCard)
+	end
+
+	local viewportH = RIGHT_AREA_TOTAL_HEIGHT
+	local sf = settingsWindow.ScrollFrame
+	sf:ClearAllPoints()
+	if activeSticky and settingsWindow.StickyPane then
+		local sh = activeSticky.stickyHeight or (activeSticky:GetHeight() + 6)
+		settingsWindow.StickyPane:SetHeight(sh)
+		settingsWindow.StickyPane:Show()
+		sf:SetPoint("TOPLEFT", settingsWindow.StickyPane, "BOTTOMLEFT", 0, -4)
+		viewportH = RIGHT_AREA_TOTAL_HEIGHT - sh - 4
+	else
+		if settingsWindow.StickyPane then
+			settingsWindow.StickyPane:Hide()
+		end
+		sf:SetPoint("TOPLEFT", settingsWindow.Sidebar, "TOPRIGHT", 2, -6)
+	end
+	sf:SetPoint("BOTTOMRIGHT", settingsWindow, "BOTTOMRIGHT", -28, RIGHT_AREA_BOTTOM_PAD)
+
+	local activePage = isSearching and settingsWindow.SearchPage or settingsWindow.Pages[activeTabIndex]
+	local contentH = (activePage and activePage.contentHeight) or 100
+	local needsScroll = (contentH > viewportH)
+
+	settingsWindow.ScrollChild:SetHeight(needsScroll and contentH or math.max(1, contentH))
+	if not needsScroll and sf.SetVerticalScroll then
+		sf:SetVerticalScroll(0)
+	end
+	sf:EnableMouseWheel(needsScroll)
+	if sf.ScrollBar then
+		sf.ScrollBar:SetShown(needsScroll)
+		if sf.ScrollBar.ScrollUpButton then sf.ScrollBar.ScrollUpButton:SetShown(needsScroll) end
+		if sf.ScrollBar.ScrollDownButton then sf.ScrollBar.ScrollDownButton:SetShown(needsScroll) end
+		if sf.ScrollBar.ThumbTexture then sf.ScrollBar.ThumbTexture:SetShown(needsScroll) end
+	end
+
+	settingsWindow.lastViewportHeight = viewportH
+	settingsWindow.lastContentHeight = contentH
+	settingsWindow.lastNeedsScroll = needsScroll
 end
 
 local function SelectTab(tabIndex)
@@ -1245,10 +1305,9 @@ local function PositionSettingsWindow(frame)
 	local saved = Database.Get("settingsWindowPos")
 	if type(saved) == "table" and saved.point then
 		frame:SetPoint(saved.point, UIParent, saved.relativePoint or saved.point, saved.x or 0, saved.y or 0)
-	elseif ClickBindingFrame and ClickBindingFrame:IsShown() then
-		frame:SetPoint("TOPLEFT", ClickBindingFrame, "TOPRIGHT", 12, 0)
 	else
-		frame:SetPoint("CENTER", UIParent, "CENTER", 0, 30)
+		-- Bei 880x696 px standardmäßig zentriert auf UIParent (analog Blizzards SettingsPanel 920x724)
+		frame:SetPoint("CENTER", UIParent, "CENTER", 0, 16)
 	end
 end
 
@@ -1259,7 +1318,7 @@ local function EnsureSettingsWindow()
 	searchCatalog = {}
 
 	local win = CreateFrame("Frame", "BetterClickCastingSettingsFrame", UIParent, "BackdropTemplate")
-	win:SetSize(716, 556)
+	win:SetSize(WINDOW_WIDTH, WINDOW_HEIGHT)
 	win:SetFrameStrata("MEDIUM")
 	win:SetToplevel(true)
 	win:SetFrameLevel(20)
@@ -1481,16 +1540,34 @@ local function EnsureSettingsWindow()
 		SettingsUI.ToggleOverlaysUnlocked()
 	end, "secondary", "SETTING_UNITHOVER_UNLOCK_MOVE_DESC")
 	qMoveBtn:SetPoint("BOTTOMLEFT", sidebar, "BOTTOMLEFT", 9, 8)
+	win.Sidebar = sidebar
 	win.QuickButtons = { qClickBtn, qMatrixBtn, qMoveBtn }
 
-	-- Rechter Scroll-Bereich für die 6 Kategorie-Seiten + globale Suchseite
+	-- Fester Sticky-Vorschau-Container oberhalb des Scroll-Bereichs (aktiv auf Seite 1, 2 und 4)
+	local stickyPane = CreateFrame("Frame", nil, win)
+	stickyPane:SetWidth(656)
+	stickyPane:SetPoint("TOPLEFT", sidebar, "TOPRIGHT", 2, -6)
+	local stickyDivider = stickyPane:CreateTexture(nil, "ARTWORK")
+	stickyDivider:SetHeight(1)
+	stickyDivider:SetPoint("BOTTOMLEFT", stickyPane, "BOTTOMLEFT", 12, 1)
+	stickyDivider:SetPoint("BOTTOMRIGHT", stickyPane, "BOTTOMRIGHT", -6, 1)
+	stickyDivider:SetColorTexture(0.65, 0.55, 0.30, 0.32)
+	stickyPane:Hide()
+	win.StickyPane = stickyPane
+	win.StickyCards = {}
+
+	-- Rechter Scroll-Bereich (auto-hide Scrollbar; greift nur bei Überlänge z. B. vielen Presets oder Suchtreffern)
 	local scrollFrame = CreateFrame("ScrollFrame", nil, win, "UIPanelScrollFrameTemplate")
+	scrollFrame.scrollBarHideable = true
 	scrollFrame:SetPoint("TOPLEFT", sidebar, "TOPRIGHT", 2, -6)
-	scrollFrame:SetPoint("BOTTOMRIGHT", win, "BOTTOMRIGHT", -28, 10)
+	scrollFrame:SetPoint("BOTTOMRIGHT", win, "BOTTOMRIGHT", -28, RIGHT_AREA_BOTTOM_PAD)
+	if scrollFrame.ScrollBar then
+		scrollFrame.ScrollBar:Hide()
+	end
 	win.ScrollFrame = scrollFrame
 
 	local scrollChild = CreateFrame("Frame", nil, scrollFrame)
-	scrollChild:SetSize(502, 460)
+	scrollChild:SetSize(656, 460)
 	scrollFrame:SetScrollChild(scrollChild)
 	win.ScrollChild = scrollChild
 
@@ -1532,6 +1609,13 @@ local function EnsureSettingsWindow()
 		return Reg(Widgets.CreateToggleRow(card, spec))
 	end
 
+	local function AddIndexedToggleGrid(card, tabIdx, entries)
+		for idx, item in ipairs(entries) do
+			item.spec.col = ((idx - 1) % 2) + 1
+			AddIndexedToggle(card, tabIdx, item.spec, item.keywords)
+		end
+	end
+
 	local function AddIndexedSegmented(card, tabIdx, spec, keywords)
 		RegisterSearchEntry({
 			tabIndex = tabIdx,
@@ -1550,14 +1634,16 @@ local function EnsureSettingsWindow()
 	end
 
 	----------------------------------------------------------------------------
-	-- SEITE 1: Klickbelegung & Ränge (Live-Zeilen-Vorschau + 2 Themen-Karten)
+	-- SEITE 1: Klickbelegung & Ränge (Sticky Zeilen-Vorschau + 2 Themen-Karten)
 	----------------------------------------------------------------------------
-	local p1 = win.Pages[1]
-	local y1 = -6
-
-	local c1Prev = Reg(Widgets.CreateCard(p1, "UX_CARD_PREVIEW", y1))
+	local c1Prev = Reg(Widgets.CreateCard(stickyPane, "UX_CARD_PREVIEW", 0))
 	Reg(Widgets.CreateLineLivePreview(c1Prev))
-	y1 = c1Prev:Finalize(8)
+	c1Prev:Finalize(8)
+	c1Prev.stickyHeight = c1Prev:GetHeight() + 6
+	win.StickyCards[1] = c1Prev
+
+	local p1 = win.Pages[1]
+	local y1 = -2
 
 	local c1Layout = Reg(Widgets.CreateCard(p1, "UX_CARD_LIST_LAYOUT", y1))
 	AddIndexedSegmented(c1Layout, 1, {
@@ -1567,9 +1653,11 @@ local function EnsureSettingsWindow()
 		descKey = "GROUP_TOOLTIP_DESC",
 		options = GROUP_MODES,
 	}, "group sort modifier button type")
-	AddIndexedToggle(c1Layout, 1, { dbKey = "compactListMode", labelKey = "SETTING_COMPACT_LIST_MODE", descKey = "SETTING_COMPACT_LIST_MODE_DESC" }, "compact row height small")
-	AddIndexedToggle(c1Layout, 1, { dbKey = "moveInteractionsToBottom", labelKey = "SETTING_MOVE_INTERACTIONS_BOTTOM", descKey = "SETTING_MOVE_INTERACTIONS_BOTTOM_DESC" }, "target menu interaction bottom")
-	AddIndexedToggle(c1Layout, 1, { dbKey = "showLineTooltips", labelKey = "SETTING_SHOW_LINE_TOOLTIPS", descKey = "SETTING_SHOW_LINE_TOOLTIPS_DESC" }, "tooltip spell")
+	AddIndexedToggleGrid(c1Layout, 1, {
+		{ spec = { dbKey = "compactListMode",          labelKey = "SETTING_COMPACT_LIST_MODE",          descKey = "SETTING_COMPACT_LIST_MODE_DESC" },          keywords = "compact row height small" },
+		{ spec = { dbKey = "moveInteractionsToBottom", labelKey = "SETTING_MOVE_INTERACTIONS_BOTTOM",   descKey = "SETTING_MOVE_INTERACTIONS_BOTTOM_DESC" },   keywords = "target menu interaction bottom" },
+		{ spec = { dbKey = "showLineTooltips",         labelKey = "SETTING_SHOW_LINE_TOOLTIPS",         descKey = "SETTING_SHOW_LINE_TOOLTIPS_DESC" },         keywords = "tooltip spell" },
+	})
 	y1 = c1Layout:Finalize(8)
 
 	local c1Ranks = Reg(Widgets.CreateCard(p1, "UX_CARD_RANKS_RULES", y1))
@@ -1580,11 +1668,13 @@ local function EnsureSettingsWindow()
 		descKey = "TRAINER_BEHAVIOR_TOOLTIP_DESC",
 		options = TRAINER_BEHAVIOR_OPTIONS,
 	}, "trainer upgrade hero card learn")
-	AddIndexedToggle(c1Ranks, 1, { dbKey = "showRankInName", labelKey = "SETTING_SHOW_RANK_IN_NAME", descKey = "SETTING_SHOW_RANK_IN_NAME_DESC" }, "rank name")
-	AddIndexedToggle(c1Ranks, 1, { dbKey = "highlightDownranks", labelKey = "SETTING_HIGHLIGHT_DOWNRANKS", descKey = "SETTING_HIGHLIGHT_DOWNRANKS_DESC" }, "downrank highlight color")
-	AddIndexedToggle(c1Ranks, 1, { dbKey = "showRankSwitcher", labelKey = "SETTING_SHOW_RANK_SWITCHER", descKey = "SETTING_SHOW_RANK_SWITCHER_DESC" }, "switcher dropdown inline")
-	AddIndexedToggle(c1Ranks, 1, { dbKey = "showLineManaCost", labelKey = "SETTING_SHOW_LINE_MANA_COST", descKey = "SETTING_SHOW_LINE_MANA_COST_DESC" }, "mana cost power")
-	AddIndexedToggle(c1Ranks, 1, { dbKey = "enableSmartRankRules", labelKey = "SETTING_ENABLE_SMART_RULES", descKey = "SETTING_ENABLE_SMART_RULES_DESC" }, "smart rules max fixed")
+	AddIndexedToggleGrid(c1Ranks, 1, {
+		{ spec = { dbKey = "showRankInName",       labelKey = "SETTING_SHOW_RANK_IN_NAME",    descKey = "SETTING_SHOW_RANK_IN_NAME_DESC" },    keywords = "rank name" },
+		{ spec = { dbKey = "highlightDownranks",   labelKey = "SETTING_HIGHLIGHT_DOWNRANKS",  descKey = "SETTING_HIGHLIGHT_DOWNRANKS_DESC" },  keywords = "downrank highlight color" },
+		{ spec = { dbKey = "showRankSwitcher",     labelKey = "SETTING_SHOW_RANK_SWITCHER",   descKey = "SETTING_SHOW_RANK_SWITCHER_DESC" },   keywords = "switcher dropdown inline" },
+		{ spec = { dbKey = "showLineManaCost",     labelKey = "SETTING_SHOW_LINE_MANA_COST",  descKey = "SETTING_SHOW_LINE_MANA_COST_DESC" },  keywords = "mana cost power" },
+		{ spec = { dbKey = "enableSmartRankRules", labelKey = "SETTING_ENABLE_SMART_RULES",   descKey = "SETTING_ENABLE_SMART_RULES_DESC" },   keywords = "smart rules max fixed" },
+	})
 
 	local upgY = c1Ranks:Advance(28, 4)
 	local upgradeBtn = Reg(Widgets.CreateStyledButton(
@@ -1613,36 +1703,40 @@ local function EnsureSettingsWindow()
 		"ACTION_UPGRADE_ALL_MAX_DESC"
 	))
 	upgradeBtn:SetPoint("TOPLEFT", c1Ranks, "TOPLEFT", 14, upgY)
-	y1 = c1Ranks:Finalize(10)
-	p1.contentHeight = math.abs(y1) + 12
+	y1 = c1Ranks:Finalize(8)
+	p1.contentHeight = math.abs(y1) + 4
 
 	----------------------------------------------------------------------------
-	-- SEITE 2: Zauberbuch (eigene prominente Kategorie + Live-Slot-Vorschau)
+	-- SEITE 2: Zauberbuch (Sticky Slot-Vorschau + volle Zeilenbreite darunter)
 	----------------------------------------------------------------------------
-	local p2 = win.Pages[2]
-	local y2 = -6
-
-	local c2Prev = Reg(Widgets.CreateCard(p2, "UX_CARD_PREVIEW", y2))
+	local c2Prev = Reg(Widgets.CreateCard(stickyPane, "UX_CARD_PREVIEW", 0))
 	Reg(Widgets.CreateSpellbookLivePreview(c2Prev))
-	y2 = c2Prev:Finalize(8)
+	c2Prev:Finalize(8)
+	c2Prev.stickyHeight = c2Prev:GetHeight() + 6
+	win.StickyCards[2] = c2Prev
+
+	local p2 = win.Pages[2]
+	local y2 = -2
 
 	local c2Sb = Reg(Widgets.CreateCard(p2, "SETTINGS_HEADER_SPELLBOOK", y2))
-	AddIndexedToggle(c2Sb, 2, { dbKey = "quickBindSpellbook", labelKey = "SETTING_QUICK_BIND_SPELLBOOK", descKey = "SETTING_QUICK_BIND_SPELLBOOK_DESC" }, "spellbook quick bind click")
-	AddIndexedToggle(c2Sb, 2, { dbKey = "showSpellbookBadges", labelKey = "SETTING_SHOW_SPELLBOOK_BADGES", descKey = "SETTING_SHOW_SPELLBOOK_BADGES_DESC" }, "spellbook badge key")
-	AddIndexedToggle(c2Sb, 2, { dbKey = "autoShowAllRanks", labelKey = "SETTING_AUTO_SHOW_ALL_RANKS", descKey = "SETTING_AUTO_SHOW_ALL_RANKS_DESC" }, "spellbook all ranks cvar")
-	AddIndexedToggle(c2Sb, 2, { dbKey = "autoSelectPrimarySpellTab", labelKey = "SETTING_AUTO_SELECT_PRIMARY_TAB", descKey = "SETTING_AUTO_SELECT_PRIMARY_TAB_DESC" }, "spellbook primary class tab")
+	AddIndexedToggle(c2Sb, 2, { dbKey = "quickBindSpellbook",        labelKey = "SETTING_QUICK_BIND_SPELLBOOK",        descKey = "SETTING_QUICK_BIND_SPELLBOOK_DESC" },        "spellbook quick bind click")
+	AddIndexedToggle(c2Sb, 2, { dbKey = "showSpellbookBadges",       labelKey = "SETTING_SHOW_SPELLBOOK_BADGES",       descKey = "SETTING_SHOW_SPELLBOOK_BADGES_DESC" },       "spellbook badge key")
+	AddIndexedToggle(c2Sb, 2, { dbKey = "autoShowAllRanks",          labelKey = "SETTING_AUTO_SHOW_ALL_RANKS",          descKey = "SETTING_AUTO_SHOW_ALL_RANKS_DESC" },          "spellbook all ranks cvar")
+	AddIndexedToggle(c2Sb, 2, { dbKey = "autoSelectPrimarySpellTab", labelKey = "SETTING_AUTO_SELECT_PRIMARY_TAB",     descKey = "SETTING_AUTO_SELECT_PRIMARY_TAB_DESC" },     "spellbook primary class tab")
 	y2 = c2Sb:Finalize(10)
-	p2.contentHeight = math.abs(y2) + 12
+	p2.contentHeight = math.abs(y2) + 4
 
 	----------------------------------------------------------------------------
-	-- SEITE 3: Matrix & Reihenfolge (klar vom Zauberbuch getrennt + Reorder eingebettet)
+	-- SEITE 3: Matrix & Reihenfolge (volle Höhe + Reorder-Editor eingebettet)
 	----------------------------------------------------------------------------
 	local p3 = win.Pages[3]
 	local y3 = -6
 
 	local c3Mat = Reg(Widgets.CreateCard(p3, "UX_CARD_MATRIX_SETTINGS", y3))
-	AddIndexedToggle(c3Mat, 3, { dbKey = "matrixAutoOpen", labelKey = "MATRIX_AUTO_OPEN_CHECKBOX", descKey = "MATRIX_AUTO_OPEN_DESC" }, "matrix auto open free keys")
-	AddIndexedToggle(c3Mat, 3, { dbKey = "matrixShowCombos", labelKey = "MATRIX_SHOW_COMBOS_CHECKBOX", descKey = "MATRIX_SHOW_COMBOS_DESC" }, "matrix combos 8x5 12x5 default")
+	AddIndexedToggleGrid(c3Mat, 3, {
+		{ spec = { dbKey = "matrixAutoOpen",   labelKey = "MATRIX_AUTO_OPEN_CHECKBOX",   descKey = "MATRIX_AUTO_OPEN_DESC" },   keywords = "matrix auto open free keys" },
+		{ spec = { dbKey = "matrixShowCombos", labelKey = "MATRIX_SHOW_COMBOS_CHECKBOX", descKey = "MATRIX_SHOW_COMBOS_DESC" }, keywords = "matrix combos 8x5 12x5 default" },
+	})
 	AddIndexedSegmented(c3Mat, 3, {
 		dbKey = "matrixMetaMode",
 		defaultValue = "auto",
@@ -1656,20 +1750,23 @@ local function EnsureSettingsWindow()
 	reorderCard, y3 = BuildEmbeddedReorderCard(p3, y3)
 	win.ReorderCard = reorderCard
 	RegisterSearchEntry({ tabIndex = 3, navKey = "UX_NAV_MATRIX", labelKey = "REORDER_WINDOW_TITLE", descKey = "SETTINGS_REORDER_DESC", keywords = "reorder mouse button mmb mmo mb6 modifier drag" })
-	p3.contentHeight = math.abs(y3) + 12
+	p3.contentHeight = math.abs(y3) + 6
 
 	----------------------------------------------------------------------------
-	-- SEITE 4: Unit-Frame Hover-Overlay (Live-Preview + Anker-Schaubild + Details)
+	-- SEITE 4: Unit-Frame Hover-Overlay (Sticky Live-Karte + Anker & Anzeige)
 	----------------------------------------------------------------------------
-	local p4 = win.Pages[4]
-	local y4 = -6
 	local isHoverEnabled = function()
 		return (Database.Get("unitHoverMode") or "off") ~= "off"
 	end
 
-	local c4Prev = Reg(Widgets.CreateCard(p4, "UX_CARD_PREVIEW", y4))
+	local c4Prev = Reg(Widgets.CreateCard(stickyPane, "UX_CARD_PREVIEW", 0))
 	Reg(Widgets.CreateHoverOverlayLivePreview(c4Prev))
-	y4 = c4Prev:Finalize(8)
+	c4Prev:Finalize(8)
+	c4Prev.stickyHeight = c4Prev:GetHeight() + 6
+	win.StickyCards[4] = c4Prev
+
+	local p4 = win.Pages[4]
+	local y4 = -2
 
 	local c4Mode = Reg(Widgets.CreateCard(p4, "SETTINGS_HEADER_UNITHOVER", y4))
 	AddIndexedSegmented(c4Mode, 4, {
@@ -1690,17 +1787,19 @@ local function EnsureSettingsWindow()
 	hintFs:SetText(L["UX_HOVER_DISABLED_HINT"])
 	c4Disp.disabledHintText = hintFs
 
-	Reg(Widgets.CreateSliderRow(c4Disp, { dbKey = "unitHoverScale", minVal = 70, maxVal = 150, stepVal = 5, formatKey = "SETTING_UNITHOVER_SCALE_FORMAT", enabledFunc = isHoverEnabled }))
+	Reg(Widgets.CreateSliderRow(c4Disp, { col = 1, dbKey = "unitHoverScale", minVal = 70, maxVal = 150, stepVal = 5, formatKey = "SETTING_UNITHOVER_SCALE_FORMAT", enabledFunc = isHoverEnabled }))
 	RegisterSearchEntry({ tabIndex = 4, navKey = "UX_NAV_HOVER", labelKey = "SETTING_UNITHOVER_SCALE_FORMAT", keywords = "scale size zoom hover" })
-	Reg(Widgets.CreateSliderRow(c4Disp, { dbKey = "unitHoverAlpha", minVal = 30, maxVal = 100, stepVal = 5, formatKey = "SETTING_UNITHOVER_ALPHA_FORMAT", enabledFunc = isHoverEnabled }))
+	Reg(Widgets.CreateSliderRow(c4Disp, { col = 2, dbKey = "unitHoverAlpha", minVal = 30, maxVal = 100, stepVal = 5, formatKey = "SETTING_UNITHOVER_ALPHA_FORMAT", enabledFunc = isHoverEnabled }))
 	RegisterSearchEntry({ tabIndex = 4, navKey = "UX_NAV_HOVER", labelKey = "SETTING_UNITHOVER_ALPHA_FORMAT", keywords = "opacity alpha transparency hover" })
 
-	AddIndexedToggle(c4Disp, 4, { dbKey = "unitHoverShowMana", labelKey = "SETTING_UNITHOVER_SHOW_MANA", descKey = "SETTING_UNITHOVER_SHOW_MANA_DESC", enabledFunc = isHoverEnabled }, "hover mana")
-	AddIndexedToggle(c4Disp, 4, { dbKey = "unitHoverShowRankTags", labelKey = "SETTING_UNITHOVER_SHOW_RANK_TAGS", descKey = "SETTING_UNITHOVER_SHOW_RANK_TAGS_DESC", enabledFunc = isHoverEnabled }, "hover rank max tag")
-	AddIndexedToggle(c4Disp, 4, { dbKey = "unitHoverShowRange", labelKey = "SETTING_UNITHOVER_SHOW_RANGE", descKey = "SETTING_UNITHOVER_SHOW_RANGE_DESC", enabledFunc = isHoverEnabled }, "hover range oor out of range")
-	AddIndexedToggle(c4Disp, 4, { dbKey = "unitHoverShowInCombat", labelKey = "SETTING_UNITHOVER_SHOW_IN_COMBAT", descKey = "SETTING_UNITHOVER_SHOW_IN_COMBAT_DESC", enabledFunc = isHoverEnabled }, "hover combat infight")
-	y4 = c4Disp:Finalize(10)
-	p4.contentHeight = math.abs(y4) + 12
+	AddIndexedToggleGrid(c4Disp, 4, {
+		{ spec = { dbKey = "unitHoverShowMana",     labelKey = "SETTING_UNITHOVER_SHOW_MANA",      descKey = "SETTING_UNITHOVER_SHOW_MANA_DESC",      enabledFunc = isHoverEnabled }, keywords = "hover mana" },
+		{ spec = { dbKey = "unitHoverShowRankTags", labelKey = "SETTING_UNITHOVER_SHOW_RANK_TAGS", descKey = "SETTING_UNITHOVER_SHOW_RANK_TAGS_DESC", enabledFunc = isHoverEnabled }, keywords = "hover rank max tag" },
+		{ spec = { dbKey = "unitHoverShowRange",    labelKey = "SETTING_UNITHOVER_SHOW_RANGE",     descKey = "SETTING_UNITHOVER_SHOW_RANGE_DESC",     enabledFunc = isHoverEnabled }, keywords = "hover range oor out of range" },
+		{ spec = { dbKey = "unitHoverShowInCombat", labelKey = "SETTING_UNITHOVER_SHOW_IN_COMBAT", descKey = "SETTING_UNITHOVER_SHOW_IN_COMBAT_DESC", enabledFunc = isHoverEnabled }, keywords = "hover combat infight" },
+	})
+	y4 = c4Disp:Finalize(8)
+	p4.contentHeight = math.abs(y4) + 4
 
 	----------------------------------------------------------------------------
 	-- SEITE 5: Presets & Dual-Spec (Sichtbare Inline-Preset-Liste)
@@ -1844,8 +1943,8 @@ local function EnsureSettingsWindow()
 		end
 	end, "secondary", "SETTINGS_RUN_DEBUG_DESC"))
 	dbgBtn:SetPoint("TOPLEFT", c6Sys, "TOPLEFT", 14 + sysHalfW + 6, sysRowY)
-	y6 = c6Sys:Finalize(10)
-	p6.contentHeight = math.abs(y6) + 12
+	y6 = c6Sys:Finalize(8)
+	p6.contentHeight = math.abs(y6) + 6
 
 	win:Hide()
 	settingsWindow = win
@@ -1956,7 +2055,24 @@ function SettingsUI.RefreshWindow()
 			RefreshPresetManagerCard()
 		end
 	end
-	UpdateScrollChildHeight()
+	SyncStickyAndScrollLayout()
+end
+
+-- Read-Only-Inspektion für /bcc debug deep (prüft Sticky-Vorschauen & Scrollfreiheit auf allen Tabs)
+function SettingsUI.GetLayoutState()
+	if not settingsWindow then
+		return nil
+	end
+	return {
+		width          = math.floor((settingsWindow:GetWidth() or 0) + 0.5),
+		height         = math.floor((settingsWindow:GetHeight() or 0) + 0.5),
+		activeTab      = activeTabIndex,
+		isSearching    = (currentSearchQuery ~= ""),
+		stickyShown    = (settingsWindow.StickyPane and settingsWindow.StickyPane:IsShown()) and true or false,
+		needsScroll    = settingsWindow.lastNeedsScroll and true or false,
+		contentHeight  = settingsWindow.lastContentHeight or 0,
+		viewportHeight = settingsWindow.lastViewportHeight or 0,
+	}
 end
 
 function SettingsUI.OpenSettingsTab(tabIndex)

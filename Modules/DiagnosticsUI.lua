@@ -340,10 +340,30 @@ local function RunDeepStressSelfTest(findings, infoNotes)
 
 		if SettingsUI and SettingsUI.OpenSettingsTab then
 			local maxTabs = SettingsUI.NAV_COUNT or 6
+			local presetCount = (Database.GetPresetList and #Database.GetPresetList()) or 0
 			for tabIdx = 1, maxTabs do
 				SettingsUI.OpenSettingsTab(tabIdx)
+				if SettingsUI.GetLayoutState then
+					local st = SettingsUI.GetLayoutState()
+					local expectSticky = (tabIdx == 1 or tabIdx == 2 or tabIdx == 4)
+					if st then
+						if st.stickyShown ~= expectSticky then
+							table.insert(findings, string.format("DeepTest SettingsLayout: Tab %d stickyShown=%s (expected %s)", tabIdx, tostring(st.stickyShown), tostring(expectSticky)))
+						end
+						if (tabIdx ~= 5 or presetCount <= 12) and st.needsScroll then
+							table.insert(findings, string.format("DeepTest SettingsLayout: Tab %d unexpectedly requires scrolling (content=%d > viewport=%d)", tabIdx, st.contentHeight or 0, st.viewportHeight or 0))
+						end
+					end
+				end
 			end
 			if SettingsUI.SetSearchFilter and SettingsUI.GetSearchFilter then
+				SettingsUI.SetSearchFilter("a")
+				if SettingsUI.GetLayoutState then
+					local stSearch = SettingsUI.GetLayoutState()
+					if stSearch and stSearch.stickyShown then
+						table.insert(findings, "DeepTest SettingsSearch: StickyPane should hide while search results are active")
+					end
+				end
 				SettingsUI.SetSearchFilter("mana")
 				if SettingsUI.GetSearchFilter() ~= "mana" then
 					table.insert(findings, "DeepTest SettingsSearch: failed to apply search query 'mana'")
