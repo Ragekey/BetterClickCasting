@@ -65,10 +65,10 @@ SettingsUI.LOCALE_OPTIONS = LOCALE_OPTIONS
 local NAV_SECTIONS = {
 	{ index = 1, labelKey = "UX_NAV_CLICKCAST", atlas = Constants.ICON_ATLAS },
 	{ index = 2, labelKey = "UX_NAV_SPELLBOOK", texture = 133741 },
-	{ index = 3, labelKey = "UX_NAV_MATRIX",    texture = 134414 },
-	{ index = 4, labelKey = "UX_NAV_HOVER",     atlas = "Raid-Icon-SummonPending" },
-	{ index = 5, labelKey = "UX_NAV_PRESETS",   texture = 134327 },
-	{ index = 6, labelKey = "UX_NAV_PROFILES",  atlas = "questlog-icon-setting" },
+	{ index = 3, labelKey = "UX_NAV_MATRIX",    atlas = "newplayertutorial-icon-key" },
+	{ index = 4, labelKey = "UX_NAV_HOVER",     atlas = "friends-icon-eye", tint = { 0.55, 0.90, 1.0 } },
+	{ index = 5, labelKey = "UX_NAV_PRESETS",   atlas = "Garr_SwapIcon" },
+	{ index = 6, labelKey = "UX_NAV_PROFILES",  atlas = "groupfinder-icon-friend" },
 }
 SettingsUI.NAV_COUNT = #NAV_SECTIONS
 
@@ -1260,6 +1260,17 @@ local function SyncStickyAndScrollLayout()
 	local contentH = (activePage and activePage.contentHeight) or 100
 	local needsScroll = (contentH > viewportH)
 
+	-- Echtes Glas-Sichtfenster auf Seite 4: schaltet den Hauptfenster-Hintergrund auf den 4-Streifen-Ausschnitt um
+	local useWorldCutout = (not isSearching) and (activeTabIndex == 4) and (settingsWindow.BgCutoutSlices ~= nil)
+	if settingsWindow.BgFull then
+		settingsWindow.BgFull:SetShown(not useWorldCutout)
+	end
+	if settingsWindow.BgCutoutSlices then
+		for _, sliceTex in ipairs(settingsWindow.BgCutoutSlices) do
+			sliceTex:SetShown(useWorldCutout)
+		end
+	end
+
 	settingsWindow.ScrollChild:SetHeight(needsScroll and contentH or math.max(1, contentH))
 	if not needsScroll and sf.SetVerticalScroll then
 		sf:SetVerticalScroll(0)
@@ -1343,9 +1354,16 @@ local function EnsureSettingsWindow()
 			edgeSize = 24,
 			insets = { left = 6, right = 6, top = 6, bottom = 6 },
 		})
-		win:SetBackdropColor(0.045, 0.055, 0.085, 0.97)
+		-- Rahmen über Backdrop, Innenfläche über eigene Hintergrund-Texturen (ermöglicht 100 % transparenten Ausschnitt auf Seite 4)
+		win:SetBackdropColor(0, 0, 0, 0)
 		win:SetBackdropBorderColor(0.85, 0.72, 0.40, 1.0)
 	end
+
+	local bgFull = win:CreateTexture(nil, "BACKGROUND", nil, 0)
+	bgFull:SetPoint("TOPLEFT", win, "TOPLEFT", 7, -7)
+	bgFull:SetPoint("BOTTOMRIGHT", win, "BOTTOMRIGHT", -7, 7)
+	bgFull:SetColorTexture(0.045, 0.055, 0.085, 0.97)
+	win.BgFull = bgFull
 
 	-- Kopfzeile + Globale Suchbox
 	local headerBg = win:CreateTexture(nil, "BACKGROUND", nil, 1)
@@ -1486,6 +1504,9 @@ local function EnsureSettingsWindow()
 		elseif nav.texture then
 			ic:SetTexture(nav.texture)
 			ic:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+		end
+		if nav.tint then
+			ic:SetVertexColor(nav.tint[1], nav.tint[2], nav.tint[3], nav.tint[4] or 1.0)
 		end
 
 		local fs = b:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
@@ -1760,8 +1781,51 @@ local function EnsureSettingsWindow()
 	end
 
 	local c4Prev = Reg(Widgets.CreateCard(stickyPane, "UX_CARD_PREVIEW", 0))
-	Reg(Widgets.CreateHoverOverlayLivePreview(c4Prev))
+	local c4Stage = Reg(Widgets.CreateHoverOverlayLivePreview(c4Prev))
 	c4Prev:Finalize(8)
+	-- Karten-Körper hinter der Hover-Bühne transparent lassen (nur Kopfzeilen-Streifen & Rahmen bleiben sichtbar)
+	if c4Prev.SetBackdropColor then
+		c4Prev:SetBackdropColor(0, 0, 0, 0)
+	end
+	local c4HeaderFill = c4Prev:CreateTexture(nil, "BACKGROUND", nil, 0)
+	c4HeaderFill:SetPoint("TOPLEFT", c4Prev, "TOPLEFT", 3, -3)
+	c4HeaderFill:SetPoint("TOPRIGHT", c4Prev, "TOPRIGHT", -3, -3)
+	c4HeaderFill:SetHeight(35)
+	c4HeaderFill:SetColorTexture(Widgets.THEME.cardBg[1], Widgets.THEME.cardBg[2], Widgets.THEME.cardBg[3], Widgets.THEME.cardBg[4] or 0.92)
+
+	-- 4 überlappungsfreie Hintergrund-Streifen auf dem Hauptfenster, die exakt c4Stage zur 3D-Spielwelt aussparen
+	if c4Stage then
+		local function MakeCutSlice()
+			local t = win:CreateTexture(nil, "BACKGROUND", nil, 0)
+			t:SetColorTexture(0.045, 0.055, 0.085, 0.97)
+			t:Hide()
+			return t
+		end
+		local cutTop = MakeCutSlice()
+		cutTop:SetPoint("TOPLEFT", win, "TOPLEFT", 7, -7)
+		cutTop:SetPoint("RIGHT", win, "RIGHT", -7, 0)
+		cutTop:SetPoint("BOTTOM", c4Stage, "TOP", 0, -2)
+
+		local cutBottom = MakeCutSlice()
+		cutBottom:SetPoint("TOP", c4Stage, "BOTTOM", 0, 2)
+		cutBottom:SetPoint("LEFT", win, "LEFT", 7, 0)
+		cutBottom:SetPoint("BOTTOMRIGHT", win, "BOTTOMRIGHT", -7, 7)
+
+		local cutLeft = MakeCutSlice()
+		cutLeft:SetPoint("TOP", c4Stage, "TOP", 0, -2)
+		cutLeft:SetPoint("BOTTOM", c4Stage, "BOTTOM", 0, 2)
+		cutLeft:SetPoint("LEFT", win, "LEFT", 7, 0)
+		cutLeft:SetPoint("RIGHT", c4Stage, "LEFT", 2, 0)
+
+		local cutRight = MakeCutSlice()
+		cutRight:SetPoint("TOP", c4Stage, "TOP", 0, -2)
+		cutRight:SetPoint("BOTTOM", c4Stage, "BOTTOM", 0, 2)
+		cutRight:SetPoint("LEFT", c4Stage, "RIGHT", -2, 0)
+		cutRight:SetPoint("RIGHT", win, "RIGHT", -7, 0)
+
+		win.BgCutoutSlices = { cutTop, cutBottom, cutLeft, cutRight }
+	end
+
 	c4Prev.stickyHeight = c4Prev:GetHeight() + 6
 	win.StickyCards[4] = c4Prev
 

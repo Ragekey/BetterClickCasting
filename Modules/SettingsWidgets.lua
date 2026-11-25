@@ -858,7 +858,9 @@ function SettingsWidgets.CreateHoverOverlayLivePreview(card)
 	stage:SetSize(card.innerWidth, 112)
 	stage:SetPoint("TOPLEFT", card, "TOPLEFT", 14, y)
 	stage:SetClipsChildren(true)
-	SettingsWidgets.ApplyBoxBackdrop(stage, { 0.035, 0.045, 0.07, 0.92 }, { 0.22, 0.28, 0.38, 0.75 }, false)
+	-- Volltransparentes Sichtfenster (alpha = 0), damit die echte 3D-Spielwelt für die Opacity-Bewertung durchscheint
+	SettingsWidgets.ApplyBoxBackdrop(stage, { 0, 0, 0, 0 }, { 0.36, 0.44, 0.58, 0.85 }, false)
+	card.previewStage = stage
 
 	-- Exakter Nachbau von hoverCard aus Modules/UnitHoverTooltip.lua:556-785
 	local mockCard = CreateFrame("Frame", nil, stage, "BackdropTemplate")
