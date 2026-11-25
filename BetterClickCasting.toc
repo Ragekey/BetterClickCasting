@@ -33,6 +33,10 @@ Modules\SettingsUI.lua
 Modules\MinimapButton.lua
 Modules\SpellBookUI.lua
 Modules\ClickBindingUI.lua
+Modules\HeroCardUI.lua
+Modules\FreeKeysMatrixUI.lua
+Modules\PresetsAndImportUI.lua
+Modules\DiagnosticsUI.lua
 Modules\UnitHoverTooltip.lua
 
 BetterClickCasting.lua
