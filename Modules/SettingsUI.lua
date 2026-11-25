@@ -65,7 +65,7 @@ SettingsUI.LOCALE_OPTIONS = LOCALE_OPTIONS
 local NAV_SECTIONS = {
 	{ index = 1, labelKey = "UX_NAV_CLICKCAST", atlas = Constants.ICON_ATLAS },
 	{ index = 2, labelKey = "UX_NAV_SPELLBOOK", texture = 133741 },
-	{ index = 3, labelKey = "UX_NAV_MATRIX",    atlas = "newplayertutorial-icon-key" },
+	{ index = 3, labelKey = "UX_NAV_MATRIX",    matrixGrid = true },
 	{ index = 4, labelKey = "UX_NAV_HOVER",     atlas = "friends-icon-eye", tint = { 0.55, 0.90, 1.0 } },
 	{ index = 5, labelKey = "UX_NAV_PRESETS",   atlas = "Garr_SwapIcon" },
 	{ index = 6, labelKey = "UX_NAV_PROFILES",  atlas = "groupfinder-icon-friend" },
@@ -1496,21 +1496,50 @@ local function EnsureSettingsWindow()
 		hl:SetAllPoints()
 		hl:SetColorTexture(1, 1, 1, 0.06)
 
-		local ic = b:CreateTexture(nil, "ARTWORK")
-		ic:SetSize(16, 16)
-		ic:SetPoint("LEFT", b, "LEFT", 11, 0)
-		if nav.atlas then
-			ic:SetAtlas(nav.atlas)
-		elseif nav.texture then
-			ic:SetTexture(nav.texture)
-			ic:SetTexCoord(0.08, 0.92, 0.08, 0.92)
-		end
-		if nav.tint then
-			ic:SetVertexColor(nav.tint[1], nav.tint[2], nav.tint[3], nav.tint[4] or 1.0)
+		local icAnchor
+		if nav.matrixGrid then
+			-- 3x3 Mini-Matrix-Raster (14x14 px in 16x16 Container: Gold/Blau = belegt, Grün = frei)
+			local gridHolder = CreateFrame("Frame", nil, b)
+			gridHolder:SetSize(16, 16)
+			gridHolder:SetPoint("LEFT", b, "LEFT", 11, 0)
+			local palette = {
+				G = { 0.95, 0.78, 0.25, 0.95 },
+				B = { 0.36, 0.72, 0.98, 0.95 },
+				F = { 0.24, 0.78, 0.42, 0.90 },
+			}
+			local layout = {
+				{ "G", "F", "B" },
+				{ "F", "G", "F" },
+				{ "B", "F", "F" },
+			}
+			for r = 1, 3 do
+				for c = 1, 3 do
+					local cell = gridHolder:CreateTexture(nil, "ARTWORK")
+					cell:SetSize(4, 4)
+					cell:SetPoint("TOPLEFT", gridHolder, "TOPLEFT", 1 + ((c - 1) * 5), -(1 + ((r - 1) * 5)))
+					local col = palette[layout[r][c]]
+					cell:SetColorTexture(col[1], col[2], col[3], col[4])
+				end
+			end
+			icAnchor = gridHolder
+		else
+			local ic = b:CreateTexture(nil, "ARTWORK")
+			ic:SetSize(16, 16)
+			ic:SetPoint("LEFT", b, "LEFT", 11, 0)
+			if nav.atlas then
+				ic:SetAtlas(nav.atlas)
+			elseif nav.texture then
+				ic:SetTexture(nav.texture)
+				ic:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+			end
+			if nav.tint then
+				ic:SetVertexColor(nav.tint[1], nav.tint[2], nav.tint[3], nav.tint[4] or 1.0)
+			end
+			icAnchor = ic
 		end
 
 		local fs = b:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-		fs:SetPoint("LEFT", ic, "RIGHT", 8, 0)
+		fs:SetPoint("LEFT", icAnchor, "RIGHT", 8, 0)
 		fs:SetPoint("RIGHT", b, "RIGHT", -4, 0)
 		fs:SetJustifyH("LEFT")
 		fs:SetWordWrap(false)
