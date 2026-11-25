@@ -1,0 +1,117 @@
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - main
+      - dev
+      - next
+      - "rework/**"
+  push:
+    branches:
+      - main
+      - dev
+      - next
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate AddOn (Syntax, TOC & Locales)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install Lua 5.1
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq lua5.1
+
+      - name: Lua 5.1 Bytecode Syntax Check
+        run: |
+          set -euo pipefail
+          count=0
+          while IFS= read -r -d '' file; do
+            luac5.1 -p "$file"
+            count=$((count + 1))
+          done < <(find . -name "*.lua" -not -path "./.git/*" -print0)
+          echo "Syntax OK ($count Lua files checked)."
+
+      - name: Validate TOC Files & Locale Parity
+        run: |
+          lua5.1 - << 'EOF'
+          local function fail(msg)
+            io.stderr:write("CI ERROR: " .. msg .. "\n")
+            os.exit(1)
+          end
+
+          -- 1. TOC-Prüfung (Version + Dateipfade)
+          local toc = io.open("BetterClickCasting.toc", "r")
+          if not toc then fail("BetterClickCasting.toc not found") end
+          local version = nil
+          local fileCount = 0
+          for line in toc:lines() do
+            line = line:gsub("\r$", "")
+            local v = line:match("^##%s*Version:%s*(%S+)")
+            if v then version = v end
+            local trimmed = line:match("^%s*(.-)%s*$")
+            if trimmed ~= "" and not trimmed:match("^#") then
+              local normPath = trimmed:gsub("\\", "/")
+              local f = io.open(normPath, "r")
+              if not f then
+                fail("TOC references missing file: " .. normPath)
+              end
+              f:close()
+              fileCount = fileCount + 1
+            end
+          end
+          toc:close()
+          if not version or not version:match("^%d+%.%d+%.%d+") then
+            fail("Invalid or missing ## Version in BetterClickCasting.toc: " .. tostring(version))
+          end
+          print(string.format("TOC OK (version=%s, files=%d).", version, fileCount))
+
+          -- 2. Lokalisierungs-Parität (enUS == deDE == esES) + Format-Signaturen
+          _G.GetLocale = function() return "enUS" end
+          local ns = {}
+          for _, locFile in ipairs({ "Locales/enUS.lua", "Locales/deDE.lua", "Locales/esES.lua" }) do
+            local chunk, err = loadfile(locFile)
+            if not chunk then fail("Failed to load " .. locFile .. ": " .. tostring(err)) end
+            chunk("BetterClickCasting", ns)
+          end
+
+          local function sig(s)
+            if type(s) ~= "string" then return "" end
+            s = s:gsub("%%%%", "")
+            local parts = {}
+            for sp in s:gmatch("%%[%d%.]*[sdfoxXegGcpuq]") do
+              parts[#parts + 1] = sp
+            end
+            return table.concat(parts, ",")
+          end
+
+          local base = ns.Locales and ns.Locales["enUS"]
+          if type(base) ~= "table" then fail("ns.Locales.enUS missing") end
+          local baseCount = 0
+          for _ in pairs(base) do baseCount = baseCount + 1 end
+
+          for _, code in ipairs({ "deDE", "esES" }) do
+            local tbl = ns.Locales[code]
+            if type(tbl) ~= "table" then fail("ns.Locales." .. code .. " missing") end
+            for k, v in pairs(base) do
+              if tbl[k] == nil then
+                fail(string.format("Missing key '%s' in %s", k, code))
+              end
+              if sig(v) ~= sig(tbl[k]) then
+                fail(string.format("Format specifier mismatch for '%s' in %s (enUS='%s' vs %s='%s')", k, code, sig(v), code, sig(tbl[k])))
+              end
+            end
+            for k in pairs(tbl) do
+              if base[k] == nil then
+                fail(string.format("Extra key '%s' in %s (not in enUS)", k, code))
+              end
+            end
+          end
+          print(string.format("Locales OK (%d keys verified across enUS, deDE, esES).", baseCount))
+          EOF
