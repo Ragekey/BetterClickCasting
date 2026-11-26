@@ -19,10 +19,78 @@ ns.DiagnosticsUI = DiagnosticsUI
 local SetSaveButtonGlowShown = ClickBindingUI.SetSaveButtonGlowShown
 local ShowDebugCopyPopup = PresetsAndImportUI.ShowCopyPopup
 
--- Rein lesender Mitschnitt bei ADDON_ACTION_BLOCKED für BetterClickCasting:
+local seenDevAlerts = {}
+local isRunningDeepSelfTest = false
+
+-- Persistenter Live-DEV-Alert (/bcc debug live): öffnet bei unerwarteten Laufzeit-Abweichungen
+-- (Taint, Tab-Rescue, Purge, Save-Mismatch, Layout-Überlauf) außerhalb des Kampfes sofort ein Copy-Paste-Fenster.
+function DiagnosticsUI.RaiseDevAlert(code, summaryText, detailLines, dedupKey, silentPopup)
+	if not (Database and Database.Get and Database.Get("debugLiveAlerts")) then
+		return false
+	end
+	if isRunningDeepSelfTest and not silentPopup then
+		return false
+	end
+	local key = dedupKey or (tostring(code) .. ":" .. tostring(summaryText))
+	if code ~= "LIVE_TEST" and seenDevAlerts[key] then
+		return false
+	end
+	if code ~= "LIVE_TEST" then
+		seenDevAlerts[key] = true
+	end
+
+	local details = type(detailLines) == "table" and detailLines or {}
+	local specIdx = (Constants.GetActiveSpecGroupIndex and Constants.GetActiveSpecGroupIndex()) or 1
+	local gpFlag = (Constants.IsGamepadUIActive and Constants.IsGamepadUIActive()) and 1 or 0
+	local compact = string.format(
+		"BCCALERT|v%s|spec=%d|gp=%d|%s|%s|%s",
+		tostring(Constants.VERSION or "?"),
+		specIdx,
+		gpFlag,
+		tostring(code or "ALERT"),
+		tostring(summaryText or ""),
+		table.concat(details, ";")
+	)
+
+	if not silentPopup then
+		if type(BetterClickCastingDB) == "table" then
+			BetterClickCastingDB.lastDebugReport = compact
+		end
+		if DEFAULT_CHAT_FRAME then
+			DEFAULT_CHAT_FRAME:AddMessage("|cffff4444[BCC DEV ALERT]|r " .. tostring(code) .. ": " .. tostring(summaryText))
+		end
+	end
+
+	-- Im Kampf, im Gamepad-Standby oder im stummen Selbsttest keine UI-Shell aufpoppen
+	if silentPopup or (InCombatLockdown and InCombatLockdown()) or (Constants.IsGamepadUIActive and Constants.IsGamepadUIActive()) then
+		return true, compact
+	end
+
+	local colorLines = {
+		"|cffff4444=== Better Click Casting DEV ALERT ===|r",
+		string.format("|cffaaaaaaCode:|r |cffffd100%s|r   |cffaaaaaaVersion:|r v%s   |cffaaaaaaSpec:|r %d", tostring(code or "ALERT"), tostring(Constants.VERSION or "?"), specIdx),
+		string.format("|cffaaaaaaSummary:|r %s", tostring(summaryText or "")),
+		"",
+		"|cffffd100Details:|r",
+	}
+	for _, line in ipairs(details) do
+		table.insert(colorLines, "  |cffdddddd" .. tostring(line) .. "|r")
+	end
+	table.insert(colorLines, "")
+	table.insert(colorLines, "|cff88ccffTip:|r Click 'Compact Report (Ctrl+C)' to copy this alert. Toggle via '/bcc debug live'.")
+
+	ShowDebugCopyPopup(
+		compact,
+		"BCC DEV ALERT: " .. tostring(code or "Alert"),
+		table.concat(colorLines, "\n")
+	)
+	return true, compact
+end
+
+-- Rein lesender Mitschnitt bei ADDON_ACTION_BLOCKED / ADDON_ACTION_FORBIDDEN für BetterClickCasting:
 -- Erfasst den exakten Laufzeit-Zustand (Combat, alle 6 C_RestrictedActions-Flags, Taint-Status von
 -- dataProvider/SaveButton, SpellBook-Tab und aktives Preset) in BetterClickCastingDB.lastDebugReport.
-function DiagnosticsUI.CaptureBlockedActionDiagnostics(blockedAddon, blockedFunc, silent)
+function DiagnosticsUI.CaptureBlockedActionDiagnostics(blockedAddon, blockedFunc, silent, isForbidden)
 	if blockedAddon ~= Constants.ADDON_NAME and blockedAddon ~= "BetterClickCasting" then
 		return nil
 	end
@@ -60,8 +128,10 @@ function DiagnosticsUI.CaptureBlockedActionDiagnostics(blockedAddon, blockedFunc
 	local gp = Constants.IsGamepadUIActive() and 1 or 0
 	local preset = ClickBindingUI.GetEffectiveActivePresetName() or "none"
 
+	local prefix = isForbidden and "BCCFORBID" or "BCCBLOCK"
 	local line = string.format(
-		"BCCBLOCK|v%s|fn=%s|c=%d,uac=%d|r=%s|cb=%d,pend=%d,dp=%s/%s,sb=%s/%s,n=%d|ps=%d,tab=%s|gp=%d|preset=%s",
+		"%s|v%s|fn=%s|c=%d,uac=%d|r=%s|cb=%d,pend=%d,dp=%s/%s,sb=%s/%s,n=%d|ps=%d,tab=%s|gp=%d|preset=%s",
+		prefix,
 		tostring(Constants.VERSION or "?"),
 		tostring(blockedFunc or "?"),
 		inCombat,
@@ -86,6 +156,15 @@ function DiagnosticsUI.CaptureBlockedActionDiagnostics(blockedAddon, blockedFunc
 		end
 		if DEFAULT_CHAT_FRAME then
 			DEFAULT_CHAT_FRAME:AddMessage("|cffff5555Better Click Casting:|r " .. line)
+		end
+		if Database and Database.Get and Database.Get("debugLiveAlerts") then
+			local alertCode = isForbidden and "ACTION_FORBIDDEN" or "ACTION_BLOCKED"
+			DiagnosticsUI.RaiseDevAlert(
+				alertCode,
+				tostring(blockedFunc or "unknown"),
+				{ line },
+				string.format("%s:%s:%d", alertCode, tostring(blockedFunc or "?"), inCombat)
+			)
 		end
 	end
 	return line
@@ -662,6 +741,23 @@ local function RunDeepStressSelfTest(findings, infoNotes)
 		if type(blockedDiag) ~= "string" or not string.find(blockedDiag, "^BCCBLOCK|") then
 			table.insert(findings, "DeepTest BlockedDiag: CaptureBlockedActionDiagnostics returned invalid format")
 		end
+		-- Live-DEV-Alert-System (/bcc debug live) inkl. Aus/An-Schutz und Session-Deduplizierung prüfen
+		local origLiveAlerts = Database.Get("debugLiveAlerts")
+		Database.Set("debugLiveAlerts", false)
+		local firedOff = DiagnosticsUI.RaiseDevAlert("DEEP_TEST_ALERT", "should not fire", { "k=1" }, "__bcc_deep_dedup__", true)
+		if firedOff then
+			table.insert(findings, "DeepTest LiveAlerts: RaiseDevAlert fired while debugLiveAlerts=false")
+		end
+		Database.Set("debugLiveAlerts", true)
+		local firedOn, alertCompact = DiagnosticsUI.RaiseDevAlert("DEEP_TEST_ALERT", "live check", { "k=1" }, "__bcc_deep_dedup__", true)
+		local firedDup = DiagnosticsUI.RaiseDevAlert("DEEP_TEST_ALERT", "live check", { "k=1" }, "__bcc_deep_dedup__", true)
+		seenDevAlerts["__bcc_deep_dedup__"] = nil
+		Database.Set("debugLiveAlerts", origLiveAlerts)
+		if not firedOn or type(alertCompact) ~= "string" or not string.find(alertCompact, "^BCCALERT|") then
+			table.insert(findings, "DeepTest LiveAlerts: RaiseDevAlert failed to build BCCALERT report when enabled")
+		elseif firedDup then
+			table.insert(findings, "DeepTest LiveAlerts: RaiseDevAlert did not deduplicate identical dedupKey")
+		end
 		-- SecureActionButton-Prüfung für den Minimap-Button (taintfreies /clickcast-Öffnen)
 		local mmBtn = _G.BetterClickCastingMinimapButton
 		if mmBtn and mmBtn.GetAttribute then
@@ -709,6 +805,39 @@ function DiagnosticsUI.RunTaintDiagnostics(subArg)
 		return
 	end
 
+	local debugWord, debugRest = string.match(strtrim(subArg or ""), "^(%S+)%s*(.-)$")
+	if debugWord == "live" then
+		local restLower = string.lower(strtrim(debugRest or ""))
+		if restLower == "test" then
+			local prev = Database.Get("debugLiveAlerts")
+			Database.Set("debugLiveAlerts", true)
+			DiagnosticsUI.RaiseDevAlert(
+				"LIVE_TEST",
+				"Manual Live DEV Alert test triggered via /bcc debug live test",
+				{
+					"version=" .. tostring(Constants.VERSION or "?"),
+					"locale=" .. tostring(Database.Get("addonLocale") or "auto"),
+					"char=" .. tostring(Constants.GetPlayerDisplayName and Constants.GetPlayerDisplayName() or "?"),
+				}
+			)
+			if not prev then
+				Database.Set("debugLiveAlerts", false)
+			end
+			return
+		end
+		local nextState
+		if restLower == "on" or restLower == "1" or restLower == "true" then
+			nextState = true
+		elseif restLower == "off" or restLower == "0" or restLower == "false" then
+			nextState = false
+		else
+			nextState = not (Database.Get("debugLiveAlerts") and true or false)
+		end
+		Database.Set("debugLiveAlerts", nextState)
+		DEFAULT_CHAT_FRAME:AddMessage(nextState and L["CHAT_DEBUG_LIVE_ON"] or L["CHAT_DEBUG_LIVE_OFF"])
+		return
+	end
+
 	if not issecurevariable then
 		DEFAULT_CHAT_FRAME:AddMessage("|cffff4040Better Click Casting (Debug):|r issecurevariable is not available in this environment.")
 		return
@@ -718,7 +847,9 @@ function DiagnosticsUI.RunTaintDiagnostics(subArg)
 	local infoNotes = {}
 	local isDeepMode = (subArg == "deep" or subArg == "full" or subArg == "stress")
 	if isDeepMode then
+		isRunningDeepSelfTest = true
 		RunDeepStressSelfTest(findings, infoNotes)
+		isRunningDeepSelfTest = false
 	end
 	local function checkVar(tbl, key, label)
 		if tbl == nil then

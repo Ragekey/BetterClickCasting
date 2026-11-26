@@ -1286,6 +1286,24 @@ local function SyncStickyAndScrollLayout()
 	settingsWindow.lastViewportHeight = viewportH
 	settingsWindow.lastContentHeight = contentH
 	settingsWindow.lastNeedsScroll = needsScroll
+
+	-- Live-DEV-Alert bei unerwartetem Scroll-Überlauf auf einer der 6 Standardseiten
+	if not isSearching and needsScroll and Database.Get("debugLiveAlerts") and ns.ClickBindingUI and ns.ClickBindingUI.RaiseDevAlert then
+		local presetCount = (activeTabIndex == 5 and Database.GetPresetList and #Database.GetPresetList()) or 0
+		if activeTabIndex ~= 5 or presetCount <= 12 then
+			ns.ClickBindingUI.RaiseDevAlert(
+				"SETTINGS_LAYOUT_OVERFLOW",
+				string.format("Settings Tab %d unexpectedly requires scrolling (%d > %d)", activeTabIndex, contentH, viewportH),
+				{
+					"tab=" .. tostring(activeTabIndex),
+					"contentH=" .. tostring(contentH),
+					"viewportH=" .. tostring(viewportH),
+					"presetCount=" .. tostring(presetCount),
+				},
+				string.format("layoutoverflow:%d:%d:%d", activeTabIndex, contentH, viewportH)
+			)
+		end
+	end
 end
 
 local function SelectTab(tabIndex)
@@ -2021,7 +2039,10 @@ local function EnsureSettingsWindow()
 		descKey = "LOCALE_TOOLTIP_DESC",
 		options = LOCALE_OPTIONS,
 	}, "language locale english deutsch espanol spanish")
-	AddIndexedToggle(c6Sys, 6, { dbKey = "showMinimapButton", labelKey = "SETTING_SHOW_MINIMAP_BUTTON", descKey = "SETTING_SHOW_MINIMAP_BUTTON_DESC" }, "minimap icon button")
+	AddIndexedToggleGrid(c6Sys, 6, {
+		{ spec = { dbKey = "showMinimapButton", labelKey = "SETTING_SHOW_MINIMAP_BUTTON", descKey = "SETTING_SHOW_MINIMAP_BUTTON_DESC" }, keywords = "minimap icon button" },
+		{ spec = { dbKey = "debugLiveAlerts",   labelKey = "SETTING_DEBUG_LIVE_ALERTS",   descKey = "SETTING_DEBUG_LIVE_ALERTS_DESC" },   keywords = "debug live dev alert report copy" },
+	})
 
 	local sysRowY = c6Sys:Advance(26, 4)
 	local sysHalfW = math.floor((c6Sys.innerWidth - 6) / 2)

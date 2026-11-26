@@ -408,6 +408,17 @@ function ClickBindingUI.RestorePurgedUnlearnedBindings(silent)
 	if restored > 0 then
 		ClickBindingUI.RebuildGroups()
 		ClickBindingUI.RefreshVisibleLines()
+		if ClickBindingUI.RaiseDevAlert then
+			ClickBindingUI.RaiseDevAlert(
+				"SPELLS_CHANGED_PURGE_RESCUED",
+				string.format("Restored %d binding(s) purged by SPELLS_CHANGED", restored),
+				{
+					"restored=" .. tostring(restored),
+					"preset=" .. tostring(ClickBindingUI.GetEffectiveActivePresetName and ClickBindingUI.GetEffectiveActivePresetName() or "none"),
+				},
+				"purge:" .. tostring(restored)
+			)
+		end
 		if not silent and DEFAULT_CHAT_FRAME and L["CHAT_DUAL_SPEC_RESTORED_FORMAT"] then
 			DEFAULT_CHAT_FRAME:AddMessage(string.format(L["CHAT_DUAL_SPEC_RESTORED_FORMAT"], restored))
 		end
@@ -2398,6 +2409,8 @@ local function RescueSpellBookTabAfterClickCastShow()
 	end
 
 	isRescuingSpellBookTab = true
+	local wasMin = (PlayerSpellsFrame.IsMinimized and PlayerSpellsFrame:IsMinimized()) and 1 or 0
+	local cbWasShown = (ClickBindingFrame and ClickBindingFrame:IsShown()) and 1 or 0
 	if PlayerSpellsFrame.ClearInspectUnit and PlayerSpellsFrame.IsInspecting and PlayerSpellsFrame:IsInspecting() then
 		PlayerSpellsFrame:ClearInspectUnit()
 	end
@@ -2414,6 +2427,19 @@ local function RescueSpellBookTabAfterClickCastShow()
 		end
 	end
 	isRescuingSpellBookTab = false
+	if ClickBindingUI.RaiseDevAlert then
+		ClickBindingUI.RaiseDevAlert(
+			"SPELLBOOK_TAB_RESCUE",
+			string.format("PlayerSpellsFrame opened on tab %s instead of SpellBook (%s)", tostring(currentTabID), tostring(spellBookTabID)),
+			{
+				"fromTab=" .. tostring(currentTabID),
+				"targetTab=" .. tostring(spellBookTabID),
+				"wasMinimized=" .. tostring(wasMin),
+				"cbShown=" .. tostring(cbWasShown),
+			},
+			"tabrescue:" .. tostring(currentTabID) .. ":" .. tostring(wasMin)
+		)
+	end
 end
 
 function ClickBindingUI.SyncAutoShowAllRanks()
@@ -2668,9 +2694,35 @@ function ClickBindingUI.SetupHooks()
 
 	if ClickBindingFrame.SaveButton and not isSaveButtonHooked then
 		ClickBindingFrame.SaveButton:HookScript("OnClick", function()
+			-- Erwartete gebundene Einträge aus dataProvider zählen und nach Save gegen C_ClickBindings prüfen
+			local expectedBound = nil
+			if Database.Get("debugLiveAlerts") and ClickBindingFrame.dataProvider and ClickBindingFrame.dataProvider.Enumerate then
+				expectedBound = 0
+				for _, el in ClickBindingFrame.dataProvider:Enumerate() do
+					if el and el.bindingInfo and not el.unbound then
+						expectedBound = expectedBound + 1
+					end
+				end
+			end
 			-- Geladenes Preset wurde per Hardware-Klick auf "Speichern" bestätigt (auch wenn HideUIPanel/OnHide zuvor lief)
 			if ClickBindingUI.CommitPendingPresetOnSave then
 				ClickBindingUI.CommitPendingPresetOnSave()
+			end
+			if expectedBound ~= nil and C_ClickBindings and C_ClickBindings.GetProfileInfo then
+				local savedProfile = C_ClickBindings.GetProfileInfo()
+				local actualBound = (type(savedProfile) == "table") and #savedProfile or -1
+				if actualBound ~= expectedBound and ClickBindingUI.RaiseDevAlert then
+					ClickBindingUI.RaiseDevAlert(
+						"SAVE_PROFILE_MISMATCH",
+						string.format("Saved profile count (%d) differs from dataProvider (%d)", actualBound, expectedBound),
+						{
+							"expectedBound=" .. tostring(expectedBound),
+							"actualBound=" .. tostring(actualBound),
+							"pendingChanges=" .. tostring(ClickBindingFrame.pendingChanges),
+						},
+						string.format("savemismatch:%d:%d", expectedBound, actualBound)
+					)
+				end
 			end
 			if C_Timer and C_Timer.After and Database and Database.SaveCharacterSnapshot then
 				C_Timer.After(0.1, Database.SaveCharacterSnapshot)

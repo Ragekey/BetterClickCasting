@@ -40,6 +40,7 @@ local DEFAULTS = {
 	minimapAngle = 225,
 	addonLocale = "auto", -- "auto", "enUS", "deDE", "esES"
 	importMergeBindings = false, -- false = Ersetzen (Standard), true = Zusammenführen
+	debugLiveAlerts = false, -- Live-DEV-Alert-Wächter (/bcc debug live)
 }
 
 local POSITION_KEYS = {

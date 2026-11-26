@@ -180,6 +180,8 @@ L["MATRIX_FOOTER_HINT"] = "Grüne [FREI]-Felder sind noch unbesetzt. Fahre mit d
 
 L["SETTING_SHOW_MINIMAP_BUTTON"] = "Minimap-Icon anzeigen"
 L["SETTING_SHOW_MINIMAP_BUTTON_DESC"] = "Zeigt den Better Click Casting Button an der Minimap (jederzeit per /bcc umschaltbar)."
+L["SETTING_DEBUG_LIVE_ALERTS"] = "Live DEV-Alerts (/bcc debug live)"
+L["SETTING_DEBUG_LIVE_ALERTS_DESC"] = "Öffnet automatisch einen Copy-Paste-Diagnosereport, sobald unerwartete Taint-, Tab-, Purge- oder Speicher-Abweichungen auftreten (im Kampf pausiert)."
 
 -- Unit-Frame Hover-Info (Spickzettel-Overlay)
 L["SETTINGS_HEADER_UNITHOVER"] = "Unit-Frame Hover-Overlay"
@@ -264,7 +266,9 @@ L["CHAT_HELP_LINE_3"] = "  |cffffd100/bcc max|r (Alle auf MAX)  |  |cffffd100/bc
 L["CHAT_HELP_LINE_4"] = "  |cffffd100/bcc group [mod|button|type|none]|r  |  |cffffd100/bcc hover [off|mod|always]|r  |  |cffffd100/bcc anchor [cursor|top|bottom|left|right|free]|r"
 L["CHAT_HELP_LINE_5"] = "  |cffffd100/bcc move|r oder |cffffd100lock|r (Overlays)  |  |cffffd100/bcc reset|r  |  |cffffd100/bcc scale <70-150>|r  |  |cffffd100/bcc alpha <30-100>|r"
 L["CHAT_HELP_LINE_6"] = "  |cffffd100/bcc qb|r, |cffffd100mana|r, |cffffd100range|r, |cffffd100compact|r, |cffffd100bottom|r, |cffffd100autotab|r, |cffffd100rules|r, |cffffd100ranks|r, |cffffd100downrank|r, |cffffd100switcher|r, |cffffd100tooltips|r, |cffffd100badges|r, |cffffd100allranks|r, |cffffd100mm|r"
-L["CHAT_HELP_LINE_7"] = "  |cffffd100/bcc charsettings|r, |cffffd100merge|r  |  |cffffd100/bcc status|r  |  |cffffd100/bcc debug|r"
+L["CHAT_HELP_LINE_7"] = "  |cffffd100/bcc charsettings|r, |cffffd100merge|r  |  |cffffd100/bcc status|r  |  |cffffd100/bcc debug [deep|live|taintlog]|r"
+L["CHAT_DEBUG_LIVE_ON"] = "|cff40ff40Better Click Casting:|r Live DEV-Alerts |cff40ff40AN|r. Unerwartete Laufzeit-Abweichungen öffnen einen Copy-Paste-Report (Test mit /bcc debug live test)."
+L["CHAT_DEBUG_LIVE_OFF"] = "|cff40ff40Better Click Casting:|r Live DEV-Alerts |cffff5555AUS|r."
 
 -- Native Blizzard-Optionen (Esc -> Optionen -> AddOns)
 L["BLIZZ_SETTINGS_OPEN_BTN"] = "Einstellungen öffnen"

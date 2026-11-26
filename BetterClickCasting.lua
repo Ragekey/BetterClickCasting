@@ -25,6 +25,7 @@ loaderFrame:RegisterEvent("INPUT_DEVICE_INTERFACE_TRANSITION")
 loaderFrame:RegisterEvent("ACTIVE_TALENT_GROUP_CHANGED")
 loaderFrame:RegisterEvent("PLAYER_TALENT_UPDATE")
 loaderFrame:RegisterEvent("ADDON_ACTION_BLOCKED")
+loaderFrame:RegisterEvent("ADDON_ACTION_FORBIDDEN")
 
 -- Merkt sich den zuletzt aktiven Dual-Spec-Index (1 oder 2), damit ein Wechsel zwischen Primär- und
 -- Sekundär-Spec zuverlässig erkannt wird, aber Login-/Reload-Init-Events (ACTIVE_TALENT_GROUP_CHANGED
@@ -173,9 +174,9 @@ loaderFrame:SetScript("OnEvent", function(self, event, arg1, arg2)
 		if UnitHoverTooltip and UnitHoverTooltip.UpdateTrackingState then
 			UnitHoverTooltip.UpdateTrackingState()
 		end
-	elseif event == "ADDON_ACTION_BLOCKED" then
+	elseif event == "ADDON_ACTION_BLOCKED" or event == "ADDON_ACTION_FORBIDDEN" then
 		if arg1 == "BetterClickCasting" and ClickBindingUI and ClickBindingUI.CaptureBlockedActionDiagnostics then
-			ClickBindingUI.CaptureBlockedActionDiagnostics(arg1, arg2)
+			ClickBindingUI.CaptureBlockedActionDiagnostics(arg1, arg2, false, event == "ADDON_ACTION_FORBIDDEN")
 		end
 	else
 		-- Zentrales Gamepad-Standby-Gate: Alle Laufzeit- und UI-Events (SPELLS_CHANGED,

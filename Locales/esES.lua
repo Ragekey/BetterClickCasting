@@ -181,6 +181,8 @@ L["MATRIX_FOOTER_HINT"] = "Las casillas verdes [LIBRE] están disponibles. Pasa 
 
 L["SETTING_SHOW_MINIMAP_BUTTON"] = "Mostrar botón en el minimapa"
 L["SETTING_SHOW_MINIMAP_BUTTON_DESC"] = "Muestra el botón de Better Click Casting en el minimapa (usa /bcc en cualquier momento)."
+L["SETTING_DEBUG_LIVE_ALERTS"] = "Alertas DEV en vivo (/bcc debug live)"
+L["SETTING_DEBUG_LIVE_ALERTS_DESC"] = "Abre automáticamente un informe de diagnóstico listo para copiar si ocurre un bloqueo, rescate de pestaña o error al guardar (pausado en combate)."
 
 -- Unit-Frame Hover-Info (Spickzettel-Overlay)
 L["SETTINGS_HEADER_UNITHOVER"] = "Panel flotante en marcos de unidad (Hover Overlay)"
@@ -265,7 +267,9 @@ L["CHAT_HELP_LINE_3"] = "  |cffffd100/bcc max|r (Mejorar todo)  |  |cffffd100/bc
 L["CHAT_HELP_LINE_4"] = "  |cffffd100/bcc group [mod|button|type|none]|r  |  |cffffd100/bcc hover [off|mod|always]|r  |  |cffffd100/bcc anchor [cursor|top|bottom|left|right|free]|r"
 L["CHAT_HELP_LINE_5"] = "  |cffffd100/bcc move|r o |cffffd100lock|r (Paneles)  |  |cffffd100/bcc reset|r  |  |cffffd100/bcc scale <70-150>|r  |  |cffffd100/bcc alpha <30-100>|r"
 L["CHAT_HELP_LINE_6"] = "  |cffffd100/bcc qb|r, |cffffd100mana|r, |cffffd100range|r, |cffffd100compact|r, |cffffd100bottom|r, |cffffd100autotab|r, |cffffd100rules|r, |cffffd100ranks|r, |cffffd100downrank|r, |cffffd100switcher|r, |cffffd100tooltips|r, |cffffd100badges|r, |cffffd100allranks|r, |cffffd100mm|r"
-L["CHAT_HELP_LINE_7"] = "  |cffffd100/bcc charsettings|r, |cffffd100merge|r  |  |cffffd100/bcc status|r  |  |cffffd100/bcc debug|r"
+L["CHAT_HELP_LINE_7"] = "  |cffffd100/bcc charsettings|r, |cffffd100merge|r  |  |cffffd100/bcc status|r  |  |cffffd100/bcc debug [deep|live|taintlog]|r"
+L["CHAT_DEBUG_LIVE_ON"] = "|cff40ff40Better Click Casting:|r Alertas DEV en vivo |cff40ff40ACTIVADAS|r. Las anomalías inesperadas abrirán un informe para copiar (prueba con /bcc debug live test)."
+L["CHAT_DEBUG_LIVE_OFF"] = "|cff40ff40Better Click Casting:|r Alertas DEV en vivo |cffff5555DESACTIVADAS|r."
 
 -- Native Blizzard Options (Esc -> Options -> AddOns)
 L["BLIZZ_SETTINGS_OPEN_BTN"] = "Abrir opciones"
